@@ -728,9 +728,6 @@ PAGES.settings = async root => {
             if (r && r.restarting) toast('Updated, restarting…', 'good', 6000); else render();
           } }, UP.busy ? 'Updating…' : `Install ${UP.info.latest}`) : null,
           h('span', { class: 'muted' }, UP.info ? (UP.info.error || (UP.info.newer ? `New version ${UP.info.latest}${UP.info.notes ? ': ' + UP.info.notes.split('\n')[0].slice(0, 60) : ''}` : `Up to date (${UP.info.current}) · ${UP.info.repo}`)) : ''))),
-      mxCard('people', 'Community', 'Get help, report bugs and stay up to date.', null,
-        h('p', { class: 'ink2', style: { marginTop: 0 } }, 'No community link is configured in this build.'),
-        h('button', { class: 'btn', disabled: true }, 'Join Discord')),
       mxCard('plug', 'Zotac Extension & local port', 'Chrome cookie sync and the delivery agent', null,
         h('div', { class: 'kv' }, h('div', null, 'Port'), h('div', { class: 'mono' }, String(s.localPort)), h('div', null, 'Extension token'), h('div', { class: 'mono' }, s.extensionToken), h('div', null, 'Agent token'), h('div', { class: 'mono' }, s.agentToken)),
         h('div', { class: 'row', style: { marginTop: '10px' } },

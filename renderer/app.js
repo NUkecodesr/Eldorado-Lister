@@ -56,7 +56,6 @@ function renderFooter() {
     h('div', { class: 'sf-status ' + (on && S.me ? 'on' : 'off') },
       h('div', null, h('span', { class: 'dot' }), on && S.me ? t('online') : t('offline')),
       S.me ? h('small', null, t('shopVisible')) : null),
-    h('button', { class: 'sf-discord', onclick: () => go('settings') }, 'Discord'),
     h('div', { class: 'sf-conn' }, h('span', null, h('span', { class: 'dot ' + (on ? 'good' : 'bad') }), on ? t('connected') : t('disconnected')), h('b', null, rate.toFixed(1) + '%')),
     h('small', { class: 'sf-ver' }, 'v' + (S.info.version || '')));
 }

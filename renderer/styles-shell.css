@@ -1,4 +1,4 @@
-/* Sidebar footer: user card, online state, Discord, connection rate. */
+/* Sidebar footer: user card, online state, connection rate. */
 #side-footer { gap: 6px; }
 .sf-user { display: flex; align-items: center; gap: 8px; padding: 4px 2px; cursor: pointer; min-width: 0; }
 .sf-user img, .sf-ava { width: 26px; height: 26px; border-radius: 50%; flex: 0 0 26px; object-fit: cover; border: 1px solid var(--line2); }
@@ -11,8 +11,6 @@
 .sf-status .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 7px; background: currentColor; }
 .sf-status.on { color: #4fdc84; background: rgba(63, 207, 114, .1); border-color: rgba(63, 207, 114, .45); }
 .sf-status.off { color: #ff6b6b; background: rgba(255, 77, 77, .08); border-color: rgba(255, 77, 77, .35); }
-.sf-discord { width: 100%; text-align: left; padding: 7px 10px; border-radius: 8px; border: 1px solid rgba(88, 101, 242, .5); background: rgba(88, 101, 242, .18); color: #c9cdff; font-weight: 700; font-size: 12px; cursor: pointer; }
-.sf-discord:hover { background: rgba(88, 101, 242, .3); }
 .sf-conn { display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; color: var(--ink2); padding: 2px 2px 0; }
 .sf-conn b { color: var(--gold); }
 .sf-conn .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; }
