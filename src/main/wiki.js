@@ -61,24 +61,38 @@ class Wiki {
   async picture(name) {
     const key = norm(name);
     const f = path.join(this.dir, key + '.png');
-    if (fs.existsSync(f)) return 'data:image/png;base64,' + fs.readFileSync(f).toString('base64');
+    if (fs.existsSync(f)) return dataUrl(fs.readFileSync(f));
     const url = (await this.index())[key];
     if (!url) return null;
     if (!this.inflight.has(key)) this.inflight.set(key, this.download(url, f).finally(() => this.inflight.delete(key)));
-    return (await this.inflight.get(key)) ? 'data:image/png;base64,' + fs.readFileSync(f).toString('base64') : null;
+    return (await this.inflight.get(key)) ? dataUrl(fs.readFileSync(f)) : null;
   }
 
   async download(url, file) {
-    try {
-      // format=original keeps the uploaded PNG (the CDN otherwise may answer with WebP)
-      const r = await fetch(url + (url.includes('?') ? '&' : '?') + 'format=original', { headers: { 'User-Agent': UA, Accept: 'image/png,image/*' } });
-      if (!r.ok) return false;
-      const buf = Buffer.from(await r.arrayBuffer());
-      if (!(buf[0] === 0x89 && buf[1] === 0x50) && !(buf[0] === 0xff && buf[1] === 0xd8)) return false;   // PNG / JPEG only
-      fs.writeFileSync(file, buf);
-      return true;
-    } catch { return false; }
+    // a 512px copy (the originals are up to 3 MB each, which made card generation time out);
+    // format=original keeps it a PNG instead of WebP. Falls back to the full-size file.
+    const scaled = url.replace(/\/revision\/latest(?!\/scale)/, '/revision/latest/scale-to-width-down/512');
+    for (const u of [...new Set([scaled, url])]) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const r = await fetch(u + (u.includes('?') ? '&' : '?') + 'format=original', { headers: { 'User-Agent': UA, Accept: 'image/png,image/*' }, signal: AbortSignal.timeout(20000) });
+          if (!r.ok) break;
+          const buf = Buffer.from(await r.arrayBuffer());
+          const png = buf[0] === 0x89 && buf[1] === 0x50, jpg = buf[0] === 0xff && buf[1] === 0xd8, webp = buf.slice(0, 4).toString() === 'RIFF' && buf.slice(8, 12).toString() === 'WEBP';
+          if (!png && !jpg && !webp) break;
+          fs.writeFileSync(file, buf);
+          return true;
+        } catch { /* timeout / network: try again */ }
+      }
+    }
+    this.log('warn', '[Wiki] picture download failed: ' + url.split('/images/')[1]);
+    return false;
   }
+}
+
+function dataUrl(buf) {
+  const type = buf[0] === 0xff ? 'image/jpeg' : buf.slice(8, 12).toString() === 'WEBP' ? 'image/webp' : 'image/png';
+  return `data:${type};base64,` + buf.toString('base64');
 }
 
 function decodeHtml(s) {
