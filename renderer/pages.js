@@ -230,6 +230,11 @@ PAGES.autolist = async root => {
     h('input', { type: 'checkbox', checked: allChecked, onchange: e => { pets.forEach(p => e.target.checked ? AL.selected.add(p.id) : AL.selected.delete(p.id)); render(); } }),
     h('span', null, `${AL.selected.size} selected of ${pets.length} pets`),
     h('div', { class: 'grow' }),
+    pets.some(p => p.status === 'available') ? h('button', { class: 'btn sm ghost danger', title: 'Delete every pet that is not listed or sold', onclick: async () => {
+      const ids = S.pets.filter(p => p.status === 'available').map(p => p.id);
+      if (!await confirmBox(`Clear ${ids.length} unlisted pets from the app? (listed and sold pets stay, Eldorado is not touched)`)) return;
+      await M.call('pets:delete', ids); AL.selected.clear(); await refreshData(); render();
+    } }, 'Clear unlisted') : null,
     AL.selected.size ? [
       h('button', { class: 'btn sm ghost', onclick: async () => { const ids = [...AL.selected]; await M.call('pets:update', ids, { status: 'available', offerId: null }); await refreshData(); render(); } }, 'Reset to available'),
       h('button', { class: 'btn sm ghost danger', onclick: async () => { const ids = [...AL.selected]; if (!await confirmBox(`Delete ${ids.length} pets from the app? (Eldorado offers are not touched)`)) return; await M.call('pets:delete', ids); AL.selected.clear(); await refreshData(); render(); } }, t('delete'))] : null);
@@ -412,7 +417,8 @@ PAGES.autolist = async root => {
       traits.length ? h('span', { class: 'x-trp' }, traits.slice(0, 8).map(tr => ART_THUMBS.traits[tr] ? h('img', { src: ART_THUMBS.traits[tr], title: tr, alt: tr }) : h('em', { title: tr }, String(tr).slice(0, 3)))) : null,
       h('span', { class: 'x-alown', title: 'Owner account' }, acctName(p.accountId)),
       h('button', { class: 'x-srch', onclick: () => searchEldorado(p) }, 'Search on Eldorado'),
-      priceCell(p));
+      priceCell(p),
+      h('button', { class: 'x-aldel', title: 'Delete from the app', onclick: () => delPet(p) }, '✕'));
   };
   const lim = AL.limit;
   const list = pets.length ? h('div', { class: 'x-allist' },

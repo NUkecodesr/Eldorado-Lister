@@ -296,6 +296,8 @@ input.x-psearch { width: 190px; padding: 5px 10px; font-size: 12px; }
 .x-alcard-ok { color: var(--good); font-size: 11px; }
 .x-alact { display: none; gap: 4px; }
 .x-alrow:hover .x-alact { display: flex; }
+.x-aldel { flex: none; width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--line2); background: #17120c; color: var(--ink2); cursor: pointer; font-size: 11px; }
+.x-aldel:hover { color: var(--bad); border-color: rgba(240, 82, 82, .5); }
 .x-alact button { background: #17120c; border: 1px solid var(--line2); color: var(--ink2); border-radius: 5px; height: 22px; min-width: 24px; padding: 0 5px; font-size: 10.5px; cursor: pointer; }
 .x-alact button:hover { color: var(--gold); border-color: rgba(242, 182, 49, .5); }
 .x-alact button.del:hover { color: var(--bad); border-color: rgba(240, 82, 82, .5); }

@@ -123,7 +123,7 @@ function wire() {
   store = new Store(app.getPath('userData'));
   // pets pasted as JSON on Auto List are for this session only: drop the ones still unlisted
   // (listed / sold ones stay, Auto Delivery needs them to match orders)
-  { const before = store.get('pets').length; store.set('pets', store.get('pets').filter(p => !(p.session && p.status === 'available'))); if (store.get('pets').length !== before) store.save(); }
+  { const before = store.get('pets').length; store.set('pets', store.get('pets').filter(p => !(p.status === 'available' && (p.session || (!p.accountId && !p.manual))))); if (store.get('pets').length !== before) store.save(); }
   // backfill new step templates for older data files
   store.data.settings.delivery.steps = { ...DEFAULT_DELIVERY_STEPS, ...store.data.settings.delivery.steps };
   art = new Art({
@@ -387,7 +387,7 @@ function ipc() {
     if (!p || !p.imagePath || !fs.existsSync(p.imagePath)) return null;
     return 'data:image/png;base64,' + fs.readFileSync(p.imagePath).toString('base64');
   });
-  handle('pets:add', p => { const pet = { id: rid(6), status: 'available', mutation: 'None', traits: [], cost: 0, createdAt: Date.now(), ...p, gen: sab.parseGen(p.gen) }; store.get('pets').push(pet); store.save(); send('pets:changed'); return pet; });
+  handle('pets:add', p => { const pet = { id: rid(6), status: 'available', mutation: 'None', traits: [], cost: 0, createdAt: Date.now(), manual: true, ...p, gen: sab.parseGen(p.gen) }; store.get('pets').push(pet); store.save(); send('pets:changed'); return pet; });
   handle('pets:update', (ids, patch) => {
     const set = new Set([].concat(ids));
     for (const p of store.get('pets')) if (set.has(p.id)) { Object.assign(p, patch); if (patch.gen !== undefined) p.gen = sab.parseGen(patch.gen); if (patch.status === 'sold' && !p.soldAt) p.soldAt = Date.now(); }
