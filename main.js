@@ -265,7 +265,7 @@ function handle(ch, fn) {
 
 function ipc() {
   handle('app:info', async () => ({
-    version: app.getVersion(), bridge: bridge.state, lastOk: bridge.lastOk, talk: delivery.talkState, talkError: delivery.talkError,
+    version: app.getVersion(), update: updateStatus, bridge: bridge.state, lastOk: bridge.lastOk, talk: delivery.talkState, talkError: delivery.talkError,
     agentOnline: delivery.agentOnline(), userData: app.getPath('userData'), lister: lister.progress, listerRunning: lister.running,
     repricerLast: repricer.lastRun, watcherLast: watcher.lastPoll,
     extensionPath: app.isPackaged ? path.join(process.resourcesPath, 'extension') : path.join(__dirname, 'extension')
@@ -594,20 +594,40 @@ app.whenReady().then(async () => {
   if (store.get('settings').bridgeUserAgent) bridge.setUserAgent(store.get('settings').bridgeUserAgent);
   bridge.start().then(afterLogin);
   if (SMOKE) return smoke();
-  const s = store.get('settings');
-  if (s.autoUpdate.enabled) {
-    // "Update automatically": a newer version is installed right away and the app restarts
-    setTimeout(async () => {
-      try {
-        const u = await checkUpdate(s.autoUpdate.repo, s.autoUpdate.installedSha);
-        if (u.error) return store.log('warn', '[Update] ' + u.error);
-        if (!u.newer) return;
-        send('update:available', u);
-        if (u.mode === 'source' || (u.mode === 'release' && u.asset)) { store.log('info', `[Update] installing ${u.latest}`); await installUpdate(u, updateHooks); }
-      } catch (e) { store.log('warn', '[Update] ' + e.message); }
-    }, 8000);
-  }
+  // "Update automatically": GitHub is checked 8 s after start and then every 10 minutes; a newer
+  // version is downloaded and installed and the app restarts, but never in the middle of a
+  // delivery, a trade or an Auto List run (then it waits for the next check).
+  setTimeout(autoUpdateTick, 8000);
+  setInterval(autoUpdateTick, UPDATE_EVERY);
 });
+
+const UPDATE_EVERY = 10 * 60 * 1000;
+const updateStatus = { lastCheck: 0, nextCheck: Date.now() + 8000, result: 'not checked yet', installing: false };
+function busyReason() {
+  if (lister.running) return 'Auto List is running';
+  if (store.get('jobs').some(j => j.status === 'pending' || j.status === 'running')) return 'a trade is in progress';
+  const live = Object.values(store.get('deliveries') || {}).some(d => d && d.orderId && ['awaitUsername', 'awaitConfirm', 'delivering', 'queued'].includes(d.state) && Date.now() - (d.createdAt || 0) < 3 * 3600e3);
+  if (live) return 'a buyer is being delivered to';
+  return null;
+}
+async function autoUpdateTick() {
+  updateStatus.nextCheck = Date.now() + UPDATE_EVERY;
+  const s = store.get('settings');
+  if (!s.autoUpdate.enabled || updateStatus.installing) return;
+  updateStatus.lastCheck = Date.now();
+  try {
+    const u = await checkUpdate(s.autoUpdate.repo, s.autoUpdate.installedSha);
+    if (u.error) { updateStatus.result = 'error: ' + u.error; return store.log('warn', '[Update] ' + u.error); }
+    if (!u.newer) { updateStatus.result = `up to date (${u.current})`; return; }
+    send('update:available', u);
+    if (!(u.mode === 'source' || (u.mode === 'release' && u.asset))) { updateStatus.result = `${u.latest} available (install it from GitHub)`; return; }
+    const busy = busyReason();
+    if (busy) { updateStatus.result = `${u.latest} found, waiting: ${busy}`; return store.log('info', `[Update] ${u.latest} found, waiting because ${busy}`); }
+    updateStatus.installing = true; updateStatus.result = `installing ${u.latest}`;
+    store.log('info', `[Update] installing ${u.latest}`);
+    await installUpdate(u, updateHooks);
+  } catch (e) { updateStatus.installing = false; updateStatus.result = 'error: ' + e.message; store.log('warn', '[Update] ' + e.message); }
+}
 
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
 app.on('window-all-closed', () => { try { store.flush(); } catch { /* ignore */ } try { launcher && launcher.stop(); } catch { /* ignore */ } app.quit(); });
