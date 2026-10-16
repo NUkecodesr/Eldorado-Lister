@@ -60,6 +60,18 @@ function xOrderAva(o, size = 34) {
   return h('div', { class: 'x-ava x-ava-img', style: { width: size + 'px', height: size + 'px' } },
     h('img', { src, alt: '', loading: 'lazy', onerror: e => e.target.replaceWith(document.createTextNode(xInitials(String(o.title || '?').split('|')[0]))) }));
 }
+// the generated listing card of a pet, as a small clickable picture in its row
+const CARD_THUMBS = {};
+function xCardThumb(p, onclick) {
+  const key = p.id + ':' + (p.imageAt || 0);
+  const src = CARD_THUMBS[key];
+  if (src === undefined) {
+    CARD_THUMBS[key] = null;
+    M.call('art:cardThumb', p.id).then(u => { CARD_THUMBS[key] = u || false; if (u && S.page === 'autolist') soft(); }).catch(() => { CARD_THUMBS[key] = false; });
+  }
+  return src ? h('img', { class: 'x-alcard', src, alt: '', title: 'Generated card (click to preview)', onclick })
+    : h('span', { class: 'x-alcard-ok', title: 'Card image generated' }, '▣');
+}
 function xDot(m) { const c = xMutColor(m); return h('span', { class: 'x-mut' }, h('i', { style: { background: c || '#4b4233' } }), m && !/^none$/i.test(m) ? m : h('span', { class: 'muted' }, 'None')); }
 function xJsonCount(text) {
   try {
@@ -129,7 +141,7 @@ PAGES.autolist = async root => {
     });
     if (target === undefined) return;
     const r = await run(() => M.call('pets:import', json, target || null));
-    if (r) { toast(`Imported ${r.added} pets`, 'good'); AL.json = ''; await refreshData(); render(); }
+    if (r) { toast(`Imported ${r.added} pets (until the app restarts)`, 'good'); AL.json = ''; await refreshData(); render(); }
   };
 
   const addPet = () => {
@@ -387,7 +399,7 @@ PAGES.autolist = async root => {
       h('input', { type: 'checkbox', checked: AL.selected.has(p.id), onchange: e => { e.target.checked ? AL.selected.add(p.id) : AL.selected.delete(p.id); render(); } }),
       h('div', { class: 'x-alname', title: p.title ? 'Fixed title (Quick Fill)' : 'Title from the template' }, tEl,
         p.status !== 'available' ? statusPill(p.status) : null,
-        p.imagePath ? h('span', { class: 'x-alcard-ok', title: 'Card image generated' }, '▣') : null),
+        p.imagePath ? xCardThumb(p, () => previewImage(p)) : null),
       h('div', { class: 'x-alact' },
         h('button', { title: 'Smart price & competitors', onclick: () => showComps(p) }, '$'),
         h('button', { title: 'Preview image', onclick: () => previewImage(p) }, 'Img'),

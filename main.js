@@ -121,6 +121,9 @@ function setupCapture() {
 
 function wire() {
   store = new Store(app.getPath('userData'));
+  // pets pasted as JSON on Auto List are for this session only: drop the ones still unlisted
+  // (listed / sold ones stay, Auto Delivery needs them to match orders)
+  { const before = store.get('pets').length; store.set('pets', store.get('pets').filter(p => !(p.session && p.status === 'available'))); if (store.get('pets').length !== before) store.save(); }
   // backfill new step templates for older data files
   store.data.settings.delivery.steps = { ...DEFAULT_DELIVERY_STEPS, ...store.data.settings.delivery.steps };
   art = new Art({
@@ -333,7 +336,13 @@ function ipc() {
   // pets
   handle('pets:list', () => store.get('pets'));
   handle('server:scans', () => Object.values(serverScans).sort((a, b) => b.receivedAt - a.receivedAt));
-  handle('pets:import', (json, accountId) => importPets(json, accountId));
+  handle('pets:import', (json, accountId) => {
+    const before = new Set(store.get('pets').map(p => p.id));
+    const r = importPets(json, accountId);
+    for (const p of store.get('pets')) if (!before.has(p.id)) p.session = true;
+    store.save();
+    return r;
+  });
   handle('scanner:script', which => scannerScript(which));
   handle('art:for', pet => artFor(pet, (store.get('settings').autolist || {}).imageFolder));
   // card thumbnails: { pets: {name: dataUrl}, traits: {name: dataUrl}, mutations: {...} },
@@ -364,6 +373,15 @@ function ipc() {
   });
   handle('art:status', () => art.status());
   // the card saved by "Generate Images" for a pet, as a data URL (null when missing)
+  // small preview of a pet's generated card for the Auto List rows
+  handle('art:cardThumb', id => {
+    const p = store.get('pets').find(x => x.id === id);
+    if (!p || !p.imagePath || !fs.existsSync(p.imagePath)) return null;
+    let img = nativeImage.createFromPath(p.imagePath);
+    if (img.isEmpty()) return null;
+    img = img.resize({ width: 112, quality: 'best' });
+    return 'data:image/png;base64,' + img.toPNG().toString('base64');
+  });
   handle('art:card', id => {
     const p = store.get('pets').find(x => x.id === id);
     if (!p || !p.imagePath || !fs.existsSync(p.imagePath)) return null;
@@ -407,6 +425,7 @@ function ipc() {
         const f = path.join(dir, String(p.id).replace(/[^\w-]/g, '') + '.png');
         fs.writeFileSync(f, Buffer.from(b64, 'base64'));
         p.imagePath = f; p.imageAt = Date.now(); out.ok++;
+        send('pets:changed');
       } catch (e) { out.failed++; out.errors.push(`${p.name}: ${e.message}`); }
     }
     store.save(); send('pets:changed'); return out;
