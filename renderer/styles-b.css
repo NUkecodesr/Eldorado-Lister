@@ -113,11 +113,6 @@
 .mx-tab.on { background: linear-gradient(180deg, var(--gold), var(--gold2)); color: #1d1404; font-weight: 700; }
 .mx-stack { display: flex; flex-direction: column; gap: 12px; }
 .mx-stack > .mx-card { margin: 0; }
-.mx-opts { display: flex; flex-direction: column; gap: 8px; }
-.mx-opt { padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; background: #120f0b; cursor: pointer; }
-.mx-opt small { display: block; color: var(--ink2); font-size: 11px; margin-top: 2px; }
-.mx-opt:hover { border-color: #57482f; }
-.mx-opt.sel { border-color: rgba(242, 182, 49, .65); background: var(--gold-soft); }
 .mx-rows { margin-top: 8px; }
 .mx-acct { display: flex; align-items: center; gap: 14px; padding: 8px 0; }
 .mx-acct .av { position: relative; width: 54px; height: 54px; border-radius: 12px; background: #2a2219; border: 1px solid var(--line2); display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 700; color: var(--gold); }

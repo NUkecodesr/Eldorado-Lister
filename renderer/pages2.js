@@ -379,7 +379,7 @@ const STEP_META = [
 const TUTORIAL = {
   setup: [
     ['Connect Eldorado', ['Open ', ['Account'], ' and log in with the browser, a manual cookie or the Zotac extension. Auto Delivery needs a live Eldorado session to read orders and chat with buyers.']],
-    ['Add your Roblox accounts', ['In ', ['Roblox Accounts'], ' add the ', ['mother'], ' and every ', ['stock account'], ' that holds pets, then import their pets so listings can be matched to orders.']],
+    ['Add your Roblox accounts', ['In ', ['Roblox Accounts'], ' add every ', ['stock account'], ' that holds pets, then import their pets so listings can be matched to orders.']],
     ['List your pets', ['Use ', ['Auto List'], ' so each Eldorado offer is linked to a pet. When an order arrives, Zotac matches the offer to the listed pets it has to deliver.']],
     ['Run the delivery script', ['Copy the ', ['Script'], ' from the Deliver Activity tab and run it (or save it in your executor autoexec folder) on the seller account. It polls Zotac on localhost for trade jobs and reports the result.']],
     ['Review your messages', ['Open the ', ['Automatic Messages'], ' tab and adjust the greeting, confirmation and failure texts that the buyer receives.']],
@@ -393,7 +393,7 @@ const TUTORIAL = {
   ]
 };
 const richText = parts => parts.map(p => Array.isArray(p) ? h('b', null, p[0]) : p);
-const dvDefaultScript = () => `-- Zotac delivery agent (run on the seller / mother account)\nlocal BASE  = "http://127.0.0.1:${S.settings.localPort}/agent"\nlocal TOKEN = "${S.settings.agentToken}"\n\n-- poll   GET  BASE.."/jobs?account=<RobloxUsername>&token="..TOKEN\n--        -> { job = { id, buyerUsername, buyerUserId, pets = {{name,mutation,gen,traits}} } | null }\n-- report POST BASE.."/jobs/<id>"  body {"token":TOKEN,"status":"done"|"failed","reason":"..."}\n-- log    POST BASE.."/log"        body {"token":TOKEN,"message":"..."}\n`;
+const dvDefaultScript = () => `-- Zotac delivery agent (run on each stock account)\nlocal BASE  = "http://127.0.0.1:${S.settings.localPort}/agent"\nlocal TOKEN = "${S.settings.agentToken}"\n\n-- poll   GET  BASE.."/jobs?account=<RobloxUsername>&token="..TOKEN\n--        -> { job = { id, buyerUsername, buyerUserId, pets = {{name,mutation,gen,traits}} } | null }\n-- report POST BASE.."/jobs/<id>"  body {"token":TOKEN,"status":"done"|"failed","reason":"..."}\n-- log    POST BASE.."/log"        body {"token":TOKEN,"message":"..."}\n`;
 
 // ---------- order simulator ----------
 // A fake Eldorado order: the bot's messages are the real Automatic Messages flow, you type the
@@ -470,7 +470,6 @@ PAGES.delivery = async root => {
     failed: dels.filter(d => d.state === 'manual').length
   };
   const reload = async () => { DV.data = await M.call('delivery:list'); render(); };
-  const mode = cfg.mode || 'security';
   const online = !!S.info.agentOnline;
 
   // ---------- header ----------
@@ -507,8 +506,6 @@ PAGES.delivery = async root => {
     TUTORIAL.how.map(([title, body], i) => h('div', { class: 'mx-step sm' }, h('span', { class: 'num' }, String(i + 1)), h('div', null, h('b', null, title), ' — ', h('span', { class: 'ink2' }, richText(body))))));
 
   // ---------- activity ----------
-  const modeOpt = (k, title, sub, desc) => h('div', { class: 'mx-opt' + (mode === k ? ' sel' : ''), onclick: () => saveSettings({ delivery: { mode: k } }).then(render) },
-    h('div', null, h('b', null, title), sub ? h('span', { class: 'muted' }, ' — ' + sub) : null), h('small', null, desc));
   const account = S.accounts.find(a => jobs.some(j => j.account && a.username && j.account.toLowerCase() === a.username.toLowerCase())) || S.accounts[0];
   const scriptKey = 'zotac.deliveryScript';
   // Default = the bundled delivery agent (does the trade) with this install's port + token.
@@ -532,16 +529,13 @@ PAGES.delivery = async root => {
   const activity = h('div', { class: 'mx-stack' },
     h('div', { class: 'mx-tiles4' },
       [['IN QUEUE', stats.queue, ''], ['TRADING', stats.trading, 'gold'], ['COMPLETED', stats.done, 'good'], ['FAILED', stats.failed, 'bad']].map(([k, v, c]) => h('div', { class: 'mx-stat' }, h('div', { class: 'k' }, k), h('div', { class: 'v ' + c }, String(v))))),
-    mxCard(mxIco('delivery', 'green'), 'Delivery Mode', 'How orders are delivered in-game', null,
-      h('div', { class: 'mx-opts' },
-        modeOpt('security', 'Security Mode Only', '', 'Mother steals every pet and delivers in one trade. Works with any account setup.'),
-        modeOpt('single', 'Single Mode', 'Security on multi-account', 'Single-account orders deliver straight from the stock account (faster, no steal). Multi-account orders auto-fallback to Security.')),
+    mxCard(mxIco('delivery', 'green'), 'Delivery Settings', 'Each stock account trades its own pets to the buyer', null,
       h('div', { class: 'mx-rows' },
         setting('Mark order delivered', 'Calls Eldorado "deliver" after all trades succeed', sw(cfg.markDelivered, v => saveSettings({ delivery: { markDelivered: v } }))),
         setting('Cancel order if delivery fails', 'After 3 failed attempts: tell the buyer why and cancel the order on Eldorado (refund). Off = manual fallback', sw(cfg.cancelOnFail !== false, v => saveSettings({ delivery: { cancelOnFail: v } }))),
         setting('Record video proof', 'Records the Roblox window during delivery (Video Proof page)', sw(cfg.recordProof, v => saveSettings({ delivery: { recordProof: v } }))),
         setting('Agent timeout', 'Seconds before a job counts as failed', num(cfg.agentTimeoutSec, v => saveSettings({ delivery: { agentTimeoutSec: v } }))))),
-    mxCard(mxIco('user', 'purple'), 'Script Account', 'Mother account — executes the delivery script', h('span', { class: 'mx-badge ' + (online ? 'good' : 'bad') }, online ? 'CONNECTED' : 'OFFLINE'),
+    mxCard(mxIco('user', 'purple'), 'Script Account', 'Stock account — runs the delivery script', h('span', { class: 'mx-badge ' + (online ? 'good' : 'bad') }, online ? 'CONNECTED' : 'OFFLINE'),
       account ? h('div', { class: 'mx-acct' },
         h('div', { class: 'av' }, (account.username || '?')[0].toUpperCase(), h('span', { class: 'led ' + (online ? 'on' : '') })),
         h('div', null, h('b', null, account.username), h('div', { class: 'row', style: { marginTop: '6px', gap: '6px' } }, h('span', { class: 'mx-badge gold' }, 'SCRIPT MODE'),
