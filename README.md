@@ -24,4 +24,4 @@ Build the Windows installer:
 npx electron-builder --win nsis
 ```
 
-User data (accounts, settings, pets) lives in `%APPDATA%\Zotac Lister\zotac-data.json` and is never part of this repo.
+User data (accounts, settings, pets) lives in `%APPDATA%\Zotac Lister\zotac-data.json` and is only ever stored locally
