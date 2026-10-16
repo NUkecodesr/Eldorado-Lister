@@ -269,7 +269,7 @@ PAGES.analytics = async root => {
 };
 
 // ============================== REVIEWS ===================================
-const RV = { data: null, rows: [], loading: false, page: 1, more: false, filter: 'all' };
+const RV = { data: null, rows: [], loading: false, page: 1, more: false, filter: 'all', cursor: null };
 const rvPos = r => /pos|good|thumbsup|true/i.test(String(r.rating ?? r.ratingType ?? r.isPositive ?? r.type ?? ''));
 const rvTags = r => {
   const a = r.tags || r.reviewTags || r.feedbackTags || r.ratingTags || r.badges || r.labels || r.reasons || [];
@@ -278,11 +278,11 @@ const rvTags = r => {
 PAGES.reviews = async root => {
   const fetchPage = async p => {
     RV.loading = true; render();
-    const d = await run(() => M.call('eld:reviews', p));
+    const d = await run(() => M.call('eld:reviews', p === 1 ? null : RV.cursor));
     RV.loading = false;
     if (p === 1) { RV.data = d || { rows: [], error: 'Could not load reviews' }; RV.rows = (d && d.rows) || []; }
-    else if (d) RV.rows = RV.rows.concat(d.rows || []);
-    if (d) { RV.page = p; RV.more = (d.rows || []).length >= 20; }
+    else if (d) { RV.rows = RV.rows.concat(d.rows || []); if (d.stats) RV.data.stats = d.stats; }
+    if (d) { RV.page = p; RV.cursor = d.cursor || null; RV.more = !!d.cursor; }
     render();
   };
   if (S.me && !RV.data && !RV.loading) fetchPage(1);

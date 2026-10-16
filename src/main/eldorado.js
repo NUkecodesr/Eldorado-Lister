@@ -255,14 +255,43 @@ class Eldorado {
   talkToken() { return this.b.get('conversations/me/authorize'); }
 
   // --- reviews / notifications -----------------------------------------
-  async reviews(page = 1) {
-    const me = await this.me();
-    const id = me.id || me.userId;
-    const [list, stats] = await Promise.allSettled([
-      this.b.get(`orders/reviews/${id}`, { pageIndex: page, pageSize: 20 }),
-      this.b.get(`orders/reviews/${id}/stats`)
-    ]);
-    return { rows: list.status === 'fulfilled' ? listOf(list.value) : [], raw: list.value, stats: stats.value || null, error: list.reason && list.reason.message };
+  // Reviews live on the seller's own orders (order.review); counts come from orders/me/reviews.
+  // Pages are cursor based: pass the returned cursor to get the next batch.
+  async reviews(cursor) {
+    const first = typeof cursor !== 'string' || !cursor;
+    const rows = [];
+    let next = first ? null : cursor, done = false;
+    for (let i = 0; i < 6 && rows.length < 20; i++) {
+      const q = { pageSize: 50, isAscendingDateOrder: false };
+      if (next) { q.cursorValue = next; q.pageDirection = 'Next'; }
+      const r = await this.b.get('orders/me/seller/orders', q);
+      const list = listOf(r);
+      for (const o of list) {
+        const rv = o.review || {};
+        const rating = rv.feedbackRating || rv.rating;
+        if (!rating || rating === 'Unrated') continue;
+        // Eldorado hides these from the public profile too
+        if (rating === 'Negative' && (stateOf(o.state) === 'Canceled' || rv.isReviewMessageVisible === false)) continue;
+        const n = normalizeOrder(o);
+        rows.push({
+          orderId: n.id, buyerUsername: n.buyer, rating,
+          comment: rv.reviewMessage || rv.feedbackMessage || rv.message || rv.comment || rv.reviewText || '',
+          tags: rv.feedbackTags || [], date: rv.createdDate || rv.reviewDate || n.date, amount: n.price, offerTitle: n.title, image: n.image
+        });
+      }
+      next = (r && (r.nextPageCursor || r.cursor)) || null;
+      if (!next || list.length < 50) { done = true; break; }
+    }
+    let stats = null;
+    if (first) {
+      try {
+        const s = await this.b.get('orders/me/reviews', { pageSize: 1 });
+        const info = (s && s.userOrderInfo) || {};
+        const pos = info.positiveCount, neg = info.negativeCount;
+        stats = { ...info, positiveCount: pos, negativeCount: neg, ratingCount: pos != null || neg != null ? (pos || 0) + (neg || 0) : undefined };
+      } catch { /* counts from the rows */ }
+    }
+    return { rows, cursor: done ? null : next, stats };
   }
   async notifications(unreadOnly, page = 1) {
     const r = await this.b.get('notifications/me', {

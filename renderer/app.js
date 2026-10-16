@@ -121,8 +121,8 @@ const LIVE = {
     notifications: async () => { if (NT.list && !NT.loading) NT.list = (await M.call('eld:notifications', NT.unreadOnly)) || NT.list; },
     reviews: async () => {
       if (!RV.data || RV.loading || RV.page !== 1) return;
-      const d = await M.call('eld:reviews', 1);
-      if (d) { RV.data = d; RV.rows = d.rows || []; }
+      const d = await M.call('eld:reviews', null);
+      if (d) { RV.data = d; RV.rows = d.rows || []; RV.cursor = d.cursor || null; RV.more = !!d.cursor; }
     },
     chat: async () => { const r = await M.call('eld:orders', { page: 1, pageSize: 40 }); if (r) CH.orders = r.rows; }
   }
