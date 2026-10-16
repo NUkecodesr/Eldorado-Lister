@@ -38,6 +38,37 @@ async function gh(url) {
   return r.json();
 }
 
+// newest commit of the branch, read from git's own refs (not the rate-limited REST API)
+async function latestSha(repo) {
+  try {
+    const r = await fetch(`https://github.com/${repo}.git/info/refs?service=git-upload-pack`, { headers: { 'User-Agent': 'git/2.45.0' }, signal: AbortSignal.timeout(20000) });
+    if (r.ok) {
+      const m = (await r.text()).match(new RegExp('([0-9a-f]{40}) refs/heads/' + BRANCH + '(\\s|$)'));
+      if (m) return m[1];
+    }
+    if (r.status === 404 || r.status === 401) return null;
+  } catch { /* fall back to the API */ }
+  const c = await gh(`https://api.github.com/repos/${repo}/commits/${BRANCH}`);
+  return c && c.sha;
+}
+
+// downloads and unpacks one commit of the repo (codeload, no API limit); returns its folder
+const sourceCache = {};
+async function fetchSource(repo, sha) {
+  if (sourceCache[sha] && fs.existsSync(sourceCache[sha])) return sourceCache[sha];
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'zotac-update-'));
+  const zip = path.join(tmp, 'src.zip');
+  const r = await fetch(`https://codeload.github.com/${repo}/zip/${sha}`, { headers: { 'User-Agent': 'ZotacLister-updater' }, signal: AbortSignal.timeout(120000) });
+  if (!r.ok) throw new Error('Download HTTP ' + r.status);
+  fs.writeFileSync(zip, Buffer.from(await r.arrayBuffer()));
+  const out = path.join(tmp, 'x');
+  fs.mkdirSync(out);
+  await run(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'), ['-xf', zip, '-C', out]);
+  const top = fs.readdirSync(out).map(n => path.join(out, n)).find(p => fs.existsSync(path.join(p, 'package.json')));
+  if (!top) throw new Error('Downloaded zip has no package.json');
+  return (sourceCache[sha] = top);
+}
+
 async function checkUpdate(repoSetting, installedSha) {
   const repo = normRepo(repoSetting);
   if (!repo) return { error: 'Repo must look like owner/name' };
@@ -51,18 +82,19 @@ async function checkUpdate(repoSetting, installedSha) {
           asset: asset && { name: asset.name, url: asset.browser_download_url, size: asset.size }, notes: rel.body || '', page: rel.html_url };
       }
     }
-    // source: compare package.json version, then the last commit
-    const [commit, pkgFile] = await Promise.all([
-      gh(`https://api.github.com/repos/${repo}/commits/${BRANCH}`),
-      gh(`https://api.github.com/repos/${repo}/contents/package.json?ref=${BRANCH}`)
-    ]);
-    if (!commit) return { error: `Repo ${repo} not found (or it is private)` };
+    // Source: GitHub's REST API allows only 60 calls an hour per internet connection without a
+    // login (shared / VPN connections run out fast), so the check uses plain git and the zip
+    // download instead, which have no such limit. The newest commit comes from the git refs; only
+    // when it differs from the installed one is the zip fetched (and kept for the install).
+    const sha = await latestSha(repo);
+    if (!sha) return { error: `Repo ${repo} not found (or it is private)` };
+    if (installedSha && installedSha === sha) return { repo, mode: app.isPackaged ? 'page' : 'source', current, latest: current, newer: false, sha, page: `https://github.com/${repo}` };
+    const dir = await fetchSource(repo, sha);
     let latest = current;
-    try { latest = JSON.parse(Buffer.from(pkgFile.content, 'base64').toString('utf8')).version || current; } catch { /* keep current */ }
-    const sha = commit.sha;
-    const newer = cmp(latest, current) > 0 || (!!installedSha && installedSha !== sha && cmp(latest, current) >= 0);
+    try { latest = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).version || current; } catch { /* keep current */ }
+    const newer = cmp(latest, current) > 0 || (!!installedSha && cmp(latest, current) >= 0);
     return { repo, mode: app.isPackaged ? 'page' : 'source', current, latest: newer && cmp(latest, current) === 0 ? `${latest} (${sha.slice(0, 7)})` : latest,
-      newer, sha, notes: (commit.commit && commit.commit.message) || '', page: `https://github.com/${repo}` };
+      newer, sha, dir, notes: '', page: `https://github.com/${repo}` };
   } catch (e) {
     return { error: e.message };
   }
@@ -94,16 +126,8 @@ async function installUpdate(info, { onDone, log } = {}) {
   if (info.mode !== 'source') { shell.openExternal(info.page); return { opened: true }; }
 
   const appDir = app.getAppPath();
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'zotac-update-'));
-  const zip = path.join(tmp, 'src.zip');
-  const r = await fetch(`https://api.github.com/repos/${info.repo}/zipball/${info.sha || BRANCH}`, { headers: GH });
-  if (!r.ok) throw new Error('Download HTTP ' + r.status);
-  fs.writeFileSync(zip, Buffer.from(await r.arrayBuffer()));
-  const out = path.join(tmp, 'x');
-  fs.mkdirSync(out);
-  await run(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'), ['-xf', zip, '-C', out]);
-  const top = fs.readdirSync(out).map(n => path.join(out, n)).find(p => fs.existsSync(path.join(p, 'package.json')));
-  if (!top) throw new Error('Downloaded zip has no package.json');
+  const top = info.dir && fs.existsSync(info.dir) ? info.dir : await fetchSource(info.repo, info.sha);
+  const tmp = path.dirname(path.dirname(top));
 
   const deps = f => { try { const p = JSON.parse(fs.readFileSync(f, 'utf8')); return JSON.stringify([p.dependencies, p.devDependencies]); } catch { return ''; } };
   const depsChanged = deps(path.join(top, 'package.json')) !== deps(path.join(appDir, 'package.json'));
