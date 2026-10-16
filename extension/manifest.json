@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Zotac Cookie Sync",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Keeps Zotac Lister on this PC logged in to eldorado.gg by sending it your eldorado.gg session (127.0.0.1 only).",
   "permissions": ["cookies", "storage", "alarms"],
   "host_permissions": ["https://*.eldorado.gg/*", "http://127.0.0.1/*"],

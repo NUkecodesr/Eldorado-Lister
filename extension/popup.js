@@ -23,12 +23,14 @@ $('port').onchange = () => chrome.storage.local.set({ port: $('port').value.trim
 $('token').onchange = () => chrome.storage.local.set({ token: $('token').value.trim() });
 $('sync').onclick = async () => {
   $('sync').disabled = true; show(null, 'Syncing…');
-  show(await chrome.runtime.sendMessage({ type: 'sync' }));
+  show(await sync('manual'));   // runs right here, so it works even before the background worker starts
   $('sync').disabled = false;
 };
 $('pair').onclick = async () => {
   $('pair').disabled = true; show(null, 'Pairing…');
-  show(await chrome.runtime.sendMessage({ type: 'pair', port: $('port').value.trim() || '47321' }));
+  const port = $('port').value.trim() || '47321';
+  try { await pair(port); show(await sync('paired')); }
+  catch (e) { show({ ok: false, at: Date.now(), error: /fetch|timed? ?out|abort/i.test(e.message) ? 'Zotac Lister is not running (port ' + port + ')' : e.message }); }
   chrome.storage.local.get(['token'], v => { $('token').value = v.token || ''; });
   $('pair').disabled = false;
 };
