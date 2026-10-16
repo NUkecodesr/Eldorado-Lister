@@ -543,25 +543,25 @@ PAGES.listings = async root => {
   const load = async () => {
     const seq = ++LS.seq;
     LS.loading = true; render();
-    const states = ['Active', 'Paused', 'Expired'];
+    const states = ['Active', 'Paused', 'Closed'];
     const res = await Promise.allSettled(states.map(st => M.call('eld:myOffers', st)));
     if (seq !== LS.seq) return;   // a newer Refresh took over
     const d = {}, errs = [];
     states.forEach((st, i) => {
       if (res[i].status === 'fulfilled') d[st] = res[i].value || [];
-      else { d[st] = (LS.data && LS.data[st]) || []; errs.push(`${st === 'Expired' ? 'Closed' : st}: ${(res[i].reason && res[i].reason.message) || 'failed'}`); }
+      else { d[st] = (LS.data && LS.data[st]) || []; errs.push(`${st === 'Closed' ? 'Closed' : st}: ${(res[i].reason && res[i].reason.message) || 'failed'}`); }
     });
     LS.data = d; LS.err = errs.length ? errs.join('\n') : null; LS.at = Date.now();
     LS.loading = false; render();
   };
   if (S.me && !LS.loading && (!LS.data || (LS.err && Date.now() - LS.at > 15000))) load();
-  const D = LS.data || { Active: [], Paused: [], Expired: [] };
+  const D = LS.data || { Active: [], Paused: [], Closed: [] };
   const act = async (o, a, arg, quiet) => { await run(() => M.call('eld:offerAction', o.id, a, arg), quiet ? null : `${a} ok`); if (!quiet) load(); };
   const attr = (o, re) => { const a = (o.attributes || []).find(x => re.test(x.id)); return a ? (a.type === 'Numeric' ? a.value : a.value && a.value.name) : null; };
   const priceOf = o => Number((o.pricePerUnit || {}).amount) || 0;
   const hasBlocked = o => { if (!blocked.length) return false; const hay = (JSON.stringify(o.attributes || []) + ' ' + (o.offerTitle || '')).toLowerCase(); return blocked.some(b => hay.includes(String(b).toLowerCase())); };
-  const rows = (LS.state === 'All' ? [...D.Active, ...D.Paused, ...D.Expired] : (D[LS.state] || [])).filter(o => !LS.q || String(o.offerTitle || '').toLowerCase().includes(LS.q.toLowerCase()));
-  const offline = [...D.Active, ...D.Paused, ...D.Expired].filter(o => /offline|inactive/i.test(o.offerState || '')).length;
+  const rows = (LS.state === 'All' ? [...D.Active, ...D.Paused, ...D.Closed] : (D[LS.state] || [])).filter(o => !LS.q || String(o.offerTitle || '').toLowerCase().includes(LS.q.toLowerCase()));
+  const offline = [...D.Active, ...D.Paused, ...D.Closed].filter(o => /offline|inactive/i.test(o.offerState || '')).length;
   const totalListed = D.Active.reduce((a, o) => a + priceOf(o) * (o.quantity || 1), 0);
 
   const bulk = async (list, fn, label) => {
@@ -624,13 +624,13 @@ PAGES.listings = async root => {
         sel([['-', '−'], ['+', '+']], LS.dir, v => LS.dir = v),
         h('input', { type: 'number', value: LS.pct, min: '0', step: '1', onchange: e => LS.pct = Number(e.target.value) || 0 }), '%',
         h('button', { class: 'btn sm', onclick: () => { const f = 1 + (LS.dir === '+' ? 1 : -1) * LS.pct / 100; bulk(D.Active, o => act(o, 'price', Math.max(0.01, Math.round(priceOf(o) * f * 100) / 100), true), `${LS.dir}${LS.pct}% on`); } }, '% All')),
-      sel([['Active', 'Active'], ['Paused', 'Paused'], ['Expired', 'Closed'], ['All', 'All']], LS.state, v => { LS.state = v; render(); }),
+      sel([['Active', 'Active'], ['Paused', 'Paused'], ['Closed', 'Closed'], ['All', 'All']], LS.state, v => { LS.state = v; render(); }),
       h('button', { class: 'btn sm', onclick: load }, LS.loading ? 'Loading…' : t('refresh')),
       h('button', { class: 'btn sm danger', onclick: () => bulk(rows, o => act(o, 'delete', undefined, true), 'Delete') }, 'Delete All')),
     !S.me ? h('div', { class: 'card empty' }, 'Log in on the Account page to see your listings.') : h('div', null,
       h('div', { class: 'x-tiles x-t6' },
         xTile('ACTIVE', String(D.Active.length), 'x-green'), xTile('PAUSED', String(D.Paused.length), 'x-yellow'),
-        xTile('CLOSED', String(D.Expired.length), 'x-red'), xTile('OFFLINE', String(offline), 'x-grey'),
+        xTile('CLOSED', String(D.Closed.length), 'x-red'), xTile('OFFLINE', String(offline), 'x-grey'),
         xTile('TOTAL LISTED', money(totalListed), 'x-green'), xTile('LIQUID (-15%)', money(totalListed * 0.85), 'x-purple')),
       h('div', { class: 'x-bar' },
         h('span', { class: 'x-bar-k' }, 'AUTO-REPRICER'), sw(rp.enabled, v => saveSettings({ repricer: { enabled: v } })),

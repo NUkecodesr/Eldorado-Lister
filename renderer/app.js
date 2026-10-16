@@ -103,7 +103,7 @@ const LIVE = {
   remote: {
     listings: async () => {
       if (!LS.data || LS.loading) return;
-      const states = ['Active', 'Paused', 'Expired'];
+      const states = ['Active', 'Paused', 'Closed'];
       const seq = LS.seq;
       const res = await Promise.all(states.map(st => M.call('eld:myOffers', st).catch(() => null)));
       if (seq !== LS.seq || LS.loading) return;   // a manual Refresh is running
