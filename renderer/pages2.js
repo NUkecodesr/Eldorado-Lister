@@ -116,7 +116,7 @@ PAGES.account = async root => {
   const loginBrowser = async () => { const m = await run(() => M.call('auth:loginBrowser')); if (m) { toast('Logged in as ' + m.username, 'good'); await refreshMe(); AC.dash = null; render(); } };
   const cookie = async () => { const c = await promptBox('Manual cookie', 'Cookie string (name=value; name2=value2)', '', true); if (!c) return; const r = await run(() => M.call('auth:cookie', c)); if (r) { toast(`Cookies set (${r.set}). Logged in as ${r.me.username}`, 'good'); await refreshMe(); AC.dash = null; render(); } };
   const extension = () => modal('Zotac Extension', h('div', null,
-    h('p', { class: 'ink2' }, '100% local cookie sync from Chrome. Load the unpacked extension (Chrome › Extensions › Developer mode › Load unpacked), paste the token in it and click Sync.'),
+    h('p', { class: 'ink2' }, '100% local cookie sync from Chrome. Load the unpacked extension (Chrome › Extensions › Developer mode › Load unpacked), log in on eldorado.gg in Chrome and keep Zotac open. It pairs with Zotac by itself and keeps it logged in (on browser start, whenever your Eldorado login changes, and every 10 minutes). After updating the extension files, click its reload button in chrome://extensions.'),
     h('div', { class: 'kv' }, h('div', null, 'Port'), h('div', { class: 'mono' }, '127.0.0.1:' + S.settings.localPort), h('div', null, 'Token'), h('div', { class: 'mono' }, S.settings.extensionToken)),
     h('div', { class: 'row', style: { marginTop: '12px' } },
       h('button', { class: 'btn', onclick: () => M.call('open:path', S.info.extensionPath) }, 'Open extension folder'),

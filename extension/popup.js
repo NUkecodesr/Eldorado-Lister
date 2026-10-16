@@ -1,12 +1,27 @@
 const $ = id => document.getElementById(id);
-chrome.storage.local.get(['token', 'port'], v => { if (v.token) $('token').value = v.token; if (v.port) $('port').value = v.port; });
-$('sync').onclick = async () => {
-  const token = $('token').value.trim(), port = $('port').value.trim() || '47321';
-  chrome.storage.local.set({ token, port });
-  try {
-    const cookies = (await chrome.cookies.getAll({ domain: 'eldorado.gg' })).map(c => ({ name: c.name, value: c.value, domain: c.domain, path: c.path, secure: c.secure, httpOnly: c.httpOnly, expirationDate: c.expirationDate }));
-    const r = await fetch(`http://127.0.0.1:${port}/extension/cookies`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Zotac-Token': token }, body: JSON.stringify({ cookies }) });
-    const j = await r.json();
-    $('s').textContent = r.ok ? `Synced ${j.set} cookies` : 'Error: ' + (j.error || r.status);
-  } catch (e) { $('s').textContent = 'Zotac not reachable: ' + e.message; }
+const ago = t => { const s = Math.round((Date.now() - t) / 1000); return s < 60 ? s + 's ago' : s < 3600 ? Math.round(s / 60) + 'm ago' : Math.round(s / 3600) + 'h ago'; };
+
+function show(last) {
+  const el = $('st');
+  if (!last) { el.className = 'st'; el.textContent = 'Not synced yet'; return; }
+  el.className = 'st ' + (last.ok ? 'ok' : 'bad');
+  el.textContent = last.ok ? `Synced ${last.n} cookies · ${ago(last.at)}` : `${last.error} · ${ago(last.at)}`;
+}
+
+chrome.storage.local.get(['token', 'port', 'auto', 'last'], v => {
+  $('token').value = v.token || '';
+  $('port').value = v.port || '47321';
+  $('auto').checked = v.auto !== false;
+  show(v.last);
+});
+
+$('auto').onchange = () => chrome.storage.local.set({ auto: $('auto').checked });
+$('port').onchange = () => chrome.storage.local.set({ port: $('port').value.trim() || '47321' });
+$('token').onchange = () => chrome.storage.local.set({ token: $('token').value.trim() });
+$('sync').onclick = async () => { $('st').textContent = 'Syncing…'; show(await chrome.runtime.sendMessage({ type: 'sync' })); };
+$('pair').onclick = async () => {
+  $('st').textContent = 'Pairing…';
+  const r = await chrome.runtime.sendMessage({ type: 'pair', port: $('port').value.trim() || '47321' });
+  show(r);
+  chrome.storage.local.get(['token'], v => { $('token').value = v.token || ''; });
 };

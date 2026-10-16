@@ -1,6 +1,11 @@
 // 127.0.0.1-only HTTP server for the Zotac browser extension (cookie sync) and
 // the in-game delivery agent. Both are gated by per-install tokens.
 const http = require('http');
+const crypto = require('crypto');
+
+// analytics / tracking cookies change all the time and say nothing about the login
+const NOISE = /^(_ga|_gid|_gcl|_fbp|_ttp|_hj|ajs_|amp_|_clck|_clsk|intercom|__stripe|_uet|mp_|_tt_|ttcsid|_scid|_rdt|_pin|__hs|hubspot|_dd_s|OptanonConsent)/i;
+let lastCookieSig = '';
 
 function startLocalServer({ store, bridge, delivery, importScan, onServerScan, onCookies, onAgentClosing }) {
   const port = store.get('settings').localPort || 47321;
@@ -22,10 +27,27 @@ function startLocalServer({ store, bridge, delivery, importScan, onServerScan, o
     try {
       if (url.pathname === '/ping') return send(200, { ok: true, app: 'zotac-lister', bridge: bridge.state });
 
+      // The extension pairs itself: only an extension page may ask (websites always send their own
+      // Origin), and only through 127.0.0.1/localhost (blocks DNS-rebinding pages).
+      if (url.pathname === '/extension/pair' && req.method === 'GET') {
+        const origin = String(req.headers.origin || '');
+        const host = String(req.headers.host || '');
+        if (origin && !origin.startsWith('chrome-extension://')) return send(403, { error: 'only the Zotac extension can pair' });
+        if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/i.test(host)) return send(403, { error: 'bad host' });
+        store.log('info', '[Extension] paired');
+        return send(200, { ok: true, token: s.extensionToken, port });
+      }
+
       if (url.pathname === '/extension/cookies' && req.method === 'POST') {
         if (token !== s.extensionToken) return send(401, { error: 'bad token' });
         const list = Array.isArray(body.cookies) ? body.cookies.filter(c => /eldorado\.gg$/.test(String(c.domain || '').replace(/^\./, '')) || !c.domain) : [];
+        // Cloudflare's clearance cookie only works with the browser's own user agent
+        const ua = typeof body.userAgent === 'string' && /Mozilla\//.test(body.userAgent) ? body.userAgent.slice(0, 400) : null;
+        if (ua && ua !== s.bridgeUserAgent) { store.patchSettings({ bridgeUserAgent: ua }); bridge.setUserAgent(ua); lastCookieSig = ''; }
+        const sig = crypto.createHash('sha1').update(list.filter(c => c && c.name && !NOISE.test(c.name)).map(c => c.name + '=' + c.value).sort().join(';')).digest('hex');
+        if (sig === lastCookieSig && bridge.state === 'connected') return send(200, { ok: true, set: list.length, unchanged: true });
         const n = await bridge.setCookies(list);
+        lastCookieSig = sig;
         store.log('info', `[Extension] synced ${n} cookies`);
         onCookies && onCookies(n);
         return send(200, { ok: true, set: n });

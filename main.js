@@ -589,6 +589,7 @@ app.whenReady().then(async () => {
   ipc();
   setupCapture();
   createWindow();
+  if (store.get('settings').bridgeUserAgent) bridge.setUserAgent(store.get('settings').bridgeUserAgent);
   bridge.start().then(afterLogin);
   if (SMOKE) return smoke();
   const s = store.get('settings');

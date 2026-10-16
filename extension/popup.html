@@ -1,9 +1,30 @@
 <!doctype html>
 <meta charset="utf-8">
-<style>body{width:260px;font:13px Segoe UI,sans-serif;background:#0d0b08;color:#eee;padding:12px}input,button{width:100%;box-sizing:border-box;margin:4px 0;padding:6px;border-radius:6px;border:1px solid #3a3022;background:#1a1611;color:#eee}button{background:#f2b631;color:#1a1205;font-weight:700;cursor:pointer}#s{min-height:18px;font-size:12px}</style>
-<b>Zotac Cookie Sync</b>
-<input id="token" placeholder="Token (from Zotac Account page)">
-<input id="port" placeholder="Port" value="47321">
-<button id="sync">Sync cookies</button>
-<div id="s"></div>
+<style>
+  body { width: 280px; margin: 0; font: 13px 'Segoe UI', sans-serif; background: #0d0b08; color: #eee; padding: 14px; }
+  .head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .logo { width: 26px; height: 26px; border-radius: 50%; background: #f2b631; position: relative; flex: none; }
+  .logo::before, .logo::after { content: ''; position: absolute; top: 9px; width: 5px; height: 5px; border-radius: 50%; background: #0c0b08; }
+  .logo::before { left: 7px; } .logo::after { right: 7px; }
+  b { font-size: 14px; }
+  .st { padding: 8px 10px; border-radius: 8px; background: #1a1611; border: 1px solid #3a3022; font-size: 12px; margin-bottom: 8px; }
+  .st.ok { border-color: #2f6b3f; color: #8fe3a5; } .st.bad { border-color: #7a2c2c; color: #ff9a9a; }
+  .muted { color: #9a8f7c; font-size: 11px; }
+  button { width: 100%; box-sizing: border-box; margin: 4px 0; padding: 8px; border-radius: 8px; border: 0; background: #f2b631; color: #1a1205; font-weight: 700; cursor: pointer; }
+  button.ghost { background: #1a1611; color: #eee; border: 1px solid #3a3022; }
+  label.row { display: flex; align-items: center; justify-content: space-between; margin: 8px 0; }
+  details { margin-top: 6px; } summary { cursor: pointer; color: #9a8f7c; font-size: 12px; }
+  input { width: 100%; box-sizing: border-box; margin: 4px 0; padding: 6px; border-radius: 6px; border: 1px solid #3a3022; background: #1a1611; color: #eee; }
+</style>
+<div class="head"><div class="logo"></div><b>Zotac Cookie Sync</b></div>
+<div id="st" class="st">…</div>
+<button id="sync">Sync now</button>
+<label class="row"><span>Keep Zotac logged in automatically</span><input id="auto" type="checkbox" style="width:auto"></label>
+<div class="muted">Log in on eldorado.gg in this browser, keep Zotac Lister open, and it syncs by itself.</div>
+<details>
+  <summary>Connection</summary>
+  <input id="port" placeholder="Port (default 47321)">
+  <input id="token" placeholder="Token (filled in automatically)">
+  <button id="pair" class="ghost">Re-pair with Zotac</button>
+</details>
 <script src="popup.js"></script>

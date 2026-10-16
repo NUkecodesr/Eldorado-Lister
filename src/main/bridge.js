@@ -65,6 +65,14 @@ class Bridge extends EventEmitter {
 
   get session() { return session.fromPartition(PARTITION); }
 
+  // use the user agent of the browser the Eldorado cookies came from (Cloudflare checks it)
+  setUserAgent(ua) {
+    if (!ua) return;
+    this.ua = ua;
+    try { this.session.setUserAgent(ua); } catch { /* session not ready */ }
+    if (this.win && !this.win.isDestroyed()) this.win.webContents.setUserAgent(ua);
+  }
+
   start() {
     if (this.win && !this.win.isDestroyed()) return this.ready;
     this.setState('connecting');
@@ -79,6 +87,7 @@ class Bridge extends EventEmitter {
       }
     });
     this.win.webContents.setAudioMuted(true);
+    if (this.ua) this.win.webContents.setUserAgent(this.ua);
     this.ready = new Promise(resolve => {
       this.win.webContents.once('did-finish-load', () => resolve());
       this.win.webContents.once('did-fail-load', () => resolve());
