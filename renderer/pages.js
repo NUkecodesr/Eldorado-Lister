@@ -69,8 +69,8 @@ function xCardThumb(p, onclick) {
     CARD_THUMBS[key] = null;
     M.call('art:cardThumb', p.id).then(u => { CARD_THUMBS[key] = u || false; if (u && S.page === 'autolist') soft(); }).catch(() => { CARD_THUMBS[key] = false; });
   }
-  return src ? h('img', { class: 'x-alcard', src, alt: '', title: 'Generated card (click to preview)', onclick })
-    : h('span', { class: 'x-alcard-ok', title: 'Card image generated' }, '▣');
+  return src ? h('img', { class: 'x-althumb', src, alt: '', title: 'Generated card (click to preview)', onclick })
+    : h('span', { class: 'x-althumb ph', title: 'Card image generated' }, '▣');
 }
 function xDot(m) { const c = xMutColor(m); return h('span', { class: 'x-mut' }, h('i', { style: { background: c || '#4b4233' } }), m && !/^none$/i.test(m) ? m : h('span', { class: 'muted' }, 'None')); }
 function xJsonCount(text) {
@@ -397,9 +397,10 @@ PAGES.autolist = async root => {
     const traits = p.traits || [];
     return h('div', { class: 'x-alrow' + (rev ? ' rev' : '') + (AL.selected.has(p.id) ? ' sel' : '') },
       h('input', { type: 'checkbox', checked: AL.selected.has(p.id), onchange: e => { e.target.checked ? AL.selected.add(p.id) : AL.selected.delete(p.id); render(); } }),
+      p.imagePath ? xCardThumb(p, () => previewImage(p)) : h('span', { class: 'x-althumb ph', title: 'No card yet: Generate Images' }, '·'),
       h('div', { class: 'x-alname', title: p.title ? 'Fixed title (Quick Fill)' : 'Title from the template' }, tEl,
         p.status !== 'available' ? statusPill(p.status) : null,
-        p.imagePath ? xCardThumb(p, () => previewImage(p)) : null),
+        null),
       h('div', { class: 'x-alact' },
         h('button', { title: 'Smart price & competitors', onclick: () => showComps(p) }, '$'),
         h('button', { title: 'Preview image', onclick: () => previewImage(p) }, 'Img'),
