@@ -236,17 +236,22 @@ class Eldorado {
       return this.b.post(`orders/me/${id}/cancel`, text);   // older shape: the reason as the body
     }
   }
-  // what the buyer typed at checkout; only the order detail endpoint carries deliveryDetails
+  // What the buyer typed at checkout (e.g. their Roblox username). Eldorado shows it masked on
+  // the order page: the order detail lists the fields (deliveryDetailsSubmission.details =
+  // [{ id, type }]) and "Reveal value" loads one with GET v1/orders/me/{order}/delivery-details/{field id}.
   async deliveryDetail(orderId, field = 'RobloxUsername') {
-    try {
-      const o = await this.order(orderId);
-      const list = Array.isArray(o && o.deliveryDetails) ? o.deliveryDetails : [];
-      const f = list.find(x => x && (x.type === field || x.name === field));
-      if (f && f.value) return String(f.value).trim();
-      if (field === 'RobloxUsername') { const any = robloxOf(o); if (any) return any; }
-    } catch { /* older endpoint below */ }
-    const r = await this.b.get(`v1/orders/me/${orderId}/delivery-details/${field}`);
-    return r && (r.value ?? r);
+    const o = await this.order(orderId);
+    const sub = (o && (o.deliveryDetailsSubmission || (o.order && o.order.deliveryDetailsSubmission))) || null;
+    const fields = sub && Array.isArray(sub.details) ? sub.details : [];
+    const f = fields.find(x => x && x.type === field) || (field === 'RobloxUsername' ? fields.find(x => x && /roblox/i.test(x.type || '')) : null);
+    const clean = v => { const s = String(v == null ? '' : v).trim(); return s && !/^[\u2022*]+$/.test(s) ? s : null; };
+    if (f) {
+      if (clean(f.value)) return clean(f.value);
+      const r = await this.b.get(`v1/orders/me/${orderId}/delivery-details/${encodeURIComponent(f.id)}`);
+      const v = clean(r && typeof r === 'object' ? r.value : r);
+      if (v) return v;
+    }
+    return field === 'RobloxUsername' ? robloxOf(o) : null;   // older order shape
   }
   orderConversation(orderId) { return this.b.get(`v1/orders/me/${orderId}/conversation`); }
   sendOrderMessage(orderId, message) {

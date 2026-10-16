@@ -1465,7 +1465,7 @@ PAGES.chat = async root => {
 
   root.append(
     h('div', { class: 'x-head' }, h('div', { class: 'x-badge' }, 'Ch'), h('div', { class: 'x-head-t' }, h('h1', null, 'Chat'), h('p', null, 'Open conversations on Eldorado')), h('div', { class: 'grow' }),
-      h('div', { class: 'row x-head-r' }, h('button', { class: 'btn sm ghost', onclick: () => { CH.orders = null; CH.dl = null; if (CH.orderId) chLoadHistory(CH.orderId, true); render(); } }, '↻ Refresh'), h('button', { class: 'btn sm', onclick: () => M.call('open:external', url) }, '✎ Eldorado'))),
+      h('div', { class: 'row x-head-r' }, h('button', { class: 'btn sm ghost', onclick: () => { CH.orders = null; CH.dl = null; if (CH.orderId) { delete CH.rbx[CH.orderId]; chLoadHistory(CH.orderId, true); } render(); } }, '↻ Refresh'), h('button', { class: 'btn sm', onclick: () => M.call('open:external', url) }, '✎ Eldorado'))),
     xPills([['all', 'All'], ['active', 'Active'], ['delivered', 'Delivered'], ['completed', 'Completed'], ['canceled', 'Canceled'], ['disputed', 'Disputed']], CH.filter, v => { CH.filter = v; render(); }),
     h('div', { class: 'x-bar x-am' }, h('span', { class: 'x-bar-k' }, '⚡ AUTO-MESSAGE'),
       h('small', { class: 'muted grow', style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, CH.edit ? '' : am.text),
