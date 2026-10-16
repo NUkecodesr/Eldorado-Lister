@@ -52,6 +52,14 @@ function xAvatar(pet, size = 34) {
   const c = xMutColor(pet.mutation) || RARITY_COLORS[pet.rarity || xRarity(pet.name)] || '#8d806b';
   return h('div', { class: 'x-ava', style: { width: size + 'px', height: size + 'px', background: `linear-gradient(135deg, ${c}55, #15110c)`, borderColor: c + '88', fontSize: Math.round(size * .36) + 'px' } }, xInitials(pet.name));
 }
+// order picture (the listing image) with the initials tile as fallback
+function xOrderAva(o, size = 34) {
+  const f = o && o.image;
+  if (!f) return xAvatar({ name: String(o && o.title || '?').split('|')[0] }, size);
+  const src = /^https?:/.test(f) ? f : `https://assetsdelivery.eldorado.gg/v7/_offers-v2_/${f}?w=${size * 3}&q=85`;
+  return h('div', { class: 'x-ava x-ava-img', style: { width: size + 'px', height: size + 'px' } },
+    h('img', { src, alt: '', loading: 'lazy', onerror: e => e.target.replaceWith(document.createTextNode(xInitials(String(o.title || '?').split('|')[0]))) }));
+}
 function xDot(m) { const c = xMutColor(m); return h('span', { class: 'x-mut' }, h('i', { style: { background: c || '#4b4233' } }), m && !/^none$/i.test(m) ? m : h('span', { class: 'muted' }, 'None')); }
 function xJsonCount(text) {
   try {
@@ -1365,7 +1373,7 @@ PAGES.orders = async root => {
         h('input', { class: 'x-search sm', type: 'search', placeholder: 'Search buyer or item...', value: OR.q, oninput: e => { OR.q = e.target.value; clearTimeout(OR.qt); OR.qt = setTimeout(render, 250); } })),
       h('div', { class: 'x-ohead' }, h('span', null, 'ORDER'), h('span', null, 'BUYER'), h('span', { class: 'r' }, 'AMOUNT'), h('span', null, 'STATUS'), h('span', null, 'RATING'), h('span', { class: 'r' }, 'ACTION')),
       rows.length ? rows.map(o => h('div', { class: 'x-orow' },
-        h('div', { class: 'x-oi' }, xAvatar({ name: String(o.title || '?').split('|')[0] }, 34), h('div', { class: 'x-ot' }, h('b', null, o.title || '—'), h('small', { class: 'muted mono' }, '#' + String(o.id || '').slice(0, 8)))),
+        h('div', { class: 'x-oi' }, xOrderAva(o, 34), h('div', { class: 'x-ot' }, h('b', null, o.title || '—'), h('small', { class: 'muted mono' }, '#' + String(o.id || '').slice(0, 8)))),
         h('div', { class: 'x-ob' }, h('b', null, o.buyer || '—'), h('small', { class: 'muted' }, ago(o.date))),
         h('div', { class: 'x-oa' }, money(o.price)),
         h('div', null, xStatePill(o.state)),
@@ -1410,11 +1418,11 @@ PAGES.chat = async root => {
   // messages: the order's Eldorado chat history, plus anything newer that arrived live (and the
   // bot's own log when the chat could not be read)
   if (CH.orderId) chLoadHistory(CH.orderId);
-  if (CH.orderId && !(d && d.username) && !(CH.orderId in CH.rbx)) {
+  if (CH.orderId && !(d && d.username) && !(cur && cur.robloxUsername) && !(CH.orderId in CH.rbx)) {
     const id = CH.orderId; CH.rbx[id] = undefined;
     M.call('chat:buyerRoblox', id).then(v => { CH.rbx[id] = v || null; if (S.page === 'chat' && CH.orderId === id) render(); }).catch(() => { CH.rbx[id] = null; });
   }
-  const rbxName = (d && d.username) || CH.rbx[CH.orderId] || null;
+  const rbxName = (d && d.username) || (cur && cur.robloxUsername) || CH.rbx[CH.orderId] || null;
   const hist = CH.hist[CH.orderId] || {};
   const convId = hist.conversationId || (d && d.conversationId);
   let msgs = (hist.msgs || []).map(m => ({ id: m.id, t: m.ts, mine: m.isByMe, sys: m.system, text: m.body }));
@@ -1434,7 +1442,7 @@ PAGES.chat = async root => {
   };
   const thread = !cur && !CH.orderId ? h('div', { class: 'x-empty' }, 'Select a conversation') : h('div', { class: 'x-thread' },
     h('div', { class: 'x-thead' },
-      cur ? xAvatar({ name: String(cur.title || '?').split('|')[0] }, 36) : null,
+      cur ? xOrderAva(cur, 36) : null,
       h('div', { class: 'grow' }, h('b', null, cur ? cur.title : 'Order ' + CH.orderId), h('small', { class: 'muted' }, cur ? `Buyer: ${cur.buyer || '—'}   Order: #${String(CH.orderId).slice(0, 18)}` : '')),
       cur ? xStatePill(cur.state) : null),
     h('div', { class: 'x-tuser' }, h('span', { class: 'muted' }, 'Buyer username: '), h('b', null, rbxName ? '@' + rbxName : CH.rbx[CH.orderId] === undefined && !(d && d.username) ? 'loading…' : '—'),
@@ -1467,7 +1475,7 @@ PAGES.chat = async root => {
       h('div', { class: 'x-clist' },
         h('input', { type: 'search', placeholder: 'Search by buyer name...', value: CH.q, oninput: e => { CH.q = e.target.value; clearTimeout(CH.qt); CH.qt = setTimeout(render, 250); } }),
         h('div', { class: 'x-cscroll' }, list.length ? list.map(o => h('div', { class: 'x-citem' + (CH.orderId === o.id ? ' on' : ''), onclick: () => { CH.orderId = o.id; CH.live = false; render(); } },
-          xAvatar({ name: String(o.title || '?').split('|')[0] }, 34),
+          xOrderAva(o, 34),
           h('div', { class: 'x-cm' }, h('div', { class: 'x-cl1' }, h('b', null, o.buyer || '—'), h('small', { class: 'muted' }, ago(o.date))), h('small', { class: 'muted x-ctt' }, o.title || ''), h('div', { class: 'x-cl3' }, h('b', { class: 'x-cp' }, money(o.price)), xStatePill(o.state))))) : h('div', { class: 'x-empty sm' }, CH.orders && !CH.orders.length ? 'No orders yet.' : 'Nothing matches.'))),
       thread));
   const ms = $('#ch-msgs'); if (ms) ms.scrollTop = ms.scrollHeight;

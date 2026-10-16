@@ -14,16 +14,28 @@ function listOf(d) {
 
 const amountOf = v => (v == null ? null : typeof v === 'number' ? v : typeof v === 'object' ? (v.amount ?? v.value ?? null) : Number(v) || null);
 
+// Eldorado's order state is an object ({ state: 'Received', ... }) in the seller order lists
+const stateOf = v => (v && typeof v === 'object' ? (v.state || v.name || v.value || '') : (v || ''));
+// the buyer's Roblox username typed at checkout: deliveryDetails = [{ type: 'RobloxUsername', value }]
+const robloxOf = o => {
+  const f = Array.isArray(o && o.deliveryDetails) ? o.deliveryDetails.find(x => x && /roblox/i.test(x.type || x.name || '')) : null;
+  return f && String(f.value || '').trim() || null;
+};
+
 function normalizeOrder(o) {
-  const offer = o.offer || o.offerDetails || o.orderOffer || {};
+  const offer = o.orderOfferDetails || o.offer || o.offerDetails || o.orderOffer || {};
+  const img = offer.mainOfferImage || o.mainOfferImage || null;
   return {
     id: o.id || o.orderId,
-    state: o.orderState || o.state || o.status || '',
+    state: stateOf(o.orderState) || stateOf(o.state) || stateOf(o.status) || '',
     title: o.offerTitle || offer.offerTitle || o.title || o.itemTitle || o.gameCategoryTitle || '',
-    offerId: o.offerId || offer.id || null,
+    image: img ? (img.largeImage || img.smallImage || img.originalSizeImage || null) : null,
+    robloxUsername: robloxOf(o),
+    lastMessage: (o.conversationDetails && o.conversationDetails.message) || '',
+    offerId: o.offerId || offer.offerId || offer.id || null,
     buyer: o.buyerUsername || (o.buyer && (o.buyer.username || o.buyer.name)) || o.buyerName || o.counterpartyUsername || '',
     buyerId: o.buyerId || (o.buyer && o.buyer.id) || null,
-    quantity: o.quantity || o.orderedQuantity || 1,
+    quantity: o.purchaseQuantity || o.quantity || o.orderedQuantity || (offer.orderPricing && offer.orderPricing.quantity) || 1,
     price: amountOf(o.totalPrice) ?? amountOf(o.price) ?? amountOf(o.sellerEarnings) ?? amountOf(o.orderPrice) ?? amountOf(o.amount),
     earnings: amountOf(o.sellerEarnings) ?? amountOf(o.sellerPayout) ?? amountOf(o.netAmount),
     date: o.createdDate || o.orderDate || o.created || o.date || null,
@@ -224,7 +236,15 @@ class Eldorado {
       return this.b.post(`orders/me/${id}/cancel`, text);   // older shape: the reason as the body
     }
   }
+  // what the buyer typed at checkout; only the order detail endpoint carries deliveryDetails
   async deliveryDetail(orderId, field = 'RobloxUsername') {
+    try {
+      const o = await this.order(orderId);
+      const list = Array.isArray(o && o.deliveryDetails) ? o.deliveryDetails : [];
+      const f = list.find(x => x && (x.type === field || x.name === field));
+      if (f && f.value) return String(f.value).trim();
+      if (field === 'RobloxUsername') { const any = robloxOf(o); if (any) return any; }
+    } catch { /* older endpoint below */ }
     const r = await this.b.get(`v1/orders/me/${orderId}/delivery-details/${field}`);
     return r && (r.value ?? r);
   }
