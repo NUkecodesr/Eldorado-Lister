@@ -6,6 +6,7 @@ local ZOTAC_PORT  = 47321
 local ZOTAC_TOKEN = "PASTE_AGENT_TOKEN"
 local AUTO_SECONDS = 30
 local SCAN_SERVER = true
+local SHOW_GUI = true
 
 local Players     = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
@@ -16,7 +17,8 @@ local PG = LP:WaitForChild("PlayerGui")
 
 if _G.ZotacScannerStop then pcall(_G.ZotacScannerStop) end
 local running = true
-_G.ZotacScannerStop = function() running = false end
+local guiRoot = nil
+_G.ZotacScannerStop = function() running = false; if guiRoot then pcall(function() guiRoot:Destroy() end) end end
 
 local function notify(text)
     pcall(StarterGui.SetCore, StarterGui, "SendNotification", {Title = "Zotac Scanner", Text = text, Duration = 5})
@@ -570,7 +572,7 @@ local function runOnce(first)
     end
 end
 
-local function scanServer()
+local function scanServer(includeEmpty)
     local plots = workspace:FindFirstChild("Plots")
     if not plots then return nil end
     local overheads, used = readOverheads(), {}
@@ -580,32 +582,209 @@ local function scanServer()
         local okR, pets = pcall(readPlot, plot, overheads, used, false)
         if not okR or type(pets) ~= "table" then pets = {} end
         local name, display, uid = ownerInfo(plot)
-        if name or #pets > 0 then
+        if includeEmpty or name or #pets > 0 then
             local total = 0
             for _, p in ipairs(pets) do total += (p.gen or 0) end
-            table.insert(bases, {plot = plot.Name, owner = name, displayName = display, userId = uid, mine = plot == mine or uid == LP.UserId, pets = pets, totalGen = total})
+            table.insert(bases, {plot = plot.Name, owner = name, displayName = display, userId = uid, mine = plot == mine or uid == LP.UserId, pets = pets, totalGen = total, empty = not name and #pets == 0})
         end
     end
-    table.sort(bases, function(a, b) return a.totalGen > b.totalGen end)
+    table.sort(bases, function(a, b)
+        if a.empty ~= b.empty then return not a.empty end
+        return a.totalGen > b.totalGen
+    end)
     return {jobId = game.JobId, placeId = game.PlaceId, by = LP.Name, players = #Players:GetPlayers(), scannedAt = os.time(), bases = bases}
 end
 
 local lastServerSig, lastServerAt = nil, 0
-local function runServer()
+local function runServer(force, data)
     if not SCAN_SERVER then return end
-    local data = scanServer()
+    data = data or scanServer(false)
     if not data then return end
+    local kept = {}
+    for _, b in ipairs(data.bases) do if not b.empty then table.insert(kept, b) end end
+    data = {jobId = data.jobId, placeId = data.placeId, by = data.by, players = data.players, scannedAt = data.scannedAt, bases = kept}
     local parts = {}
     for _, b in ipairs(data.bases) do table.insert(parts, b.plot .. "=" .. tostring(b.owner) .. ":" .. signature(b)) end
     local sig = table.concat(parts, "#")
-    if sig == lastServerSig and os.clock() - lastServerAt < 120 then return end
+    if not force and sig == lastServerSig and os.clock() - lastServerAt < 120 then return end
     local ok = post("/scanner/server", data)
     if ok then lastServerSig, lastServerAt = sig, os.clock() end
+end
+
+
+local function buildGui()
+    local TweenService = game:GetService("TweenService")
+    local UIS = game:GetService("UserInputService")
+    local YELLOW = Color3.fromRGB(245, 196, 0)
+    local BG = Color3.fromRGB(20, 20, 24)
+    local PANEL = Color3.fromRGB(26, 26, 31)
+    local ROW = Color3.fromRGB(32, 32, 38)
+    local OFF = Color3.fromRGB(52, 52, 60)
+    local TEXT = Color3.fromRGB(240, 240, 245)
+    local DIM = Color3.fromRGB(130, 130, 140)
+
+    local function new(class, props, children)
+        local o = Instance.new(class)
+        for k, v in pairs(props or {}) do o[k] = v end
+        for _, c in ipairs(children or {}) do c.Parent = o end
+        return o
+    end
+    local function corner(r) return new("UICorner", {CornerRadius = UDim.new(0, r)}) end
+
+    local parent
+    local okH, hui = pcall(function() return gethui and gethui() end)
+    if okH and hui then parent = hui else
+        local okC, cg = pcall(function() return game:GetService("CoreGui") end)
+        parent = okC and cg or PG
+    end
+    local old = parent:FindFirstChild("ZotacScannerGui")
+    if old then old:Destroy() end
+
+    local gui = new("ScreenGui", {Name = "ZotacScannerGui", ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 50})
+    pcall(function() gui.Parent = parent end)
+    if not gui.Parent then gui.Parent = PG end
+    guiRoot = gui
+
+    local main = new("Frame", {Parent = gui, Size = UDim2.fromOffset(600, 380), Position = UDim2.new(0.5, -300, 0.5, -190), BackgroundColor3 = BG, BorderSizePixel = 0, Active = true},
+        {corner(16), new("UIStroke", {Color = YELLOW, Thickness = 2})})
+
+    local left = new("Frame", {Parent = main, Size = UDim2.new(0, 200, 1, 0), BackgroundColor3 = PANEL, BorderSizePixel = 0}, {corner(16)})
+    new("Frame", {Parent = left, Size = UDim2.new(0, 16, 1, 0), Position = UDim2.new(1, -16, 0, 0), BackgroundColor3 = PANEL, BorderSizePixel = 0})
+    new("ImageLabel", {Parent = left, Size = UDim2.fromOffset(116, 116), Position = UDim2.new(0.5, -58, 0, 22), BackgroundColor3 = ROW,
+        Image = "rbxthumb://type=AvatarHeadShot&id=" .. LP.UserId .. "&w=150&h=150"}, {corner(16), new("UIStroke", {Color = YELLOW, Thickness = 2})})
+    new("TextLabel", {Parent = left, Size = UDim2.new(1, 0, 0, 26), Position = UDim2.fromOffset(0, 148), BackgroundTransparency = 1, RichText = true,
+        Text = 'Zotac <font color="#F5C400">Lister</font>', Font = Enum.Font.GothamBold, TextSize = 20, TextColor3 = TEXT})
+    local stats = new("TextLabel", {Parent = left, Size = UDim2.new(1, 0, 0, 16), Position = UDim2.fromOffset(0, 176), BackgroundTransparency = 1,
+        Text = "scanning...", Font = Enum.Font.Gotham, TextSize = 11, TextColor3 = DIM})
+
+    local function button(text, y, primary)
+        return new("TextButton", {Parent = left, Size = UDim2.new(1, -28, 0, 32), Position = UDim2.new(0, 14, 1, y), AutoButtonColor = true,
+            BackgroundColor3 = primary and YELLOW or ROW, Text = text, Font = Enum.Font.GothamBold, TextSize = 13,
+            TextColor3 = primary and Color3.fromRGB(20, 20, 20) or TEXT, BorderSizePixel = 0}, {corner(8)})
+    end
+    local refreshBtn = button("Refresh", -132, false)
+    local allBtn = button("Select All", -92, false)
+    local copyBtn = button("Copy Selected", -52, true)
+
+    new("TextLabel", {Parent = main, Size = UDim2.fromOffset(120, 16), Position = UDim2.fromOffset(216, 16), BackgroundTransparency = 1,
+        Text = "BASES", Font = Enum.Font.GothamBold, TextSize = 11, TextColor3 = DIM, TextXAlignment = Enum.TextXAlignment.Left})
+    new("TextLabel", {Parent = main, Size = UDim2.fromOffset(60, 16), Position = UDim2.new(1, -96, 0, 16), BackgroundTransparency = 1,
+        Text = "PETS", Font = Enum.Font.GothamBold, TextSize = 11, TextColor3 = DIM, TextXAlignment = Enum.TextXAlignment.Right})
+    local close = new("TextButton", {Parent = main, Size = UDim2.fromOffset(22, 22), Position = UDim2.new(1, -30, 0, 10), BackgroundTransparency = 1,
+        Text = "X", Font = Enum.Font.GothamBold, TextSize = 13, TextColor3 = DIM})
+
+    local list = new("ScrollingFrame", {Parent = main, Size = UDim2.new(1, -228, 1, -56), Position = UDim2.fromOffset(212, 40), BackgroundTransparency = 1,
+        BorderSizePixel = 0, ScrollBarThickness = 4, ScrollBarImageColor3 = YELLOW, CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y},
+        {new("UIListLayout", {Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder}), new("UIPadding", {PaddingRight = UDim.new(0, 8)})})
+
+    local selected, current = {}, {}
+    local function setToggle(t, on)
+        TweenService:Create(t, TweenInfo.new(0.15), {BackgroundColor3 = on and YELLOW or OFF}):Play()
+        TweenService:Create(t.Knob, TweenInfo.new(0.15), {Position = on and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8),
+            BackgroundColor3 = on and Color3.fromRGB(20, 20, 20) or Color3.fromRGB(150, 150, 158)}):Play()
+    end
+
+    local function draw(data)
+        for _, c in ipairs(list:GetChildren()) do if c:IsA("Frame") then c:Destroy() end end
+        current = data and data.bases or {}
+        local nb, np = 0, 0
+        for i, b in ipairs(current) do
+            if not b.empty then nb += 1; np += #b.pets end
+            local who = b.empty and "Empty Base" or ((b.displayName and b.displayName ~= b.owner) and (b.displayName .. " (@" .. tostring(b.owner) .. ")") or tostring(b.owner or "Unknown"))
+            if b.mine then who = who .. "  (you)" end
+            local row = new("Frame", {Parent = list, Size = UDim2.new(1, 0, 0, 42), BackgroundColor3 = ROW, BorderSizePixel = 0, LayoutOrder = i}, {corner(10)})
+            local tog = new("TextButton", {Name = "Toggle", Parent = row, Size = UDim2.fromOffset(38, 20), Position = UDim2.new(0, 12, 0.5, -10),
+                BackgroundColor3 = OFF, Text = "", AutoButtonColor = false, BorderSizePixel = 0}, {corner(10)})
+            new("Frame", {Name = "Knob", Parent = tog, Size = UDim2.fromOffset(16, 16), Position = UDim2.new(0, 2, 0.5, -8), BackgroundColor3 = Color3.fromRGB(150, 150, 158), BorderSizePixel = 0}, {corner(8)})
+            local best = (not b.empty and b.pets[1]) and ("  ·  best " .. b.pets[1].name) or ""
+            new("TextLabel", {Parent = row, Size = UDim2.new(1, -130, 1, 0), Position = UDim2.fromOffset(62, 0), BackgroundTransparency = 1,
+                Text = who .. best, Font = b.empty and Enum.Font.Gotham or Enum.Font.GothamMedium, TextSize = 13,
+                TextColor3 = b.empty and DIM or TEXT, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd})
+            new("TextLabel", {Parent = row, Size = UDim2.fromOffset(34, 22), Position = UDim2.new(1, -46, 0.5, -11), BackgroundColor3 = BG,
+                Text = tostring(#b.pets), Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = #b.pets > 0 and TEXT or DIM}, {corner(11)})
+            if selected[b.plot] then setToggle(tog, true) end
+            tog.MouseButton1Click:Connect(function()
+                selected[b.plot] = not selected[b.plot] or nil
+                setToggle(tog, selected[b.plot] == true)
+            end)
+        end
+        stats.Text = ("%d bases · %d pets"):format(nb, np)
+    end
+
+    local busy = false
+    local function refresh()
+        if busy then return end
+        busy = true
+        refreshBtn.Text = "Scanning..."
+        task.spawn(function()
+            local ok, data = pcall(scanServer, true)
+            if ok and data then
+                draw(data)
+                pcall(runServer, true, data)
+            else
+                stats.Text = "scan failed"
+            end
+            refreshBtn.Text = "Refresh"
+            busy = false
+        end)
+    end
+
+    refreshBtn.MouseButton1Click:Connect(refresh)
+    allBtn.MouseButton1Click:Connect(function()
+        local all = true
+        for _, b in ipairs(current) do if not b.empty and not selected[b.plot] then all = false end end
+        for _, b in ipairs(current) do if not b.empty then selected[b.plot] = (not all) or nil end end
+        for _, row in ipairs(list:GetChildren()) do
+            if row:IsA("Frame") then
+                local b = current[row.LayoutOrder]
+                if b then setToggle(row.Toggle, selected[b.plot] == true) end
+            end
+        end
+        allBtn.Text = all and "Select All" or "Deselect All"
+    end)
+    copyBtn.MouseButton1Click:Connect(function()
+        local out, nb, np = {}, 0, 0
+        for _, b in ipairs(current) do
+            if selected[b.plot] and not b.empty then
+                nb += 1; np += #b.pets
+                table.insert(out, {username = b.owner or b.plot, displayName = b.displayName, userId = b.userId, pets = b.pets})
+            end
+        end
+        if nb == 0 then notify("Select at least one base first") return end
+        local json = HttpService:JSONEncode(out)
+        if setclipboard then
+            pcall(setclipboard, json)
+            notify(("Copied %d pets from %d bases - paste into Zotac Auto List"):format(np, nb))
+        else
+            notify("This executor has no setclipboard")
+        end
+    end)
+    close.MouseButton1Click:Connect(function() main.Visible = false; notify("Scanner hidden - press RightShift to show it") end)
+    UIS.InputBegan:Connect(function(input, processed)
+        if not processed and input.KeyCode == Enum.KeyCode.RightShift and gui.Parent then main.Visible = not main.Visible end
+    end)
+
+    local dragging, dragStart, startPos
+    main.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging, dragStart, startPos = true, input.Position, main.Position
+            input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
+        end
+    end)
+    UIS.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local d = input.Position - dragStart
+            main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+        end
+    end)
+
+    refresh()
 end
 
 if not game:IsLoaded() then game.Loaded:Wait() end
 task.wait(3)
 heartbeat()
+if SHOW_GUI then local okG, errG = pcall(buildGui); if not okG then notify("GUI failed: " .. tostring(errG)) end end
 
 for _ = 1, 10 do
     if findMyPlot() then break end
