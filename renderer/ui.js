@@ -144,7 +144,7 @@ function download(name, text, type = 'application/json') {
 
 const ICONS = {
   autolist: 'M4 6h16M4 12h10M4 18h7', listings: 'M3 12l9-9 9 9-9 9zM12 8v.01', templates: 'M6 3h9l4 4v14H6zM14 3v5h5', accounts: 'M12 12a4 4 0 100-8 4 4 0 000 8zM4 21a8 8 0 0116 0',
-  sales: 'M4 20V10M10 20V4M16 20v-7M22 20H2', searcher: 'M11 18a7 7 0 100-14 7 7 0 000 14zM21 21l-5-5', orders: 'M3 4h2l2 12h11l2-8H7M9 20a1 1 0 100-2 1 1 0 000 2zM18 20a1 1 0 100-2 1 1 0 000 2z',
+  server: 'M3 10l9-6 9 6v10H3zM8 20v-6h8v6M12 4v4', sales: 'M4 20V10M10 20V4M16 20v-7M22 20H2', searcher: 'M11 18a7 7 0 100-14 7 7 0 000 14zM21 21l-5-5', orders: 'M3 4h2l2 12h11l2-8H7M9 20a1 1 0 100-2 1 1 0 000 2zM18 20a1 1 0 100-2 1 1 0 000 2z',
   chat: 'M4 5h16v11H8l-4 4z', account: 'M12 12a4 4 0 100-8 4 4 0 000 8zM4 21a8 8 0 0116 0', wallet: 'M3 7h18v12H3zM3 7l2-3h12l2 3M16 13h2', analytics: 'M4 20V12M10 20V6M16 20v-9M22 20H2',
   reviews: 'M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z', notifications: 'M6 16V11a6 6 0 1112 0v5l2 2H4zM10 21h4', delivery: 'M3 7h11v9H3zM14 10h4l3 3v3h-7M7 19a2 2 0 100-4 2 2 0 000 4zM17 19a2 2 0 100-4 2 2 0 000 4z',
   proof: 'M3 6h13v12H3zM16 10l5-3v10l-5-3', admin: 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z', settings: 'M12 15a3 3 0 100-6 3 3 0 000 6zM19 12l2-1-2-4-2 1-2-2V4h-4v2L9 7 7 6 5 10l2 1v2l-2 1 2 4 2-1 2 2v2h4v-2l2-2 2 1 2-4-2-1z'

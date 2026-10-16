@@ -458,6 +458,81 @@ async function openOrderSimulator() {
   draw(); setTimeout(() => input.focus(), 50);
 }
 
+// ============================== SERVER SCAN ===============================
+// What the scanner script sees in its Roblox server: every base with its owner and pets.
+const SV = { scans: null, job: '', view: 'bases', q: '', hideMine: false, open: new Set() };
+PAGES.server = async root => {
+  if (!SV.scans) SV.scans = await M.call('server:scans');
+  const scans = SV.scans || [];
+  const scan = scans.find(x => x.jobId === SV.job) || scans[0];
+  const head = xHead('S', 'Server Scan', t('server.sub'),
+    scans.length > 1 ? sel(scans.map(x => [x.jobId, `${x.by} · ${(x.bases || []).length} bases · ${ago(x.receivedAt)}`]), scan && scan.jobId, v => { SV.job = v; render(); }) : null,
+    h('button', { class: 'btn sm', onclick: async () => { SV.scans = await M.call('server:scans'); render(); } }, t('refresh')));
+  if (!scan) {
+    root.append(head, h('div', { class: 'card empty' },
+      h('b', null, 'No server scan yet'),
+      h('p', { class: 'muted' }, 'Run the scanner script (Roblox Accounts → Scanner script) in a Steal a Brainrot server. Besides your own base it reports every base in the server, every 30 seconds.')));
+    return;
+  }
+  const q = SV.q.toLowerCase();
+  const bases = (scan.bases || []).filter(b => !(SV.hideMine && b.mine));
+  const match = (b, p) => !q || String(p.name).toLowerCase().includes(q) || String(b.owner || '').toLowerCase().includes(q) || String(b.displayName || '').toLowerCase().includes(q)
+    || String(p.mutation || '').toLowerCase().includes(q) || (p.traits || []).some(tr => String(tr).toLowerCase().includes(q));
+  const allPets = [];
+  for (const b of bases) for (const p of b.pets || []) if (match(b, p)) allPets.push({ ...p, base: b });
+  allPets.sort((a, b) => (b.gen || 0) - (a.gen || 0));
+
+  // pictures and icons, fetched once and cached
+  const want = { pets: [...new Set(allPets.map(p => p.name))].filter(n => !(n in ART_THUMBS.pets) && !ART_THUMBS.asked.has('p:' + n)).slice(0, 40),
+    traits: [...new Set(allPets.flatMap(p => p.traits || []))].filter(n => !ART_THUMBS.traits[n] && !ART_THUMBS.asked.has('t:' + n)),
+    mutations: [...new Set(allPets.map(p => p.mutation).filter(m => m && !/^(none|normal)$/i.test(m)))].filter(n => !ART_THUMBS.mutations[n] && !ART_THUMBS.asked.has('m:' + n)) };
+  if (want.pets.length || want.traits.length || want.mutations.length) {
+    want.pets.forEach(n => ART_THUMBS.asked.add('p:' + n)); want.traits.forEach(n => ART_THUMBS.asked.add('t:' + n)); want.mutations.forEach(n => ART_THUMBS.asked.add('m:' + n));
+    M.call('art:thumbs', want).then(r => {
+      for (const k of ['pets', 'traits', 'mutations']) for (const [n, v] of Object.entries(r[k] || {})) ART_THUMBS[k][n] = v;
+      if (S.page === 'server') soft();
+    }).catch(() => {});
+  }
+
+  const petPic = p => ART_THUMBS.pets[p.name] ? h('img', { src: ART_THUMBS.pets[p.name], alt: '' }) : h('span', { class: 'sv-ph' }, xInitials(p.name));
+  const traitsEl = p => (p.traits || []).length ? h('span', { class: 'x-trp' }, p.traits.slice(0, 8).map(tr => ART_THUMBS.traits[tr] ? h('img', { src: ART_THUMBS.traits[tr], title: tr, alt: tr }) : h('em', { title: tr }, String(tr).slice(0, 3)))) : null;
+  const who = b => b.owner ? (b.displayName && b.displayName !== b.owner ? `${b.displayName} (@${b.owner})` : '@' + b.owner) : 'Unknown owner';
+  const petRow = (p, showOwner) => h('div', { class: 'sv-pet' },
+    h('div', { class: 'sv-pic' }, petPic(p)),
+    h('div', { class: 'sv-pn' }, h('b', null, p.name), h('small', null, [p.rarity, showOwner ? who(p.base) : null].filter(Boolean).join(' · '))),
+    xMutBlock(p.mutation), traitsEl(p),
+    h('span', { class: 'sv-gen' }, formatGen(p.gen || 0)),
+    h('button', { class: 'x-srch', onclick: async () => { Object.assign(SR.q, { name: p.name, page: 1 }); SR.res = null; SR.loading = true; go('searcher'); SR.res = await run(() => M.call('eld:search', { ...SR.q, pageSize: 30 })); SR.loading = false; render(); } }, 'Search on Eldorado'));
+
+  const totalPets = (scan.bases || []).reduce((n, b) => n + (b.pets || []).length, 0);
+  const best = allPets[0];
+  root.append(head,
+    h('div', { class: 'x-tiles' },
+      xTile('BASES', String((scan.bases || []).length), 'x-green', `${scan.players || '?'} players`),
+      xTile('PETS', String(totalPets), 'x-purple'),
+      xTile('BEST PET', best ? formatGen(best.gen || 0) : '—', 'x-yellow', best ? best.name : null),
+      xTile('SCANNED', ago(scan.receivedAt), 'x-grey', 'by @' + scan.by)),
+    h('div', { class: 'row sv-bar' },
+      xPills([['bases', 'By base'], ['pets', 'All pets']], SV.view, v => { SV.view = v; render(); }),
+      h('input', { class: 'x-search', type: 'search', placeholder: 'Search pet, owner, mutation, trait…', value: SV.q, style: { flex: '1', margin: 0 },
+        oninput: e => { SV.q = e.target.value; clearTimeout(SV.qt); SV.qt = setTimeout(render, 250); } }),
+      h('label', { class: 'chk' }, h('input', { type: 'checkbox', checked: SV.hideMine, onchange: e => { SV.hideMine = e.target.checked; render(); } }), 'Hide my base')),
+    SV.view === 'pets'
+      ? (allPets.length ? h('div', { class: 'sv-list' }, allPets.slice(0, 300).map(p => petRow(p, true))) : h('div', { class: 'x-empty' }, 'No pets match.'))
+      : h('div', { class: 'sv-bases' }, bases.filter(b => !q || (b.pets || []).some(p => match(b, p)) || match(b, {})).map(b => {
+          const pets = (b.pets || []).filter(p => match(b, p) || match(b, {}));
+          const open = SV.open.has(b.plot) || !!q;
+          return h('div', { class: 'card sv-base' + (b.mine ? ' mine' : '') },
+            h('div', { class: 'sv-bh', onclick: () => { open ? SV.open.delete(b.plot) : SV.open.add(b.plot); render(); } },
+              h('b', null, who(b)), b.mine ? h('span', { class: 'pill gold' }, 'YOU') : null,
+              h('span', { class: 'muted' }, `${(b.pets || []).length} pets · ${formatGen(b.totalGen || 0)} total`),
+              h('div', { class: 'grow' }),
+              (b.pets || [])[0] ? h('small', { class: 'muted' }, 'best: ' + b.pets[0].name + ' ' + formatGen(b.pets[0].gen || 0)) : null,
+              h('span', { class: 'sv-caret' }, open ? '▾' : '▸')),
+            open ? h('div', { class: 'sv-list' }, pets.length ? pets.map(p => petRow({ ...p, base: b }, false)) : h('div', { class: 'muted' }, 'No pets in this base.')) : null);
+        })));
+};
+
 PAGES.delivery = async root => {
   const cfg = S.settings.delivery;
   if (!DV.data) { DV.data = { deliveries: [], jobs: [] }; M.call('delivery:list').then(r => { DV.data = r; if (S.page === 'delivery') render(); }); }

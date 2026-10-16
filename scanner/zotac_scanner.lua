@@ -5,6 +5,7 @@ if game.PlaceId ~= 109983668079237 then return end
 local ZOTAC_PORT  = 47321
 local ZOTAC_TOKEN = "PASTE_AGENT_TOKEN"
 local AUTO_SECONDS = 30
+local SCAN_SERVER = true
 
 local Players     = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
@@ -117,21 +118,62 @@ local function nearestOverhead(overheads, name, pos, used)
     return best
 end
 
-local cachedPlot, cachedTable
-local function plotAnimalList(plotName)
-    if cachedPlot == plotName and cachedTable and type(cachedTable.AnimalList) == "table" then return cachedTable.AnimalList end
-    if not getgc then return nil end
+local plotCacheMap, plotCacheAt = nil, 0
+local function plotCaches()
+    if plotCacheMap and os.clock() - plotCacheAt < 20 then return plotCacheMap end
+    plotCacheMap, plotCacheAt = {}, os.clock()
+    if not getgc then return plotCacheMap end
     local ok, gc = pcall(getgc, true)
-    if not ok then return nil end
+    if not ok then return plotCacheMap end
     for _, v in ipairs(gc) do
         if type(v) == "table" then
             local oi, idx = pcall(rawget, v, "Index")
-            if oi and idx == plotName then
+            if oi and type(idx) == "string" then
                 local oc, ct = pcall(rawget, v, "CacheTable")
-                if oc and type(ct) == "table" and type(ct.AnimalList) == "table" then
-                    cachedPlot, cachedTable = plotName, ct
-                    return ct.AnimalList
+                if oc and type(ct) == "table" and not plotCacheMap[idx] then plotCacheMap[idx] = ct end
+            end
+        end
+    end
+    return plotCacheMap
+end
+local function plotAnimalList(plotName)
+    local ct = plotCaches()[plotName]
+    if not ct then return nil end
+    local ok, list = pcall(function() return ct.AnimalList end)
+    return ok and type(list) == "table" and list or nil
+end
+
+local function ownerInfo(plot)
+    local ct = plotCaches()[plot.Name]
+    if ct then
+        local ok, owner = pcall(function() return ct.Owner end)
+        if ok and owner ~= nil then
+            local pl
+            if typeof(owner) == "Instance" and owner:IsA("Player") then pl = owner
+            elseif type(owner) == "number" then pl = Players:GetPlayerByUserId(owner)
+            elseif type(owner) == "string" then pl = Players:FindFirstChild(owner)
+            elseif type(owner) == "table" then
+                local id = rawget(owner, "UserId") or rawget(owner, "userId")
+                local nm = rawget(owner, "Name") or rawget(owner, "name")
+                pl = (type(id) == "number" and Players:GetPlayerByUserId(id)) or (type(nm) == "string" and Players:FindFirstChild(nm)) or nil
+                if not pl and nm then return tostring(nm), tostring(nm), id end
+            end
+            if pl then return pl.Name, pl.DisplayName, pl.UserId end
+        end
+    end
+    local sign = plot:FindFirstChild("PlotSign")
+    for _, d in ipairs(sign and sign:GetDescendants() or {}) do
+        if d:IsA("TextLabel") then
+            if d.Text == "YOUR BASE" then
+                local gui = d:FindFirstAncestorWhichIsA("LayerCollector")
+                if gui and gui.Enabled then return LP.Name, LP.DisplayName, LP.UserId end
+            end
+            local who = stripTags(d.Text):match("^(.-)'s [Bb]ase$")
+            if who and who ~= "" then
+                for _, pl in ipairs(Players:GetPlayers()) do
+                    if pl.DisplayName == who or pl.Name == who then return pl.Name, pl.DisplayName, pl.UserId end
                 end
+                return who, who, nil
             end
         end
     end
@@ -407,15 +449,7 @@ end
 local modelsSent = {}
 local modelsOut = nil
 
-local function scan()
-    local plot = findMyPlot()
-    if not plot then
-        local plots = workspace:FindFirstChild("Plots")
-        return nil, ("Base not found (plots loaded: %d, getgc: %s) - stand in your base and run again")
-            :format(plots and #plots:GetChildren() or 0, getgc and "yes" or "no")
-    end
-    local overheads, used = readOverheads(), {}
-
+local function readPlot(plot, overheads, used, withModels)
     local dataByName = {}
     local animals = plotAnimalList(plot.Name)
     if animals then
@@ -428,7 +462,6 @@ local function scan()
     end
 
     local pets = {}
-    modelsOut = nil
     for _, c in ipairs(plot:GetChildren()) do
         if isPet(c) then
             local o = nearestOverhead(overheads, c.Name, c:GetPivot().Position, used)
@@ -442,7 +475,7 @@ local function scan()
             cache = cache and cache:FindFirstChild("AssetCache")
             local base = cache and cache:FindFirstChild(c.Name)
             local key = c.Name .. "|" .. (base and "None" or tostring(mutation))
-            if not modelsSent[key] then
+            if withModels and not modelsSent[key] then
                 local okM, m = pcall(serializeModel, base or c, base and c or nil)
                 if okM and #m.parts > 0 then
                     modelsOut = modelsOut or {}
@@ -463,15 +496,27 @@ local function scan()
         end
     end
     table.sort(pets, function(x, y) return (x.gen or 0) > (y.gen or 0) end)
+    return pets, animals
+end
 
+local function scan()
+    local plot = findMyPlot()
+    if not plot then
+        local plots = workspace:FindFirstChild("Plots")
+        return nil, ("Base not found (plots loaded: %d, getgc: %s) - stand in your base and run again")
+            :format(plots and #plots:GetChildren() or 0, getgc and "yes" or "no")
+    end
+    local overheads = readOverheads()
+    modelsOut = nil
+    local pets, animals = readPlot(plot, overheads, {}, true)
     return {username = LP.Name, userId = LP.UserId, displayName = LP.DisplayName, scannedAt = os.time(), pets = pets, traitsKnown = animals ~= nil or #overheads > 0}
 end
 
 local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request
-local function send(payload)
+local function post(path, payload)
     if not httpRequest or ZOTAC_TOKEN == "" or ZOTAC_TOKEN == "PASTE_AGENT_TOKEN" then return false, "no token / no request()" end
     local ok, res = pcall(httpRequest, {
-        Url = "http://127.0.0.1:" .. ZOTAC_PORT .. "/scanner/import",
+        Url = "http://127.0.0.1:" .. ZOTAC_PORT .. path,
         Method = "POST",
         Headers = {["Content-Type"] = "application/json", ["X-Zotac-Token"] = ZOTAC_TOKEN},
         Body = HttpService:JSONEncode(payload),
@@ -480,6 +525,7 @@ local function send(payload)
     if res.StatusCode ~= 200 then return false, "HTTP " .. tostring(res.StatusCode) .. " " .. tostring(res.Body) end
     return true, res.Body
 end
+local function send(payload) return post("/scanner/import", payload) end
 
 local function signature(data)
     local parts = {}
@@ -524,6 +570,39 @@ local function runOnce(first)
     end
 end
 
+local function scanServer()
+    local plots = workspace:FindFirstChild("Plots")
+    if not plots then return nil end
+    local overheads, used = readOverheads(), {}
+    local mine = ownPlotName and plots:FindFirstChild(ownPlotName)
+    local bases = {}
+    for _, plot in ipairs(plots:GetChildren()) do
+        local okR, pets = pcall(readPlot, plot, overheads, used, false)
+        if not okR or type(pets) ~= "table" then pets = {} end
+        local name, display, uid = ownerInfo(plot)
+        if name or #pets > 0 then
+            local total = 0
+            for _, p in ipairs(pets) do total += (p.gen or 0) end
+            table.insert(bases, {plot = plot.Name, owner = name, displayName = display, userId = uid, mine = plot == mine or uid == LP.UserId, pets = pets, totalGen = total})
+        end
+    end
+    table.sort(bases, function(a, b) return a.totalGen > b.totalGen end)
+    return {jobId = game.JobId, placeId = game.PlaceId, by = LP.Name, players = #Players:GetPlayers(), scannedAt = os.time(), bases = bases}
+end
+
+local lastServerSig, lastServerAt = nil, 0
+local function runServer()
+    if not SCAN_SERVER then return end
+    local data = scanServer()
+    if not data then return end
+    local parts = {}
+    for _, b in ipairs(data.bases) do table.insert(parts, b.plot .. "=" .. tostring(b.owner) .. ":" .. signature(b)) end
+    local sig = table.concat(parts, "#")
+    if sig == lastServerSig and os.clock() - lastServerAt < 120 then return end
+    local ok = post("/scanner/server", data)
+    if ok then lastServerSig, lastServerAt = sig, os.clock() end
+end
+
 if not game:IsLoaded() then game.Loaded:Wait() end
 task.wait(3)
 heartbeat()
@@ -533,6 +612,7 @@ for _ = 1, 10 do
     task.wait(3)
 end
 runOnce(true)
+pcall(runServer)
 task.spawn(function()
     local t = 0
     while running do
@@ -540,6 +620,6 @@ task.spawn(function()
         if not running then break end
         heartbeat()
         t += 30
-        if AUTO_SECONDS > 0 and t >= AUTO_SECONDS then t = 0; pcall(runOnce, false) end
+        if AUTO_SECONDS > 0 and t >= AUTO_SECONDS then t = 0; pcall(runOnce, false); pcall(runServer) end
     end
 end)

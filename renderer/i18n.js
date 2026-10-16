@@ -2,7 +2,7 @@
 const STRINGS = {
   'sec.listing': 'LISTING', 'sec.market': 'MARKET', 'sec.account': 'ACCOUNT', 'sec.system': 'SYSTEM',
   autolist: 'Auto List', listings: 'Listings', templates: 'Templates', accounts: 'Roblox Accounts', sales: 'Sales History',
-  searcher: 'Searcher', orders: 'Orders', chat: 'Chat',
+  searcher: 'Searcher', server: 'Server Scan', orders: 'Orders', chat: 'Chat',
   account: 'Account', wallet: 'Wallet', analytics: 'Analytics', reviews: 'Reviews', notifications: 'Notifications', delivery: 'Auto Delivery', proof: 'Video Proof',
   admin: 'Admin', settings: 'Settings',
   online: 'Online', offline: 'Offline', shopVisible: 'Shop Visible', notLogged: 'Not logged in', connected: 'Connected', disconnected: 'Disconnected',
@@ -14,6 +14,7 @@ const STRINGS = {
   'accounts.sub': 'Your Roblox accounts, their pets and the money they made.',
   'sales.sub': 'Every completed sale, from Eldorado and marked manually.',
   'searcher.sub': 'Search the Eldorado marketplace with filters.',
+  'server.sub': 'Every base in the Roblox server your scanner is in.',
   'orders.sub': 'Sold orders with status & rating.',
   'chat.sub': 'Eldorado messaging, inside the app.',
   'account.sub': 'Your Eldorado account and connection.',

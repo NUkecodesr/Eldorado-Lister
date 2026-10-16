@@ -7,7 +7,7 @@ const S = {
 
 const NAV = [
   ['sec.listing', ['autolist', 'listings', 'templates', 'accounts', 'sales']],
-  ['sec.market', ['searcher', 'orders', 'chat']],
+  ['sec.market', ['searcher', 'server', 'orders', 'chat']],
   ['sec.account', ['account', 'wallet', 'analytics', 'reviews', 'notifications']],
   ['sec.system', ['delivery', 'proof', 'settings']]
 ];
@@ -97,7 +97,8 @@ const LIVE = {
   local: {
     autolist: () => refreshData(), accounts: () => refreshData(), sales: () => refreshData(), templates: () => refreshData(),
     delivery: async () => { DV.data = await M.call('delivery:list'); },
-    proof: async () => { if (!VP.rec) VP.list = await M.call('proof:list'); }
+    proof: async () => { if (!VP.rec) VP.list = await M.call('proof:list'); },
+    server: async () => { SV.scans = await M.call('server:scans'); }
   },
   remote: {
     listings: async () => {
@@ -149,6 +150,7 @@ function wire() {
   M.on('log', e => { S.logs.push(e); if (S.logs.length > 1500) S.logs.shift(); const el = $('#al-log'); if (el && /\[AutoList\]/.test(e.msg)) { el.appendChild(h('div', { class: 'l-' + e.level }, `${new Date(e.t).toLocaleTimeString()}  ${e.msg}`)); el.scrollTop = el.scrollHeight; } });
   M.on('autolist:progress', p => { S.listerProgress = p; S.listerRunning = !!p && p.done < p.total; if (!S.listerRunning) refreshData().then(soft); else if (S.page === 'autolist') soft(); });
   M.on('repricer:done', () => { if (S.page === 'listings') soft(); });
+  M.on('server:scan', () => { if (S.page === 'server') liveTick('local', true); });
   M.on('sale', o => { toast('Sale: ' + (o && (o.title || o.id) || 'new order'), 'good', 8000); liveNow(); });
   M.on('dispute', o => toast('Dispute opened on order ' + (o && o.id || ''), 'error', 10000));
   M.on('notification', () => { S.unread++; renderNav(); liveNow(); });

@@ -2,7 +2,7 @@
 // the in-game delivery agent. Both are gated by per-install tokens.
 const http = require('http');
 
-function startLocalServer({ store, bridge, delivery, importScan, onCookies, onAgentClosing }) {
+function startLocalServer({ store, bridge, delivery, importScan, onServerScan, onCookies, onAgentClosing }) {
   const port = store.get('settings').localPort || 47321;
   const server = http.createServer(async (req, res) => {
     const send = (code, obj) => {
@@ -36,6 +36,15 @@ function startLocalServer({ store, bridge, delivery, importScan, onCookies, onAg
         if (token !== s.agentToken) return send(401, { error: 'bad token' });
         if (!body || !Array.isArray(body.pets)) return send(400, { error: 'pets[] missing' });
         return send(200, { ok: true, ...importScan(body) });
+      }
+
+      // Server scan (in-game script): every base in the Roblox server the scanner is in. Read only,
+      // kept for the Server Scan page, never mixed into your own pets.
+      if (url.pathname === '/scanner/server' && req.method === 'POST') {
+        if (token !== s.agentToken) return send(401, { error: 'bad token' });
+        if (!body || !Array.isArray(body.bases)) return send(400, { error: 'bases[] missing' });
+        onServerScan && onServerScan(body);
+        return send(200, { ok: true, bases: body.bases.length });
       }
 
       if (url.pathname.startsWith('/agent/')) {

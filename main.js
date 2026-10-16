@@ -40,6 +40,15 @@ let store, bridge, eld, lister, repricer, watcher, delivery, launcher, art, wiki
 const proofDir = () => { const d = path.join(app.getPath('userData'), 'proofs'); fs.mkdirSync(d, { recursive: true }); return d; };
 
 const send = (ch, payload) => { if (win && !win.isDestroyed()) win.webContents.send(ch, payload); };
+// latest scan per Roblox server (job id), newest 5 kept, in memory only
+const serverScans = {};
+function saveServerScan(d) {
+  const id = String(d.jobId || d.by || 'server');
+  serverScans[id] = { ...d, jobId: id, receivedAt: Date.now() };
+  const ids = Object.keys(serverScans).sort((a, b) => serverScans[b].receivedAt - serverScans[a].receivedAt);
+  for (const old of ids.slice(5)) delete serverScans[old];
+  send('server:scan', { jobId: id });
+}
 const updateHooks = {
   log: msg => store.log('info', msg),
   onDone: sha => { if (sha) store.patchSettings({ autoUpdate: { installedSha: sha } }); }
@@ -149,7 +158,7 @@ function wire() {
   ipcMain.on('bridge:event', (_e, { type, payload }) => { if (type === 'talk:message') delivery.onMessage(payload); });
 
   try { syncAutoexec(); } catch (e) { store.log('warn', '[Autoexec] ' + e.message); }
-  startLocalServer({ store, bridge, delivery, onAgentClosing: acc => launcher.closeGame(acc), importScan: data => { const r = importPets(data, null, { replace: true }); store.log('info', `[Scanner] ${data && data.username}: ${r.added} pets synced`); return r; }, onCookies: () => { send('auth:changed'); afterLogin(); } });
+  startLocalServer({ store, bridge, delivery, onServerScan: saveServerScan, onAgentClosing: acc => launcher.closeGame(acc), importScan: data => { const r = importPets(data, null, { replace: true }); store.log('info', `[Scanner] ${data && data.username}: ${r.added} pets synced`); return r; }, onCookies: () => { send('auth:changed'); afterLogin(); } });
 }
 
 async function afterLogin() {
@@ -319,6 +328,7 @@ function ipc() {
 
   // pets
   handle('pets:list', () => store.get('pets'));
+  handle('server:scans', () => Object.values(serverScans).sort((a, b) => b.receivedAt - a.receivedAt));
   handle('pets:import', (json, accountId) => importPets(json, accountId));
   handle('scanner:script', which => scannerScript(which));
   handle('art:for', pet => artFor(pet, (store.get('settings').autolist || {}).imageFolder));
