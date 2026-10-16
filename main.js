@@ -154,6 +154,8 @@ function wire() {
   delivery.on('job', j => send('delivery:job', j));
   delivery.on('petsChanged', () => send('pets:changed'));
   delivery.on('message', m => send('talk:message', m));
+  // public picture URL of a brainrot (SAB wiki) for Discord cards
+  delivery.petImageUrl = async name => ((await wiki.index()) || {})[sab.norm(name)] || null;
   delivery.on('proof', p => send('proof', p));
   ipcMain.on('bridge:event', (_e, { type, payload }) => { if (type === 'talk:message') delivery.onMessage(payload); });
 

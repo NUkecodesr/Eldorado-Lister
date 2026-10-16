@@ -321,30 +321,53 @@ class Delivery extends EventEmitter {
     return true;
   }
 
-  // Discord webhook with the whole story of a delivery: outcome, why, what was bought, who, how long
-  report(d, outcome, reason) {
+  // Discord card for a finished delivery (same layout as Meowl's sales channel): big status,
+  // the pet with its picture, price · quantity · time, the reason when it failed, and a
+  // running total for today in the footer.
+  report(d, outcome, reason) { this.reportCard(d, outcome, reason).catch(e => this.log('warn', 'Discord card: ' + e.message)); }
+  async reportCard(d, outcome, reason) {
     const pets = this.store.get('pets').filter(p => d.petIds.includes(p.id));
     const fmtGen = n => { n = Number(n) || 0; for (const [v, u] of [[1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'K']]) if (n >= v) return +(n / v).toFixed(2) + u + '/s'; return n + '/s'; };
-    const items = pets.map(p => `• **${p.mutation && !/^(none|normal)$/i.test(p.mutation) ? p.mutation + ' ' : ''}${p.name}** — ${fmtGen(p.gen)}${(p.traits || []).length ? ' · ' + p.traits.join(', ') : ''}`).join('\n') || (d.title || '—');
+    const MUT = { gold: '🟨', diamond: '💎', rainbow: '🌈', lava: '🌋', bloodrot: '🩸', celestial: '🌌', candy: '🍬', galaxy: '🌌', yinyang: '☯️', radioactive: '☢️', cursed: '😈', none: '🧊', normal: '🧊' };
+    const mutEmoji = m => MUT[String(m || 'none').toLowerCase().replace(/[^a-z]/g, '')] || '🔷';
     const accounts = [...new Set(pets.map(p => (this.store.get('accounts').find(a => a.id === p.accountId) || {}).username).filter(Boolean))];
     const price = d.price != null ? d.price : pets.reduce((s, p) => s + (Number(p.price) || 0), 0);
-    const secs = Math.round(((d.finishedAt || Date.now()) - (d.confirmedAt || d.createdAt)) / 1000);
-    const style = { done: ['✅ Delivered', 0x22c55e], cancelled: ['🛑 Delivery failed — order cancelled', 0xef4444], failed: ['❌ Delivery failed', 0xef4444], manual: ['⚠️ Delivery failed — needs you', 0xf59e0b] }[outcome];
-    const fields = [
-      { name: 'Bought', value: items.slice(0, 1000), inline: false },
-      { name: 'Price', value: price ? '$' + Number(price).toFixed(2) : '—', inline: true },
-      { name: 'Eldorado buyer', value: String(d.buyer || '—'), inline: true },
-      { name: 'Roblox', value: d.username ? (d.robloxId ? `[@${d.username}](https://www.roblox.com/users/${d.robloxId}/profile)` : '@' + d.username) : '—', inline: true },
-      { name: 'From account', value: accounts.map(a => '@' + a).join(', ') || '—', inline: true },
-      { name: 'Attempts', value: String((d.attempts || 0) + (outcome === 'done' ? 1 : 0)), inline: true },
-      { name: 'Time', value: secs >= 60 ? Math.floor(secs / 60) + 'm ' + (secs % 60) + 's' : secs + 's', inline: true }
+    const secs = Math.max(0, Math.round(((d.finishedAt || Date.now()) - (d.createdAt || Date.now())) / 1000));
+    const dur = secs >= 60 ? Math.floor(secs / 60) + 'm ' + (secs % 60) + 's' : secs + 's';
+    const style = { done: ['🟢 DELIVERED', 0x22c55e], cancelled: ['🟠 CANCELLED', 0xf59e0b], failed: ['🔴 FAILED', 0xef4444], manual: ['🔴 FAILED · NEEDS YOU', 0xef4444] }[outcome] || ['⚪ ' + String(outcome).toUpperCase(), 0x888888];
+
+    const petLines = pets.length ? pets.map(p => {
+      const mut = p.mutation && !/^(none|normal)$/i.test(p.mutation) ? p.mutation : '';
+      return `${mutEmoji(p.mutation)} **${p.name}**\n-# ${[fmtGen(p.gen), mut, (p.traits || []).join(', ')].filter(Boolean).join(' · ')}`;
+    }).join('\n') : `📦 **${d.title || 'Order'}**`;
+    const qty = Math.max(1, pets.length || 1);
+    const lines = [
+      `## ${style[0]}${d.sim ? '  ·  TEST' : ''}`,
+      petLines,
+      '',
+      `🟡 **$${Number(price || 0).toFixed(2)}**　📦 **×${qty}**　⏱️ **${dur}**`
     ];
-    if (reason) fields.push({ name: 'Why', value: String(reason).slice(0, 1000), inline: false });
-    fields.push({ name: 'Order', value: '`' + d.orderId + '`', inline: false });
+    if (reason && outcome !== 'done') lines.push('', `⚠️ **Reason** — ${String(reason).slice(0, 400)}`);
+    const who = [d.buyer ? '👤 ' + d.buyer : null, d.username ? (d.robloxId ? `🎮 [@${d.username}](https://www.roblox.com/users/${d.robloxId}/profile)` : '🎮 @' + d.username) : null,
+      accounts.length ? '📤 ' + accounts.map(a => '@' + a).join(', ') : null, (d.attempts || 0) > (outcome === 'done' ? 0 : 1) ? `🔁 ${(d.attempts || 0) + (outcome === 'done' ? 1 : 0)} tries` : null].filter(Boolean);
+    lines.push('', '-# ' + [...who, '`' + d.orderId + '`'].join(' · '));
+
+    // today's totals (local day): delivered, failed, money from delivered orders
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    let ok = 0, bad = 0, sum = 0;
+    for (const x of Object.values(this.map)) {
+      if (!x || !!x.sim !== !!d.sim || !x.finishedAt || x.finishedAt < start.getTime()) continue;
+      if (x.state === 'done') { ok++; sum += Number(x.price) || 0; } else if (x.state === 'cancelled' || x.state === 'manual') bad++;
+    }
+    if (outcome === 'done' && d.state !== 'done') { ok++; sum += Number(price) || 0; }
+
+    let thumb = null;
+    try { if (pets[0] && this.petImageUrl) thumb = await this.petImageUrl(pets[0].name); } catch { /* no picture */ }
     discord(this.store, {
-      title: (d.sim ? '[TEST] ' : '') + style[0], color: style[1], ping: outcome !== 'done' && !d.sim,
-      description: d.sim ? 'Simulated order (no Eldorado order behind it)' : undefined,
-      fields, thumbnail: d.avatar || undefined
+      username: 'Zotac Auto Delivery', color: style[1], ping: outcome !== 'done' && !d.sim,
+      description: lines.join('\n').slice(0, 4000),
+      thumbnail: thumb || d.avatar || undefined,
+      footer: `Today: ${ok} ✅ · ${bad} ❌ · $${sum.toFixed(2)} · Zotac Lister`
     });
   }
 

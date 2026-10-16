@@ -5,13 +5,13 @@ const { round2 } = require('./eldorado');
 const { rid } = require('./store');
 
 // --- Discord ------------------------------------------------------------
-async function discord(store, { title, description, color = 0xf5b301, fields = [], ping = false, thumbnail }) {
+async function discord(store, { title, description, color = 0xf5b301, fields = [], ping = false, thumbnail, footer, username }) {
   const s = store.get('settings');
   if (!s.webhookUrl) return false;
   const body = {
-    username: 'Zotac Lister',
+    username: username || 'Zotac Lister',
     content: ping && s.webhookPing ? (/^\d+$/.test(s.webhookPing) ? `<@${s.webhookPing}>` : s.webhookPing) : undefined,
-    embeds: [{ title, description, color, fields, thumbnail: thumbnail ? { url: thumbnail } : undefined, timestamp: new Date().toISOString(), footer: { text: 'Zotac Lister' } }]
+    embeds: [{ title, description, color, fields, thumbnail: thumbnail ? { url: thumbnail } : undefined, timestamp: new Date().toISOString(), footer: { text: footer || 'Zotac Lister' } }]
   };
   try {
     const r = await fetch(s.webhookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
