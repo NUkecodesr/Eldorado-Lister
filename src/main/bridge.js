@@ -105,7 +105,8 @@ class Bridge extends EventEmitter {
   async request(method, p, opts = {}) {
     await this.start();
     const args = { method, path: p, query: opts.query, body: opts.body, form: opts.form };
-    const run = () => this.win.webContents.executeJavaScript(`(${pageFetch.toString()})(${JSON.stringify(args)})`, true);
+    const exec = () => this.win.webContents.executeJavaScript(`(${pageFetch.toString()})(${JSON.stringify(args)})`, true);
+    const run = () => Promise.race([exec(), new Promise(res => setTimeout(() => res({ ok: false, status: 0, data: 'Eldorado did not answer in 30 s' }), 30000))]);
     let res = await run();
     if (res.status === 401 && !opts.noRefresh) {
       const ref = await this.win.webContents.executeJavaScript(

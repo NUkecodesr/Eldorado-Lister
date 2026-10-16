@@ -130,8 +130,8 @@ class Eldorado {
       const r = await this.myOffers({ state, page, pageSize: 50 });
       const rows = listOf(r);
       all.push(...rows);
-      const total = r && (r.totalPages || (r.recordCount && Math.ceil(r.recordCount / 100)));
-      if (!rows.length || (total && page >= total) || rows.length < 100) break;
+      const total = r && (r.totalPages || (r.recordCount && Math.ceil(r.recordCount / 50)));
+      if (!rows.length || (total && page >= total) || rows.length < 50) break;
     }
     return all.map(x => x.offer || x);
   }

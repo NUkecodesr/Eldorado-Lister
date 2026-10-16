@@ -3,7 +3,11 @@ const PAGES = {};
 const DELIVERY_TIMES = ['Instant', 'Minute20', 'Hour1', 'Hour2', 'Hour3', 'Hour5', 'Hour8', 'Hour12', 'Day1', 'Day2', 'Day3'];
 const GEN_BUCKETS = [['', 'Any'], ['0-99999-ks', '1-999.99 K/s'], ['1-2499-ms', '1-24.99 M/s'], ['25-4999-ms', '25-49.99 M/s'], ['50-9999-ms', '50-99.99 M/s'], ['100-24999-ms', '100-249.99 M/s'], ['250-49999-ms', '250-499.99 M/s'], ['500-74999-ms', '500-749.99 M/s'], ['750-99999-ms', '750-999.99 M/s'], ['1-499-bs', '1-4.99 B/s'], ['5-999-bs', '5-9.99 B/s'], ['10-1999-bs', '10-19.99 B/s'], ['20-plus-bs', '20+ B/s']];
 const offerUrl = o => `https://www.eldorado.gg/${o.gameSeoAlias || S.settings.game.seoAlias}/oi/${o.id}`;
-const offerImg = o => o.mainOfferImage && o.mainOfferImage.smallImage ? `https://assetsdelivery.eldorado.gg/v7/_offers-v2_/${o.mainOfferImage.smallImage}?w=58&q=40` : null;
+const offerImg = o => {
+  const m = o.mainOfferImage || {};
+  const f = m.largeImage || m.originalSizeImage || m.smallImage;
+  return f ? `https://assetsdelivery.eldorado.gg/v7/_offers-v2_/${f}?w=480&q=90` : null;
+};
 const acctName = id => (S.accounts.find(a => a.id === id) || {}).username || '—';
 const mutPill = m => !m || /^none$/i.test(m) ? h('span', { class: 'muted' }, 'None') : h('span', { class: 'pill gold' }, m);
 const statusPill = s => h('span', { class: 'pill ' + ({ available: 'info', listed: 'gold', sold: 'good' }[s] || '') }, s || '—');
@@ -486,18 +490,25 @@ function mutationNames() {
 }
 
 // ============================== LISTINGS ==================================
-const LS = { state: 'Active', data: null, loading: false, q: '', pct: 10, dir: '-' };
+const LS = { state: 'Active', data: null, loading: false, q: '', pct: 10, dir: '-', err: null, at: 0, seq: 0 };
 PAGES.listings = async root => {
   const rp = S.settings.repricer;
   const blocked = rp.blockedTraits || [];
   const load = async () => {
+    const seq = ++LS.seq;
     LS.loading = true; render();
     const states = ['Active', 'Paused', 'Expired'];
-    const res = await Promise.all(states.map(st => run(() => M.call('eld:myOffers', st)).then(r => r || [])));
-    LS.data = {}; states.forEach((st, i) => LS.data[st] = res[i]);
+    const res = await Promise.allSettled(states.map(st => M.call('eld:myOffers', st)));
+    if (seq !== LS.seq) return;   // a newer Refresh took over
+    const d = {}, errs = [];
+    states.forEach((st, i) => {
+      if (res[i].status === 'fulfilled') d[st] = res[i].value || [];
+      else { d[st] = (LS.data && LS.data[st]) || []; errs.push(`${st === 'Expired' ? 'Closed' : st}: ${(res[i].reason && res[i].reason.message) || 'failed'}`); }
+    });
+    LS.data = d; LS.err = errs.length ? errs.join('\n') : null; LS.at = Date.now();
     LS.loading = false; render();
   };
-  if (!LS.data && !LS.loading && S.me) load();
+  if (S.me && !LS.loading && (!LS.data || (LS.err && Date.now() - LS.at > 15000))) load();
   const D = LS.data || { Active: [], Paused: [], Expired: [] };
   const act = async (o, a, arg, quiet) => { await run(() => M.call('eld:offerAction', o.id, a, arg), quiet ? null : `${a} ok`); if (!quiet) load(); };
   const attr = (o, re) => { const a = (o.attributes || []).find(x => re.test(x.id)); return a ? (a.type === 'Numeric' ? a.value : a.value && a.value.name) : null; };
@@ -592,8 +603,11 @@ PAGES.listings = async root => {
         h('button', { class: 'btn sm', onclick: manageTraits }, `Manage traits (${blocked.length})`),
         h('small', { class: 'muted' }, 'pets with a blocked trait won\'t be repriced'),
         h('div', { class: 'grow' }), h('small', { class: 'muted' }, 'Last run: ' + ago(S.info && S.info.repricerLast))),
+      LS.err ? h('div', { class: 'card x-lerr' }, h('b', null, 'Some listings could not be loaded'), h('pre', null, LS.err),
+        h('button', { class: 'btn sm', onclick: load }, 'Try again')) : null,
       h('input', { class: 'x-search', type: 'search', placeholder: 'Search…', value: LS.q, oninput: e => { LS.q = e.target.value; clearTimeout(LS.qt); LS.qt = setTimeout(render, 250); } }),
-      rows.length ? h('div', { class: 'x-lgrid' }, rows.map(card)) : h('div', { class: 'x-empty' }, LS.loading ? 'Loading…' : 'No offers in this state.'),
+      rows.length ? h('div', { class: 'x-lgrid' }, rows.map(card)) : h('div', { class: 'x-empty' }, LS.loading || !LS.data ? 'Loading…' : 'No offers in this state.'),
+      LS.at ? h('small', { class: 'muted' }, 'Updated ' + ago(LS.at)) : null,
       h('details', { class: 'x-fold' }, h('summary', null, 'Repricer settings & log'),
         h('div', { class: 'card', style: { marginTop: '10px' } },
           h('div', { class: 'grid g2' }, h('label', { class: 'f' }, 'Floor (% of first price)', num(rp.floorPct, v => saveSettings({ repricer: { floorPct: v } })))),

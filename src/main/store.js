@@ -34,7 +34,7 @@ const DEFAULTS = {
     notifyDisputes: true,
     notifyMessages: false,
     autoMessage: { enabled: false, text: 'Hi {buyer}! Thanks for buying {item}. Please send your Roblox username and stay online — delivery is coming right up.' },
-    autoUpdate: { enabled: false, repo: '' },
+    autoUpdate: { enabled: true, repo: 'NUkecodesr/Eldorado-Lister', installedSha: '' },
     pollSec: 45,
     game: {
       gameId: '259',

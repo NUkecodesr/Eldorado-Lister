@@ -717,12 +717,17 @@ PAGES.settings = async root => {
     mxSec('SYSTEM'),
     h('div', { class: 'grid g2' },
       mxCard('refresh', 'Updates', 'Current version v' + (S.info.version || ''), null,
-        setting('Update automatically', 'Checks GitHub releases on start', sw(s.autoUpdate.enabled, v => saveSettings({ autoUpdate: { enabled: v } }))),
-        h('label', { class: 'f' }, 'Release repo (owner/name)', txt(s.autoUpdate.repo, v => saveSettings({ autoUpdate: { repo: v.trim() } }))),
+        setting('Update automatically', 'Checks GitHub on start and installs new versions, then restarts', sw(s.autoUpdate.enabled, v => saveSettings({ autoUpdate: { enabled: v } }))),
+        h('label', { class: 'f' }, 'GitHub repo (owner/name or link)', txt(s.autoUpdate.repo, v => { UP.info = null; saveSettings({ autoUpdate: { repo: v.trim() } }).then(render); }, { placeholder: 'NUkecodesr/Eldorado-Lister' })),
         h('div', { class: 'row', style: { marginTop: '10px' } },
           h('button', { class: 'btn primary', onclick: async () => { UP.info = await run(() => M.call('update:check')); render(); } }, 'Check for Updates'),
-          UP.info && UP.info.newer ? h('button', { class: 'btn primary', onclick: () => run(() => M.call('update:install', UP.info)) }, `Install ${UP.info.latest}`) : null,
-          h('span', { class: 'muted' }, UP.info ? (UP.info.error || (UP.info.newer ? `New version ${UP.info.latest}` : `Up to date (${UP.info.current})`)) : ''))),
+          UP.info && UP.info.newer ? h('button', { class: 'btn primary', disabled: UP.busy, onclick: async () => {
+            UP.busy = true; render();
+            const r = await run(() => M.call('update:install', UP.info));
+            UP.busy = false;
+            if (r && r.restarting) toast('Updated, restarting…', 'good', 6000); else render();
+          } }, UP.busy ? 'Updating…' : `Install ${UP.info.latest}`) : null,
+          h('span', { class: 'muted' }, UP.info ? (UP.info.error || (UP.info.newer ? `New version ${UP.info.latest}${UP.info.notes ? ': ' + UP.info.notes.split('\n')[0].slice(0, 60) : ''}` : `Up to date (${UP.info.current}) · ${UP.info.repo}`)) : ''))),
       mxCard('people', 'Community', 'Get help, report bugs and stay up to date.', null,
         h('p', { class: 'ink2', style: { marginTop: 0 } }, 'No community link is configured in this build.'),
         h('button', { class: 'btn', disabled: true }, 'Join Discord')),

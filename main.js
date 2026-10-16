@@ -40,6 +40,10 @@ let store, bridge, eld, lister, repricer, watcher, delivery, launcher, art, wiki
 const proofDir = () => { const d = path.join(app.getPath('userData'), 'proofs'); fs.mkdirSync(d, { recursive: true }); return d; };
 
 const send = (ch, payload) => { if (win && !win.isDestroyed()) win.webContents.send(ch, payload); };
+const updateHooks = {
+  log: msg => store.log('info', msg),
+  onDone: sha => { if (sha) store.patchSettings({ autoUpdate: { installedSha: sha } }); }
+};
 
 // --- renderer round-trip (image generation runs on a canvas in the UI) ------
 const pending = new Map();
@@ -499,8 +503,8 @@ function ipc() {
   });
   handle('data:reset', () => { store.reset(); send('pets:changed'); return true; });
   handle('dialog:folder', async () => { const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'] }); return r.canceled ? null : r.filePaths[0]; });
-  handle('update:check', () => checkUpdate(store.get('settings').autoUpdate.repo));
-  handle('update:install', info => installUpdate(info));
+  handle('update:check', () => { const u = store.get('settings').autoUpdate; return checkUpdate(u.repo, u.installedSha); });
+  handle('update:install', info => installUpdate(info, updateHooks));
 
   // video proof
   handle('proof:save', (orderId, b64) => {
@@ -576,8 +580,17 @@ app.whenReady().then(async () => {
   bridge.start().then(afterLogin);
   if (SMOKE) return smoke();
   const s = store.get('settings');
-  if (s.autoUpdate.enabled && s.autoUpdate.repo) {
-    setTimeout(async () => { try { const u = await checkUpdate(s.autoUpdate.repo); if (u.newer) send('update:available', u); } catch { /* offline */ } }, 8000);
+  if (s.autoUpdate.enabled) {
+    // "Update automatically": a newer version is installed right away and the app restarts
+    setTimeout(async () => {
+      try {
+        const u = await checkUpdate(s.autoUpdate.repo, s.autoUpdate.installedSha);
+        if (u.error) return store.log('warn', '[Update] ' + u.error);
+        if (!u.newer) return;
+        send('update:available', u);
+        if (u.mode === 'source' || (u.mode === 'release' && u.asset)) { store.log('info', `[Update] installing ${u.latest}`); await installUpdate(u, updateHooks); }
+      } catch (e) { store.log('warn', '[Update] ' + e.message); }
+    }, 8000);
   }
 });
 

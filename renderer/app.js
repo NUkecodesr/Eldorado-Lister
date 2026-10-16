@@ -104,8 +104,12 @@ const LIVE = {
     listings: async () => {
       if (!LS.data || LS.loading) return;
       const states = ['Active', 'Paused', 'Expired'];
+      const seq = LS.seq;
       const res = await Promise.all(states.map(st => M.call('eld:myOffers', st).catch(() => null)));
-      if (res.every(r => r)) { const d = {}; states.forEach((st, i) => d[st] = res[i]); LS.data = d; }
+      if (seq !== LS.seq || LS.loading) return;   // a manual Refresh is running
+      const d = {}; states.forEach((st, i) => d[st] = res[i] || LS.data[st] || []);
+      LS.data = d; LS.at = Date.now();
+      if (res.every(r => r)) LS.err = null;
     },
     orders: async () => { if (OR.data && !OR.loading) OR.data = await M.call('eld:orders', { page: OR.page, pageSize: 50 }); },
     wallet: async () => {
