@@ -1,7 +1,7 @@
 {
   "name": "zotac-lister",
   "productName": "Zotac Lister",
-  "version": "1.9.9",
+  "version": "1.10.0",
   "description": "Steal a Brainrot listing tool for Eldorado.gg",
   "main": "main.js",
   "private": true,
@@ -17,7 +17,9 @@
   "build": {
     "appId": "local.zotac.lister",
     "productName": "Zotac Lister",
+    "asar": false,
     "files": [
+      "extension/**",
       "main.js",
       "preload.js",
       "bridge-preload.js",

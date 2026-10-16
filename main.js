@@ -271,7 +271,7 @@ function ipc() {
     version: app.getVersion(), bridge: bridge.state, lastOk: bridge.lastOk, talk: delivery.talkState, talkError: delivery.talkError,
     agentOnline: delivery.agentOnline(), userData: app.getPath('userData'), lister: lister.progress, listerRunning: lister.running,
     repricerLast: repricer.lastRun, watcherLast: watcher.lastPoll,
-    extensionPath: app.isPackaged ? path.join(process.resourcesPath, 'extension') : path.join(__dirname, 'extension')
+    extensionPath: fs.existsSync(path.join(__dirname, 'extension')) ? path.join(__dirname, 'extension') : path.join(process.resourcesPath, 'extension')
   }));
   handle('win', a => { if (!win) return; if (a === 'min') win.minimize(); else if (a === 'max') win.isMaximized() ? win.unmaximize() : win.maximize(); else if (a === 'close') win.close(); });
   handle('open:external', url => { if (/^https:\/\//.test(url)) shell.openExternal(url); });

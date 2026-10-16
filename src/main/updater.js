@@ -74,7 +74,9 @@ async function checkUpdate(repoSetting, installedSha) {
   if (!repo) return { error: 'Repo must look like owner/name' };
   const current = app.getVersion();
   try {
-    if (app.isPackaged) {
+    // an installer build packed into app.asar can only update through a release installer
+    const canSource = !/\.asar$/i.test(app.getAppPath());
+    if (!canSource) {
       const rel = await gh(`https://api.github.com/repos/${repo}/releases/latest`);
       if (rel) {
         const asset = (rel.assets || []).find(a => /\.exe$/i.test(a.name));
@@ -88,12 +90,12 @@ async function checkUpdate(repoSetting, installedSha) {
     // when it differs from the installed one is the zip fetched (and kept for the install).
     const sha = await latestSha(repo);
     if (!sha) return { error: `Repo ${repo} not found (or it is private)` };
-    if (installedSha && installedSha === sha) return { repo, mode: app.isPackaged ? 'page' : 'source', current, latest: current, newer: false, sha, page: `https://github.com/${repo}` };
+    if (installedSha && installedSha === sha) return { repo, mode: canSource ? 'source' : 'page', current, latest: current, newer: false, sha, page: `https://github.com/${repo}` };
     const dir = await fetchSource(repo, sha);
     let latest = current;
     try { latest = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).version || current; } catch { /* keep current */ }
     const newer = cmp(latest, current) > 0 || (!!installedSha && cmp(latest, current) >= 0);
-    return { repo, mode: app.isPackaged ? 'page' : 'source', current, latest: newer && cmp(latest, current) === 0 ? `${latest} (${sha.slice(0, 7)})` : latest,
+    return { repo, mode: canSource ? 'source' : 'page', current, latest: newer && cmp(latest, current) === 0 ? `${latest} (${sha.slice(0, 7)})` : latest,
       newer, sha, dir, notes: '', page: `https://github.com/${repo}` };
   } catch (e) {
     return { error: e.message };
@@ -135,7 +137,10 @@ async function installUpdate(info, { onDone, log } = {}) {
   if (log) log(`[Update] source updated to ${info.latest} in ${appDir}`);
   if (depsChanged) {
     if (log) log('[Update] dependencies changed, running npm install');
-    await run(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['install', '--no-audit', '--no-fund'], { cwd: appDir, shell: true });
+    // the installed app only carries runtime packages; npm must be on the PC for this step
+    const args = ['install', '--no-audit', '--no-fund', ...(app.isPackaged ? ['--omit=dev'] : [])];
+    try { await run(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, { cwd: appDir, shell: true }); }
+    catch (e) { if (log) log('[Update] npm install failed (' + e.message.slice(0, 120) + '): if the app misbehaves, download the new installer'); }
   }
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* temp */ }
   if (onDone) onDone(info.sha);
