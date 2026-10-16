@@ -1,0 +1,54 @@
+{
+  "name": "zotac-lister",
+  "productName": "Zotac Lister",
+  "version": "1.7.0",
+  "description": "Steal a Brainrot listing tool for Eldorado.gg",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "smoke": "electron . --smoke",
+    "dist": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "local.zotac.lister",
+    "productName": "Zotac Lister",
+    "files": [
+      "main.js",
+      "preload.js",
+      "bridge-preload.js",
+      "src/**",
+      "renderer/**",
+      "assets/**",
+      "scanner/**"
+    ],
+    "extraResources": [
+      {
+        "from": "extension",
+        "to": "extension"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Zotac Lister"
+    },
+    "directories": {
+      "output": "dist"
+    }
+  },
+  "dependencies": {
+    "draco3d": "^1.5.7",
+    "three": "^0.149.0"
+  }
+}

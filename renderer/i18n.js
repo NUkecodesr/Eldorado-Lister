@@ -1,0 +1,29 @@
+// UI strings (English only).
+const STRINGS = {
+  'sec.listing': 'LISTING', 'sec.market': 'MARKET', 'sec.account': 'ACCOUNT', 'sec.system': 'SYSTEM',
+  autolist: 'Auto List', listings: 'Listings', templates: 'Templates', accounts: 'Roblox Accounts', sales: 'Sales History',
+  searcher: 'Searcher', orders: 'Orders', chat: 'Chat',
+  account: 'Account', wallet: 'Wallet', analytics: 'Analytics', reviews: 'Reviews', notifications: 'Notifications', delivery: 'Auto Delivery', proof: 'Video Proof',
+  admin: 'Admin', settings: 'Settings',
+  online: 'Online', offline: 'Offline', shopVisible: 'Shop Visible', notLogged: 'Not logged in', connected: 'Connected', disconnected: 'Disconnected',
+  login: 'Login', logout: 'Logout', refresh: 'Refresh', save: 'Save', cancel: 'Cancel', delete: 'Delete', edit: 'Edit', add: 'Add', import: 'Import', export: 'Export', search: 'Search', close: 'Close',
+  start: 'Start', stop: 'Stop', price: 'Price', title: 'Title', description: 'Description', name: 'Name', mutation: 'Mutation', gen: 'Gen/s', traits: 'Traits', status: 'Status', qty: 'Qty',
+  'autolist.sub': 'Import pets, auto price them from real gen/s and list in bulk.',
+  'listings.sub': 'Your active offers on Eldorado, with auto-repricer.',
+  'templates.sub': 'Reusable title, description & price presets for Quick Fill.',
+  'accounts.sub': 'Your Roblox accounts, their pets and the money they made.',
+  'sales.sub': 'Every completed sale, from Eldorado and marked manually.',
+  'searcher.sub': 'Search the Eldorado marketplace with filters.',
+  'orders.sub': 'Sold orders with status & rating.',
+  'chat.sub': 'Eldorado messaging, inside the app.',
+  'account.sub': 'Your Eldorado account and connection.',
+  'wallet.sub': 'Balance, pending sales and transaction history.',
+  'analytics.sub': 'Performance metrics and insights.',
+  'reviews.sub': 'What buyers say about you.',
+  'notifications.sub': 'Real-time Eldorado notifications.',
+  'delivery.sub': 'Automated buyer chat & Trade Machine delivery flow.',
+  'proof.sub': 'Screen recordings of your deliveries, for disputes.',
+  'admin.sub': 'Logs, diagnostics, API console and data tools.',
+  'settings.sub': 'Webhook, auto message, updates and game config.'
+};
+function t(key) { return STRINGS[key] || key; }

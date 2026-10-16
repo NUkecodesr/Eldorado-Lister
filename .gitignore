@@ -1,0 +1,8 @@
+node_modules/
+dist/
+dist_new/
+*.7z
+*.log
+.env
+zotac-data.json
+meowl-data.json

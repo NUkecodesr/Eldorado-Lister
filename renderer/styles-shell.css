@@ -1,0 +1,24 @@
+/* Sidebar footer: user card, online state, Discord, connection rate. */
+#side-footer { gap: 6px; }
+.sf-user { display: flex; align-items: center; gap: 8px; padding: 4px 2px; cursor: pointer; min-width: 0; }
+.sf-user img, .sf-ava { width: 26px; height: 26px; border-radius: 50%; flex: 0 0 26px; object-fit: cover; border: 1px solid var(--line2); }
+.sf-ava { display: flex; align-items: center; justify-content: center; background: var(--panel2); color: var(--gold); font-weight: 800; font-size: 12px; }
+.sf-who { display: flex; flex-direction: column; min-width: 0; }
+.sf-who b { font-size: 12px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sf-who small { font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sf-status { border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 700; border: 1px solid; }
+.sf-status small { display: block; font-weight: 500; font-size: 10.5px; opacity: .8; padding-left: 14px; }
+.sf-status .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 7px; background: currentColor; }
+.sf-status.on { color: #4fdc84; background: rgba(63, 207, 114, .1); border-color: rgba(63, 207, 114, .45); }
+.sf-status.off { color: #ff6b6b; background: rgba(255, 77, 77, .08); border-color: rgba(255, 77, 77, .35); }
+.sf-discord { width: 100%; text-align: left; padding: 7px 10px; border-radius: 8px; border: 1px solid rgba(88, 101, 242, .5); background: rgba(88, 101, 242, .18); color: #c9cdff; font-weight: 700; font-size: 12px; cursor: pointer; }
+.sf-discord:hover { background: rgba(88, 101, 242, .3); }
+.sf-conn { display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; color: var(--ink2); padding: 2px 2px 0; }
+.sf-conn b { color: var(--gold); }
+.sf-conn .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; }
+.sf-conn .dot.good { background: #f2b631; } .sf-conn .dot.bad { background: #ff4d4d; }
+.sf-ver { color: var(--muted); font-size: 10px; text-align: center; }
+
+/* private text (email): blurred until hovered */
+.x-private { filter: blur(4px); transition: filter .15s; cursor: default; user-select: none; }
+.x-private:hover { filter: none; user-select: text; }

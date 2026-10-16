@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob: https:; media-src 'self' blob: file:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https:">
+  <title>Zotac Lister</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles-a.css">
+  <link rel="stylesheet" href="styles-b.css">
+  <link rel="stylesheet" href="styles-shell.css">
+</head>
+<body>
+  <div id="titlebar">
+    <div class="tb-brand"><img src="../assets/icon.png" alt=""><span>ZOTAC LISTER</span></div>
+    <div class="tb-drag"></div>
+    <div class="tb-btns">
+      <button data-win="min" title="Minimize">&#x2013;</button>
+      <button data-win="max" title="Maximize">&#x25A1;</button>
+      <button data-win="close" class="close" title="Close">&#x2715;</button>
+    </div>
+  </div>
+  <div id="shell">
+    <aside id="sidebar">
+      <div class="brand-card">
+        <img src="../assets/icon.png" alt="">
+        <div><b>Zotac</b><small>LISTER</small></div>
+      </div>
+      <nav id="nav"></nav>
+      <div id="side-footer"></div>
+    </aside>
+    <main id="main"><div id="page"></div></main>
+  </div>
+  <div id="toasts"></div>
+  <div id="modal-root"></div>
+  <script src="i18n.js"></script>
+  <script src="ui.js"></script>
+  <script src="../node_modules/three/build/three.min.js"></script>
+  <script src="imagegen.js"></script>
+  <script src="model3d.js"></script>
+  <script src="pages.js"></script>
+  <script src="pages2.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
