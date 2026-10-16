@@ -131,7 +131,7 @@ async function installUpdate(info, { onDone, log } = {}) {
   const top = info.dir && fs.existsSync(info.dir) ? info.dir : await fetchSource(info.repo, info.sha);
   const tmp = path.dirname(path.dirname(top));
 
-  const deps = f => { try { const p = JSON.parse(fs.readFileSync(f, 'utf8')); return JSON.stringify([p.dependencies, p.devDependencies]); } catch { return ''; } };
+  const deps = f => { try { const p = JSON.parse(fs.readFileSync(f, 'utf8')); return JSON.stringify(app.isPackaged ? [p.dependencies] : [p.dependencies, p.devDependencies]); } catch { return ''; } };   // the installer strips devDependencies
   const depsChanged = deps(path.join(top, 'package.json')) !== deps(path.join(appDir, 'package.json'));
   copyTree(top, appDir);
   if (log) log(`[Update] source updated to ${info.latest} in ${appDir}`);
