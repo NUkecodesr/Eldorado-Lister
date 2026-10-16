@@ -49,6 +49,32 @@ async function sendImageInPage(cfg) {
   return 'sent';
 }
 
+// Injected into the eldorado.gg bridge page: the last messages of one TalkJS conversation, read
+// through the core session (the classic session has no history call).
+async function historyInPage(cfg) {
+  const s = window.__zotacTalk;
+  if (!s) throw new Error('chat listener not connected');
+  let ref = null;
+  try { ref = typeof s.conversation === 'function' ? s.conversation(cfg.conversationId) : null; } catch { ref = null; }
+  if (!ref || typeof ref.subscribeMessages !== 'function') {
+    const core = Object.values(s).find(v => v && typeof v.conversation === 'function' && typeof v.uploadImage === 'function');
+    ref = core ? core.conversation(cfg.conversationId) : null;
+  }
+  if (!ref || typeof ref.subscribeMessages !== 'function') throw new Error('this TalkJS version cannot read history');
+  const list = await new Promise((resolve, reject) => {
+    let sub = null, done = false;
+    const finish = (fn, v) => { if (done) return; done = true; clearTimeout(timer); try { sub && sub.unsubscribe(); } catch { /* gone */ } fn(v); };
+    const timer = setTimeout(() => finish(reject, new Error('TalkJS did not answer in 15 s')), 15000);
+    sub = ref.subscribeMessages(msgs => { if (msgs) finish(resolve, msgs); });
+    if (sub && sub.state && sub.state.type === 'error') finish(reject, new Error('no access to this conversation'));
+  });
+  const text = m => m.plaintext || (Array.isArray(m.content) ? m.content.map(b => b.text || (b.type === 'file' ? '[picture]' : '')).join(' ') : '') || '';
+  return list.slice(0, 200).map(m => ({
+    id: m.id, ts: m.createdAt, body: text(m), system: m.type === 'SystemMessage' || !m.sender,
+    isByMe: !!(m.sender && String(m.sender.id) === String(cfg.userId)), sender: m.sender ? m.sender.name || m.sender.id : null
+  })).reverse();
+}
+
 function decodeJwt(t) {
   try { return JSON.parse(Buffer.from(String(t).split('.')[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8')); } catch { return null; }
 }
@@ -122,6 +148,25 @@ class Delivery extends EventEmitter {
     }
   }
 
+  // chat history of an order (oldest first), for the Chat page
+  async conversationOf(orderId, hint) {
+    const d = this.map[orderId];
+    let id = hint || (d && d.conversationId) || null;
+    if (!id) { try { const o = await this.eld.order(orderId); id = o && (o.talkJsConversationId || (o.order && o.order.talkJsConversationId)) || null; } catch { /* next */ } }
+    if (!id) { try { const conv = await this.eld.orderConversation(orderId); id = typeof conv === 'string' ? conv : (conv && (conv.talkJsConversationId || conv.conversationId || conv.id)) || null; } catch { /* none */ } }
+    if (d && id && d.conversationId !== id) { d.conversationId = id; this.store.save(); }
+    return id;
+  }
+
+  async history(orderId, hint) {
+    if (!await this.ensureTalk()) throw new Error('Chat not connected: ' + (this.talkError || 'unknown error'));
+    const conversationId = await this.conversationOf(orderId, hint);
+    if (!conversationId) throw new Error('Eldorado gave no chat for this order');
+    const run = this.bridge.exec(`(${historyInPage.toString()})(${JSON.stringify({ conversationId, userId: this.talkUserId })})`);
+    const msgs = await Promise.race([run, new Promise((_, rej) => setTimeout(() => rej(new Error('chat did not load in 20 s')), 20000))]);
+    return { conversationId, messages: msgs || [] };
+  }
+
   // --- flow ------------------------------------------------------------
   async onSale(order, pets) {
     if ((!this.cfg.enabled && !order.sim) || this.map[order.id]) return;
@@ -142,10 +187,7 @@ class Delivery extends EventEmitter {
     }
     this.store.save();
     this.ensureTalk();
-    try {
-      const conv = await this.eld.orderConversation(order.id);
-      d.conversationId = typeof conv === 'string' ? conv : (conv && (conv.conversationId || conv.id || conv.talkJsConversationId)) || null;
-    } catch { /* resolved later from messages */ }
+    d.conversationId = await this.conversationOf(order.id, order.conversationId);
     if (!pets.length) this.log('warn', `Order ${order.id}: no listed pets matched offer — delivery will need manual pet selection`);
     await this.say(d, 'greeting');
     if (accounts.length > 1) await this.say(d, 'multiAccount');

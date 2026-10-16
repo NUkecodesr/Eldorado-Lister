@@ -29,6 +29,7 @@ function normalizeOrder(o) {
     date: o.createdDate || o.orderDate || o.created || o.date || null,
     rating: o.rating || o.review || null,
     gameId: o.gameId || offer.gameId,
+    conversationId: o.talkJsConversationId || o.conversationId || null,
     raw: o
   };
 }

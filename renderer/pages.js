@@ -1377,7 +1377,18 @@ PAGES.orders = async root => {
 };
 
 // ============================== CHAT ======================================
-const CH = { orderId: null, orders: null, filter: 'all', q: '', live: false, dl: null, edit: false };
+const CH = { orderId: null, orders: null, filter: 'all', q: '', live: false, dl: null, edit: false, hist: {}, rbx: {} };
+// loads (once per order, or again on Refresh) the full Eldorado chat of an order
+function chLoadHistory(orderId, force) {
+  const cur = CH.hist[orderId];
+  if (!orderId || (cur && !force && (cur.loading || cur.msgs || Date.now() - cur.at < 15000))) return;
+  CH.hist[orderId] = { loading: true, at: Date.now(), msgs: cur && cur.msgs };
+  const order = (CH.orders || []).find(o => o.id === orderId);
+  M.call('chat:history', orderId, order && order.conversationId)
+    .then(r => { CH.hist[orderId] = { msgs: r.messages, conversationId: r.conversationId, at: Date.now() }; })
+    .catch(e => { CH.hist[orderId] = { err: String(e && e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), at: Date.now(), msgs: cur && cur.msgs }; })
+    .finally(() => { if (S.page === 'chat' && CH.orderId === orderId) render(); });
+}
 PAGES.chat = async root => {
   if (!S.me) { root.append(xHead('Ch', 'Chat', 'Open conversations on Eldorado'), h('div', { class: 'card empty' }, 'Log in on the Account page to use chat.')); return; }
   const loadOrders = () => { CH.orders = CH.orders || []; M.call('eld:orders', { page: 1, pageSize: 40 }).then(r => { CH.orders = r.rows; render(); }).catch(() => {}); };
@@ -1396,39 +1407,56 @@ PAGES.chat = async root => {
   const am = S.settings.autoMessage || {};
   const hm = ts => ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
 
-  // messages: delivery log is authoritative; otherwise live TalkJS messages for this conversation
-  let msgs = [];
-  if (d && d.log && d.log.length) msgs = d.log.filter(l => l.out || l.in || l.err).map(l => ({ t: l.t, mine: !!l.out, err: !!l.err, text: l.out || l.in || l.err }));
-  else msgs = (S.talkLog || []).filter(m => d && d.conversationId && m.conversationId === d.conversationId || (m.custom && m.custom.orderId === CH.orderId)).map(m => ({ t: m.ts, mine: m.isByMe, text: m.body }));
+  // messages: the order's Eldorado chat history, plus anything newer that arrived live (and the
+  // bot's own log when the chat could not be read)
+  if (CH.orderId) chLoadHistory(CH.orderId);
+  if (CH.orderId && !(d && d.username) && !(CH.orderId in CH.rbx)) {
+    const id = CH.orderId; CH.rbx[id] = undefined;
+    M.call('chat:buyerRoblox', id).then(v => { CH.rbx[id] = v || null; if (S.page === 'chat' && CH.orderId === id) render(); }).catch(() => { CH.rbx[id] = null; });
+  }
+  const rbxName = (d && d.username) || CH.rbx[CH.orderId] || null;
+  const hist = CH.hist[CH.orderId] || {};
+  const convId = hist.conversationId || (d && d.conversationId);
+  let msgs = (hist.msgs || []).map(m => ({ id: m.id, t: m.ts, mine: m.isByMe, sys: m.system, text: m.body }));
+  const seen = new Set(msgs.map(m => m.id));
+  const lastT = msgs.length ? msgs[msgs.length - 1].t : 0;
+  for (const m of S.talkLog || []) {
+    if (seen.has(m.id) || !((convId && m.conversationId === convId) || (m.custom && m.custom.orderId === CH.orderId))) continue;
+    if (m.ts >= lastT) msgs.push({ id: m.id, t: m.ts, mine: m.isByMe, text: m.body });
+  }
+  if (!hist.msgs && d && d.log && d.log.length) msgs = d.log.filter(l => l.out || l.in || l.err).map(l => ({ t: l.t, mine: !!l.out, err: !!l.err, text: l.out || l.in || l.err }));
 
   const send = async () => {
     const inp = $('#ch-input'); const text = inp && inp.value.trim(); if (!text || !CH.orderId) return;
     inp.value = '';
     let ok = true; try { await M.call('eld:message', CH.orderId, text); } catch (e) { ok = false; toast(e.message, 'error'); }
-    if (ok) { if (d) d.log = [...(d.log || []), { t: Date.now(), out: text }]; else CH.dl = [...CH.dl, { orderId: CH.orderId, log: [{ t: Date.now(), out: text }] }]; render(); }
+    if (ok) { if (d) d.log = [...(d.log || []), { t: Date.now(), out: text }]; else CH.dl = [...CH.dl, { orderId: CH.orderId, log: [{ t: Date.now(), out: text }] }]; setTimeout(() => chLoadHistory(CH.orderId, true), 1500); render(); }
   };
   const thread = !cur && !CH.orderId ? h('div', { class: 'x-empty' }, 'Select a conversation') : h('div', { class: 'x-thread' },
     h('div', { class: 'x-thead' },
       cur ? xAvatar({ name: String(cur.title || '?').split('|')[0] }, 36) : null,
-      h('div', { class: 'grow' }, h('b', null, cur ? cur.title : 'Order ' + CH.orderId), h('small', { class: 'muted' }, cur ? `Buyer: ${cur.buyer || '—'}   Order: #${String(CH.orderId).slice(0, 18)}` : ''))),
-    h('div', { class: 'x-tuser' }, h('span', { class: 'muted' }, 'Buyer username: '), h('b', null, d && d.username ? '@' + d.username : '—'),
+      h('div', { class: 'grow' }, h('b', null, cur ? cur.title : 'Order ' + CH.orderId), h('small', { class: 'muted' }, cur ? `Buyer: ${cur.buyer || '—'}   Order: #${String(CH.orderId).slice(0, 18)}` : '')),
+      cur ? xStatePill(cur.state) : null),
+    h('div', { class: 'x-tuser' }, h('span', { class: 'muted' }, 'Buyer username: '), h('b', null, rbxName ? '@' + rbxName : CH.rbx[CH.orderId] === undefined && !(d && d.username) ? 'loading…' : '—'),
       h('div', { class: 'grow' }),
-      d && d.username ? h('button', { class: 'btn sm ghost', onclick: () => xCopy(d.username, 'Username copied') }, '⎘ Copy') : null,
+      rbxName ? h('button', { class: 'btn sm ghost', onclick: () => xCopy(rbxName, 'Username copied') }, '⎘ Copy') : null,
       h('button', { class: 'btn sm ghost', onclick: () => { CH.live = !CH.live; render(); } }, CH.live ? '← Bubbles' : 'Eldorado view')),
     CH.live ? (() => { const wv = document.createElement('webview'); wv.setAttribute('partition', 'persist:eldorado'); wv.setAttribute('src', url); wv.setAttribute('allowpopups', ''); wv.className = 'x-wv'; return wv; })()
       : h('div', { class: 'x-msgs', id: 'ch-msgs' },
-        msgs.length ? msgs.map(m => m.err ? h('div', { class: 'x-sys' }, 'Send failed: ' + m.text) : h('div', { class: 'x-msg ' + (m.mine ? 'mine' : 'theirs') },
+        hist.err ? h('div', { class: 'x-sys' }, h('div', null, 'Could not load the chat: ' + hist.err), h('button', { class: 'btn sm', style: { marginTop: '6px' }, onclick: () => chLoadHistory(CH.orderId, true) }, 'Try again'), ' ',
+          h('button', { class: 'btn sm ghost', style: { marginTop: '6px' }, onclick: () => { CH.live = true; render(); } }, 'Eldorado view')) : null,
+        msgs.length ? msgs.map(m => m.err ? h('div', { class: 'x-sys' }, 'Send failed: ' + m.text) : m.sys ? h('div', { class: 'x-sys' }, h('div', null, m.text)) : h('div', { class: 'x-msg ' + (m.mine ? 'mine' : 'theirs') },
           !m.mine ? h('div', { class: 'x-mava' }, (cur && cur.buyer || 'B')[0].toUpperCase()) : null,
           h('div', { class: 'x-bub' }, !m.mine ? h('small', { class: 'x-who' }, cur && cur.buyer || 'Buyer') : null, h('div', null, m.text), h('small', { class: 'x-mt' }, hm(m.t)))))
-          : h('div', { class: 'x-empty sm' }, 'No messages captured yet. New messages appear here live; use "Eldorado view" for the full history.'),
-        cur && (XSTATE.canceled(cur.state) || XSTATE.completed(cur.state)) ? h('div', { class: 'x-sys' }, h('div', null, 'Order ' + String(cur.state).replace(/([a-z])([A-Z])/g, '$1 $2'))) : null),
+          : h('div', { class: 'x-empty sm' }, hist.loading ? 'Loading chat…' : hist.err ? '' : 'No messages in this chat yet.'),
+        cur ? h('div', { class: 'x-sys' }, h('div', null, 'Order status: ' + String(cur.state).replace(/([a-z])([A-Z])/g, '$1 $2'))) : null),
     h('div', { class: 'x-compose' },
       h('input', { id: 'ch-input', type: 'text', placeholder: 'Type a message...', onkeydown: e => { if (e.key === 'Enter') send(); } }),
       h('button', { class: 'x-send', title: 'Send', onclick: send }, '➤')));
 
   root.append(
     h('div', { class: 'x-head' }, h('div', { class: 'x-badge' }, 'Ch'), h('div', { class: 'x-head-t' }, h('h1', null, 'Chat'), h('p', null, 'Open conversations on Eldorado')), h('div', { class: 'grow' }),
-      h('div', { class: 'row x-head-r' }, h('button', { class: 'btn sm ghost', onclick: () => { CH.orders = null; CH.dl = null; render(); } }, '↻ Refresh'), h('button', { class: 'btn sm', onclick: () => M.call('open:external', url) }, '✎ Eldorado'))),
+      h('div', { class: 'row x-head-r' }, h('button', { class: 'btn sm ghost', onclick: () => { CH.orders = null; CH.dl = null; if (CH.orderId) chLoadHistory(CH.orderId, true); render(); } }, '↻ Refresh'), h('button', { class: 'btn sm', onclick: () => M.call('open:external', url) }, '✎ Eldorado'))),
     xPills([['all', 'All'], ['active', 'Active'], ['delivered', 'Delivered'], ['completed', 'Completed'], ['canceled', 'Canceled'], ['disputed', 'Disputed']], CH.filter, v => { CH.filter = v; render(); }),
     h('div', { class: 'x-bar x-am' }, h('span', { class: 'x-bar-k' }, '⚡ AUTO-MESSAGE'),
       h('small', { class: 'muted grow', style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, CH.edit ? '' : am.text),
