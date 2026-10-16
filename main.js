@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, session, desktopCapturer, dialog, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, session, desktopCapturer, dialog, nativeImage, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -131,7 +131,9 @@ function wire() {
     getCookie: () => { const a = store.get('accounts').find(x => x.cookieEnc); return a ? decryptCookie(a.cookieEnc) : null; },
     render: payload => rendererCall('renderModel', payload, 90000)
   });
-  wiki = new Wiki({ dir: path.join(app.getPath('userData'), 'art'), log: (lvl, msg) => store.log(lvl, msg) });
+  wiki = new Wiki({ dir: path.join(app.getPath('userData'), 'art'), log: (lvl, msg) => store.log(lvl, msg), bundled: path.join(__dirname, 'assets', 'wiki-map.json'),
+    // Chromium's network stack first (system proxy / certificates like a browser), Node's as fallback
+    fetch: async (url, opts) => { if (net.fetch) { try { return await net.fetch(url, opts); } catch { /* fall back */ } } return fetch(url, opts); } });
   bridge = new Bridge();
   eld = new Eldorado(bridge, store);
   lister = new AutoLister({ store, eld, renderImage });

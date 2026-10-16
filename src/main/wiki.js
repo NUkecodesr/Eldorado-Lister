@@ -5,12 +5,18 @@ const fs = require('fs');
 const path = require('path');
 
 const API = 'https://stealabrainrot.fandom.com/api.php?action=parse&page=Brainrots&prop=text&format=json&formatversion=2';
+// an honest client name: the wiki's image CDN answers 403 to a browser user agent that does not
+// come from a real browser
 const UA = 'ZotacLister/1.0 (brainrot listing images)';
 const DAY = 24 * 3600 * 1000;
 const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
 class Wiki {
-  constructor({ dir, log }) {
+  // bundled: a copy of the index shipped with the app (used when the wiki can't be reached);
+  // fetch: Electron's net.fetch (Chromium's network stack) when available
+  constructor({ dir, log, bundled, fetch: fetchImpl }) {
+    this.bundled = bundled;
+    this.fetch = fetchImpl || ((...a) => fetch(...a));
     this.dir = path.join(dir, 'wiki');
     fs.mkdirSync(this.dir, { recursive: true });
     this.mapFile = path.join(this.dir, 'map.json');
@@ -31,7 +37,7 @@ class Wiki {
 
   async fetchIndex() {
     try {
-      const r = await fetch(API, { headers: { 'User-Agent': UA } });
+      const r = await this.fetch(API, { headers: { 'User-Agent': UA, Accept: 'application/json' }, signal: AbortSignal.timeout(20000) });
       if (!r.ok) throw new Error('wiki HTTP ' + r.status);
       const html = (await r.json()).parse.text;
       const map = {};
@@ -52,8 +58,12 @@ class Wiki {
       this.log('info', `[Wiki] ${Object.keys(map).length} brainrot pictures indexed`);
       return (this.map = map);
     } catch (e) {
-      this.log('warn', '[Wiki] ' + e.message);
-      try { return (this.map = JSON.parse(fs.readFileSync(this.mapFile, 'utf8'))); } catch { return (this.map = {}); }
+      this.log('warn', '[Wiki] ' + e.message + ' - using the saved picture list');
+      // an older download, else the list shipped with the app; never keep an empty list for good
+      for (const f of [this.mapFile, this.bundled]) {
+        try { const m = JSON.parse(fs.readFileSync(f, 'utf8')); if (Object.keys(m).length >= 20) return (this.map = m); } catch { /* next */ }
+      }
+      return {};
     }
   }
 
@@ -75,7 +85,7 @@ class Wiki {
     for (const u of [...new Set([scaled, url])]) {
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
-          const r = await fetch(u + (u.includes('?') ? '&' : '?') + 'format=original', { headers: { 'User-Agent': UA, Accept: 'image/png,image/*' }, signal: AbortSignal.timeout(20000) });
+          const r = await this.fetch(u + (u.includes('?') ? '&' : '?') + 'format=original', { headers: { 'User-Agent': UA, Accept: 'image/png,image/*' }, signal: AbortSignal.timeout(20000) });
           if (!r.ok) break;
           const buf = Buffer.from(await r.arrayBuffer());
           const png = buf[0] === 0x89 && buf[1] === 0x50, jpg = buf[0] === 0xff && buf[1] === 0xd8, webp = buf.slice(0, 4).toString() === 'RIFF' && buf.slice(8, 12).toString() === 'WEBP';
