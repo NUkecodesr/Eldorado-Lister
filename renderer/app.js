@@ -118,7 +118,11 @@ const LIVE = {
       WL.data = w || WL.data; WL.orders = o ? o.rows : WL.orders;
     },
     account: async () => { if (AC.dash && !AC.loading) AC.dash = (await M.call('eld:dashboard')) || AC.dash; },
-    notifications: async () => { if (NT.list && !NT.loading) NT.list = (await M.call('eld:notifications', NT.unreadOnly)) || NT.list; },
+    notifications: async () => {
+      if (!NT.orders || NT.loading) return;
+      const r = await M.call('eld:orders', { page: 1, pageSize: 20 });
+      if (r && r.rows) { const fresh = r.rows; NT.orders = [...fresh, ...NT.orders.filter(o => !fresh.some(x => x.id === o.id))]; }
+    },
     reviews: async () => {
       if (!RV.data || RV.loading || RV.page !== 1) return;
       const d = await M.call('eld:reviews', null);

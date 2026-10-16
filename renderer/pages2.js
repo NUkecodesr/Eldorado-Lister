@@ -318,7 +318,7 @@ PAGES.reviews = async root => {
 };
 
 // ============================== NOTIFICATIONS =============================
-const NT = { list: null, unreadOnly: false, loading: false, shown: 15 };
+const NT = { list: null, orders: null, page: 1, more: false, unreadOnly: false, loading: false, shown: 15 };
 const ntKind = n => { const s = `${n.type} ${n.title} ${n.body}`; return /cancel|refund|reject|declin|dispute|fail/i.test(s) ? 'bad' : /complet|deliver|receiv|sold|paid|releas|success|new order/i.test(s) ? 'good' : 'info'; };
 const ntBuyer = n => {
   const b = mxFind(n.raw, /buyer/i);
@@ -332,29 +332,43 @@ const ntAmount = n => {
   const m = /\$\s?([\d,]+(?:\.\d+)?)/.exec(`${n.title} ${n.body}`);
   return m ? parseFloat(m[1].replace(/,/g, '')) : null;
 };
+// Like Meowl's: one row per sold order showing what happened to it last (Received, Delivered,
+// Canceled...), the buyer, when, and the amount; newest first, 20 at a time.
 PAGES.notifications = async root => {
-  const load = async () => { NT.loading = true; render(); NT.list = (await run(() => M.call('eld:notifications', NT.unreadOnly))) || []; NT.loading = false; NT.shown = 15; render(); };
-  if (S.me && !NT.list && !NT.loading) load();
-  const head = right => mxHead('Notifications', 'Real-time Eldorado notifications.', right, 'bell');
+  const load = async more => {
+    NT.loading = true; render();
+    const page = more ? NT.page + 1 : 1;
+    const r = await run(() => M.call('eld:orders', { page, pageSize: 20 }));
+    NT.loading = false;
+    if (r) {
+      const rows = r.rows || [];
+      NT.orders = more ? [...(NT.orders || []), ...rows.filter(o => !(NT.orders || []).some(x => x.id === o.id))] : rows;
+      NT.page = page; NT.more = rows.length >= 20 && (!r.pages || page < r.pages);
+    } else if (!more) NT.orders = NT.orders || [];
+    render();
+  };
+  if (S.me && !NT.orders && !NT.loading) load(false);
+  const head = right => mxHead('Notifications', 'What happened to your orders, newest first.', right, 'bell');
   if (!S.me) { root.append(head([]), h('div', { class: 'card empty' }, 'Log in on the Account page.')); return; }
-  const list = NT.list || [];
   const ok = S.bridge === 'connected';
+  const when = o => { const st = o.raw && o.raw.state; return (st && typeof st === 'object' && (st.updatedDate || st.date || st.createdDate)) || o.raw && (o.raw.updatedDate || o.raw.lastUpdatedDate) || o.date; };
+  const label = s => String(s || 'Order').replace(/([a-z])([A-Z])/g, '$1 $2');
+  const icon = o => XSTATE.canceled(o.state) ? h('div', { class: 'nic bad' }, mxSvg('x', 16))
+    : XSTATE.disputed(o.state) ? h('div', { class: 'nic bad' }, '!')
+    : h('div', { class: 'nic box' }, h('span', { class: 'nbox' }));
+  const list = (NT.orders || []).slice().sort((a, b) => new Date(when(b)) - new Date(when(a)));
   root.append(h('div', null, head([
-    h('label', { class: 'chk' }, h('input', { type: 'checkbox', checked: NT.unreadOnly, onchange: e => { NT.unreadOnly = e.target.checked; NT.list = null; render(); } }), 'Unread only'),
-    h('button', { class: 'btn sm', onclick: load }, mxSvg('refresh', 12), NT.loading ? 'Loading…' : t('refresh')),
-    h('a', { class: 'mx-link', href: '#', onclick: async e => { e.preventDefault(); await run(() => M.call('eld:markAllRead'), 'All marked as read'); S.unread = 0; renderFooter(); renderNav(); load(); } }, 'Mark all as Read')]),
+    h('button', { class: 'btn sm', onclick: () => load(false) }, mxSvg('refresh', 12), NT.loading ? 'Loading…' : t('refresh')),
+    S.unread ? h('a', { class: 'mx-link', href: '#', onclick: async e => { e.preventDefault(); await run(() => M.call('eld:markAllRead'), 'All marked as read'); S.unread = 0; renderFooter(); renderNav(); } }, 'Mark all as read') : null]),
   h('div', { class: 'mx-status ' + (ok ? 'on' : 'off') }, h('span', { class: 'dot' }), ok ? 'Connected' : S.bridge),
-  list.length ? h('div', { class: 'mx-nlist' }, list.slice(0, NT.shown).map(n => {
-    const kind = ntKind(n); const buyer = ntBuyer(n); const a = ntAmount(n);
-    return h('div', { class: 'mx-nrow' + (n.read ? '' : ' unread'), onclick: () => { if (n.orderId) { CH.orderId = n.orderId; go('chat'); } } },
-      h('div', { class: 'nic ' + kind }, mxSvg(kind === 'bad' ? 'x' : kind === 'good' ? 'check' : 'bell', 16)),
-      h('div', { class: 'grow' },
-        h('div', { class: 't1' }, h('b', null, prettyKey(n.title)), h('span', { class: 'muted' }, ago(n.date)), n.read ? null : h('span', { class: 'mx-new' }, 'NEW')),
-        buyer ? h('div', { class: 't2' }, 'Buyer: ', h('b', null, buyer)) : (n.body ? h('div', { class: 't2' }, n.body) : null)),
-      a != null ? h('div', { class: 'amt' }, money(a)) : null,
-      n.read ? null : h('button', { class: 'btn sm ghost', title: 'Mark as read', onclick: async e => { e.stopPropagation(); await run(() => M.call('eld:markRead', n.id)); n.read = true; S.unread = Math.max(0, (S.unread || 1) - 1); renderNav(); render(); } }, 'Mark read'));
-  })) : h('div', { class: 'card empty' }, NT.loading ? 'Loading…' : 'No notifications.'),
-  list.length > NT.shown ? h('div', { class: 'mx-more' }, h('button', { class: 'btn', onclick: () => { NT.shown += 15; render(); } }, 'Load more')) : null));
+  list.length ? h('div', { class: 'mx-nlist' }, list.map(o => h('div', { class: 'mx-nrow', title: o.title || '', onclick: () => { CH.orderId = o.id; go('chat'); } },
+    icon(o),
+    h('div', { class: 'grow' },
+      h('div', { class: 't1' }, h('b', null, label(o.state)), h('span', { class: 'muted' }, ago(when(o)))),
+      h('div', { class: 't2' }, 'Buyer: ', h('b', null, o.buyer || '—'))),
+    o.price != null ? h('div', { class: 'amt' }, money(o.price)) : null)))
+    : h('div', { class: 'card empty' }, NT.loading ? 'Loading…' : 'No orders yet.'),
+  NT.more ? h('div', { class: 'mx-more' }, h('button', { class: 'btn', disabled: NT.loading, onclick: () => load(true) }, NT.loading ? 'Loading…' : 'Load more')) : null));
 };
 
 // ============================== AUTO DELIVERY =============================
