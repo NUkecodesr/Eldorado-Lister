@@ -650,8 +650,14 @@ local function buildGui()
 
     local left = new("Frame", {Parent = main, Size = UDim2.new(0, 200, 1, 0), BackgroundColor3 = PANEL, BorderSizePixel = 0}, {corner(16)})
     new("Frame", {Parent = left, Size = UDim2.new(0, 16, 1, 0), Position = UDim2.new(1, -16, 0, 0), BackgroundColor3 = PANEL, BorderSizePixel = 0})
-    new("ImageLabel", {Parent = left, Size = UDim2.fromOffset(116, 116), Position = UDim2.new(0.5, -58, 0, 22), BackgroundColor3 = ROW,
-        Image = "rbxthumb://type=AvatarHeadShot&id=" .. LP.UserId .. "&w=150&h=150"}, {corner(16), new("UIStroke", {Color = YELLOW, Thickness = 2})})
+    local logoBox = new("Frame", {Parent = left, Size = UDim2.fromOffset(116, 116), Position = UDim2.new(0.5, -58, 0, 22), BackgroundColor3 = ROW},
+        {corner(16), new("UIStroke", {Color = YELLOW, Thickness = 2})})
+    local face = new("Frame", {Parent = logoBox, Size = UDim2.fromScale(0.8, 0.8), Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundColor3 = Color3.fromRGB(242, 182, 49), BorderSizePixel = 0}, {new("UICorner", {CornerRadius = UDim.new(0.5, 0)})})
+    for _, dot in ipairs({{0.358, 0.458, 0.175}, {0.642, 0.458, 0.175}, {0.5, 0.633, 0.083}}) do
+        new("Frame", {Parent = face, Size = UDim2.fromScale(dot[3], dot[3]), Position = UDim2.fromScale(dot[1], dot[2]), AnchorPoint = Vector2.new(0.5, 0.5),
+            BackgroundColor3 = Color3.fromRGB(12, 11, 8), BorderSizePixel = 0}, {new("UICorner", {CornerRadius = UDim.new(0.5, 0)})})
+    end
     new("TextLabel", {Parent = left, Size = UDim2.new(1, 0, 0, 26), Position = UDim2.fromOffset(0, 148), BackgroundTransparency = 1, RichText = true,
         Text = 'Zotac <font color="#F5C400">Lister</font>', Font = Enum.Font.GothamBold, TextSize = 20, TextColor3 = TEXT})
     local stats = new("TextLabel", {Parent = left, Size = UDim2.new(1, 0, 0, 16), Position = UDim2.fromOffset(0, 176), BackgroundTransparency = 1,
