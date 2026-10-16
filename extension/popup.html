@@ -1,30 +1,54 @@
 <!doctype html>
 <meta charset="utf-8">
 <style>
-  body { width: 280px; margin: 0; font: 13px 'Segoe UI', sans-serif; background: #0d0b08; color: #eee; padding: 14px; }
-  .head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-  .logo { width: 26px; height: 26px; border-radius: 50%; background: #f2b631; position: relative; flex: none; }
-  .logo::before, .logo::after { content: ''; position: absolute; top: 9px; width: 5px; height: 5px; border-radius: 50%; background: #0c0b08; }
-  .logo::before { left: 7px; } .logo::after { right: 7px; }
-  b { font-size: 14px; }
-  .st { padding: 8px 10px; border-radius: 8px; background: #1a1611; border: 1px solid #3a3022; font-size: 12px; margin-bottom: 8px; }
-  .st.ok { border-color: #2f6b3f; color: #8fe3a5; } .st.bad { border-color: #7a2c2c; color: #ff9a9a; }
-  .muted { color: #9a8f7c; font-size: 11px; }
-  button { width: 100%; box-sizing: border-box; margin: 4px 0; padding: 8px; border-radius: 8px; border: 0; background: #f2b631; color: #1a1205; font-weight: 700; cursor: pointer; }
-  button.ghost { background: #1a1611; color: #eee; border: 1px solid #3a3022; }
-  label.row { display: flex; align-items: center; justify-content: space-between; margin: 8px 0; }
-  details { margin-top: 6px; } summary { cursor: pointer; color: #9a8f7c; font-size: 12px; }
-  input { width: 100%; box-sizing: border-box; margin: 4px 0; padding: 6px; border-radius: 6px; border: 1px solid #3a3022; background: #1a1611; color: #eee; }
+  :root { --bg: #0d0b08; --card: #17130d; --line: #2e261a; --gold: #f2b631; --ink: #f1ece2; --dim: #9a8f7c; --good: #3fcf72; --bad: #ff6b6b; }
+  * { box-sizing: border-box; }
+  body { width: 300px; margin: 0; font: 13px 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--ink); }
+  .top { display: flex; align-items: center; gap: 10px; padding: 14px 14px 12px; background: linear-gradient(180deg, #1d170e, var(--bg)); border-bottom: 1px solid var(--line); }
+  .logo { width: 34px; height: 34px; border-radius: 50%; background: var(--gold); position: relative; flex: none; box-shadow: 0 0 0 3px rgba(242, 182, 49, .18); }
+  .logo i { position: absolute; width: 7px; height: 7px; border-radius: 50%; background: #0c0b08; top: 12px; }
+  .logo i:nth-child(1) { left: 9px; } .logo i:nth-child(2) { right: 9px; }
+  .logo i:nth-child(3) { width: 4px; height: 4px; top: 21px; left: 15px; }
+  .title b { display: block; font-size: 14px; letter-spacing: .2px; } .title small { color: var(--dim); font-size: 11px; }
+  .wrap { padding: 12px 14px 14px; }
+  .status { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--dim); flex: none; }
+  .status.ok { border-color: rgba(63, 207, 114, .45); } .status.ok .dot { background: var(--good); box-shadow: 0 0 8px var(--good); }
+  .status.bad { border-color: rgba(255, 107, 107, .45); } .status.bad .dot { background: var(--bad); box-shadow: 0 0 8px var(--bad); }
+  .status div b { display: block; font-size: 12.5px; } .status div small { color: var(--dim); font-size: 11px; }
+  button { width: 100%; margin-top: 10px; padding: 9px; border-radius: 9px; border: 0; background: var(--gold); color: #1a1205; font-weight: 700; font-size: 13px; cursor: pointer; transition: filter .15s; }
+  button:hover { filter: brightness(1.08); } button:disabled { opacity: .6; cursor: default; }
+  button.ghost { background: var(--card); color: var(--ink); border: 1px solid var(--line); font-weight: 600; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); }
+  .row small { display: block; color: var(--dim); font-size: 11px; margin-top: 2px; }
+  .sw { position: relative; width: 38px; height: 21px; flex: none; }
+  .sw input { opacity: 0; width: 0; height: 0; }
+  .sw span { position: absolute; inset: 0; border-radius: 21px; background: #3a3225; transition: .15s; cursor: pointer; }
+  .sw span::after { content: ''; position: absolute; width: 15px; height: 15px; left: 3px; top: 3px; border-radius: 50%; background: #9a8f7c; transition: .15s; }
+  .sw input:checked + span { background: var(--gold); } .sw input:checked + span::after { left: 20px; background: #1a1205; }
+  details { margin-top: 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); padding: 8px 12px; }
+  summary { cursor: pointer; color: var(--dim); font-size: 12px; list-style: none; } summary::before { content: '▸ '; } details[open] summary::before { content: '▾ '; }
+  label.f { display: block; margin-top: 8px; color: var(--dim); font-size: 11px; }
+  input.t { width: 100%; margin-top: 3px; padding: 7px 8px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: 12px Consolas, monospace; }
+  .foot { margin-top: 10px; color: var(--dim); font-size: 10.5px; text-align: center; }
 </style>
-<div class="head"><div class="logo"></div><b>Zotac Cookie Sync</b></div>
-<div id="st" class="st">…</div>
-<button id="sync">Sync now</button>
-<label class="row"><span>Keep Zotac logged in automatically</span><input id="auto" type="checkbox" style="width:auto"></label>
-<div class="muted">Log in on eldorado.gg in this browser, keep Zotac Lister open, and it syncs by itself.</div>
-<details>
-  <summary>Connection</summary>
-  <input id="port" placeholder="Port (default 47321)">
-  <input id="token" placeholder="Token (filled in automatically)">
-  <button id="pair" class="ghost">Re-pair with Zotac</button>
-</details>
+<div class="top">
+  <div class="logo"><i></i><i></i><i></i></div>
+  <div class="title"><b>Zotac Cookie Sync</b><small id="ver">Keeps Zotac Lister logged in</small></div>
+</div>
+<div class="wrap">
+  <div id="st" class="status"><span class="dot"></span><div><b id="stT">Checking…</b><small id="stS"></small></div></div>
+  <button id="sync">Sync now</button>
+  <div class="row">
+    <div>Auto-sync<small>On browser start, login change, every 10 min</small></div>
+    <label class="sw"><input id="auto" type="checkbox"><span></span></label>
+  </div>
+  <details>
+    <summary>Connection</summary>
+    <label class="f">Port<input id="port" class="t" placeholder="47321"></label>
+    <label class="f">Token<input id="token" class="t" placeholder="filled in automatically"></label>
+    <button id="pair" class="ghost">Re-pair with Zotac</button>
+  </details>
+  <div class="foot">Log in on eldorado.gg in this browser and keep Zotac Lister open.</div>
+</div>
 <script src="popup.js"></script>
