@@ -72,6 +72,25 @@ function xCardThumb(p, onclick) {
   return src ? h('img', { class: 'x-althumb', src, alt: '', title: 'Generated card (click to preview)', onclick })
     : h('span', { class: 'x-althumb ph', title: 'Card image generated' }, '▣');
 }
+// the brainrot's own picture (wiki / game art) until a card is generated; fetched in batches
+const PET_THUMB_WANT = new Set();
+let petThumbTimer = null;
+function xPetThumb(p, onclick) {
+  const src = ART_THUMBS.pets[p.name];
+  if (src) return h('img', { class: 'x-althumb pet', src, alt: '', title: p.name + ' (no card yet: Generate Images)', onclick });
+  if (src === undefined && !ART_THUMBS.asked.has('p:' + p.name)) {
+    ART_THUMBS.asked.add('p:' + p.name); PET_THUMB_WANT.add(p.name);
+    clearTimeout(petThumbTimer);
+    petThumbTimer = setTimeout(() => {
+      const pets = [...PET_THUMB_WANT]; PET_THUMB_WANT.clear();
+      M.call('art:thumbs', { pets }).then(r => {
+        for (const [n, v] of Object.entries(r.pets || {})) ART_THUMBS.pets[n] = v || null;
+        if (S.page === 'autolist') soft();
+      }).catch(() => {});
+    }, 50);
+  }
+  return h('span', { class: 'x-althumb ph', title: 'No card yet: Generate Images' }, '·');
+}
 function xDot(m) { const c = xMutColor(m); return h('span', { class: 'x-mut' }, h('i', { style: { background: c || '#4b4233' } }), m && !/^none$/i.test(m) ? m : h('span', { class: 'muted' }, 'None')); }
 function xJsonCount(text) {
   try {
@@ -402,7 +421,7 @@ PAGES.autolist = async root => {
     const traits = p.traits || [];
     return h('div', { class: 'x-alrow' + (rev ? ' rev' : '') + (AL.selected.has(p.id) ? ' sel' : '') },
       h('input', { type: 'checkbox', checked: AL.selected.has(p.id), onchange: e => { e.target.checked ? AL.selected.add(p.id) : AL.selected.delete(p.id); render(); } }),
-      p.imagePath ? xCardThumb(p, () => previewImage(p)) : h('span', { class: 'x-althumb ph', title: 'No card yet: Generate Images' }, '·'),
+      p.imagePath ? xCardThumb(p, () => previewImage(p)) : xPetThumb(p, () => previewImage(p)),
       h('div', { class: 'x-alname', title: p.title ? 'Fixed title (Quick Fill)' : 'Title from the template' }, tEl,
         p.status !== 'available' ? statusPill(p.status) : null,
         null),

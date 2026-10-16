@@ -412,4 +412,5 @@ input.x-alpin { width: 62px; flex: 0 0 62px; padding: 3px 5px; font-size: 12px; 
 
 .x-althumb { width: 34px; height: 34px; flex: none; border-radius: 6px; object-fit: cover; border: 1px solid var(--line2); cursor: zoom-in; background: #0a0806; }
 .x-althumb:hover { border-color: var(--gold, #f2b631); }
+.x-althumb.pet { object-fit: contain; padding: 2px; }
 .x-althumb.ph { display: inline-grid; place-items: center; color: var(--ink2); font-size: 11px; cursor: default; }
