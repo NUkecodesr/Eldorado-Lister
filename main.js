@@ -86,7 +86,7 @@ async function refreshAvatars() {
 const autoScan = {
   running: false, stopFlag: false, total: 0, done: 0, failed: 0, current: [], log: [],
   waiters: {},
-  hostId: null, hostOpened: false, waitSince: {},
+  hostId: null, waitSince: {}, joinAt: {}, opened: new Set(),
   say(msg, level = 'info') { this.log.push({ t: Date.now(), msg, level }); if (this.log.length > 300) this.log.shift(); store.log(level, '[AutoScan] ' + msg); this.emit(); },
   state() { return { running: this.running, total: this.total, done: this.done, failed: this.failed, current: this.current, log: this.log, batch: (store.get('settings').autoscan || {}).batch || 3, ids: (store.get('settings').autoscan || {}).ids || null }; },
   emit() { send('autoscan', this.state()); },
@@ -112,6 +112,9 @@ const autoScan = {
     for (const b of d.bases) {
       const k = String(b.owner || '').toLowerCase();
       if (!k || !this.waiters[k]) continue;
+      // only after this run launched it (or found it in game), and only while that player is in the
+      // server: a base can still show a player who left (an old scan once closed a window too early)
+      if (!this.joinAt[k] || b.here === false) continue;
       const pets = Array.isArray(b.pets) ? b.pets : [];
       // without the game's count (its data not on the scanning client yet, so no uuids either) a
       // base is only taken after 90 s of waiting
@@ -141,7 +144,7 @@ const autoScan = {
     if (!lastAutoexec.some(f => /zotac_scanner\.lua$/i.test(f))) syncAutoexec();
     const host = this.pickHost(ids);
     if (!host) { this.say('Auto Scan needs one logged-in account in SCRIPT mode: it joins with the chosen accounts and scans the whole server (Roblox Accounts → SCRIPT)', 'error'); return this.state(); }
-    Object.assign(this, { running: true, stopFlag: false, total: accts.length, done: 0, failed: 0, current: [], waiters: {}, waitSince: {}, hostId: host.id, hostOpened: false });
+    Object.assign(this, { running: true, stopFlag: false, total: accts.length, done: 0, failed: 0, current: [], waiters: {}, waitSince: {}, joinAt: {}, opened: new Set(), hostId: host.id });
     this.say(`Started: ${accts.length} account(s), ${batch} per batch - @${host.username} scans the server`);
     (async () => {
       try {
@@ -155,8 +158,8 @@ const autoScan = {
       } catch (e) { this.say('Auto Scan stopped: ' + e.message, 'error'); }
       this.say(this.stopFlag ? 'Stopped' : `Finished: ${this.done} scanned, ${this.failed} failed`);
       this.running = false; this.current = []; this.waiters = {}; this.emit();
-      // the scanning account is closed only when Auto Scan opened it and no delivery needs it
-      if (this.hostOpened && !store.get('jobs').some(j => j.accountId === host.id && ['pending', 'running'].includes(j.status))) launcher.closeGame(host.username).catch(() => {});
+      // every window this run opened is closed (the scanning account too), checked one by one
+      await this.closeOpened().catch(e => this.say('Closing the windows: ' + e.message, 'error'));
       send('pets:changed');
     })();
     return this.state();
@@ -166,7 +169,7 @@ const autoScan = {
     if (launcher.isOnline(host)) return true;
     try {
       const r = await launcher.launch(host.id, {});
-      if (!r || !r.skipped) this.hostOpened = true;
+      if (!r || !r.skipped) this.opened.add(host.id);
       this.say(`@${host.username}: ${r && r.skipped ? r.skipped : 'launched'} - waiting for its scripts`);
     } catch (e) { this.say(`@${host.username}: ${e.message}`, 'error'); return false; }
     for (let i = 0; i < 90 && !this.stopFlag; i++) {
@@ -186,6 +189,7 @@ const autoScan = {
     if (this.stopFlag) return;
     const k = a.username.toLowerCase();
     const isHost = a.id === this.hostId;
+    if (isHost) this.joinAt[k] = Date.now();
     this.waitSince[k] = Date.now();
     const result = new Promise(res => { this.waiters[k] = res; setTimeout(() => { if (this.waiters[k] === res) { delete this.waiters[k]; res({ ok: false, why: 'its base was not in the server scan within 4 minutes (did it join the private server?)' }); } }, 240000); });
     let opened = false;
@@ -194,6 +198,8 @@ const autoScan = {
         // Legit = real Roblox without the executor (Zotac never opens a Legit account with it)
         const r = await launcher.launch(a.id, { legit: !!a.legit });
         opened = !(r && r.skipped);
+        if (opened) this.opened.add(a.id);
+        this.joinAt[k] = Date.now();
         this.say(`@${a.username}: ${opened ? (a.legit ? 'opened with real Roblox (Legit)' : 'launched') : 'already in game'}, waiting for its base in the server scan`);
       } catch (e) { if (this.waiters[k]) delete this.waiters[k]; this.failed++; this.say(`@${a.username}: ${e.message}`, 'error'); return; }
     }
@@ -202,7 +208,26 @@ const autoScan = {
     else { this.failed++; this.say(`@${a.username}: ${r.why}`, 'warn'); }
     // only the windows Auto Scan opened, and never one that is busy with a delivery job
     const busy = () => store.get('jobs').some(j => j.accountId === a.id && ['pending', 'running'].includes(j.status));
-    if (opened) setTimeout(() => { if (!busy()) launcher.closeGame(a.username).catch(() => {}); else this.say(`@${a.username}: kept open, it has a delivery job`); }, 1500);
+    if (opened) setTimeout(() => this.closeOne(a), 1500);
+  },
+  // close a window this run opened (never one busy with a delivery job); waits for its process to be
+  // known when it was launched a moment ago
+  async closeOne(a) {
+    if (store.get('jobs').some(j => j.accountId === a.id && ['pending', 'running'].includes(j.status))) { this.opened.delete(a.id); this.say(`@${a.username}: kept open, it has a delivery job`); return; }
+    const st = await launcher.closeGame(a.username, { waitPid: 30000, detail: true }).catch(() => 'stuck');
+    if (st === true || st === 'closed' || st === 'gone') this.opened.delete(a.id);
+  },
+  // end of the run: everything still open that this run opened, again, until none is left
+  async closeOpened() {
+    for (let round = 0; round < 3 && this.opened.size; round++) {
+      for (const id of [...this.opened]) {
+        const a = store.get('accounts').find(x => x.id === id);
+        if (!a) { this.opened.delete(id); continue; }
+        await this.closeOne(a);
+      }
+    }
+    if (this.opened.size) this.say(`Could not close: ${[...this.opened].map(id => '@' + ((store.get('accounts').find(x => x.id === id) || {}).username || id)).join(', ')} - close it by hand`, 'error');
+    else this.say('All windows Auto Scan opened are closed');
   },
   stop() { this.stopFlag = true; for (const k of Object.keys(this.waiters)) { const w = this.waiters[k]; delete this.waiters[k]; w({ ok: false, why: 'stopped' }); } this.say('Stopping...'); return this.state(); }
 };

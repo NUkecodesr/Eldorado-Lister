@@ -690,7 +690,9 @@ local function scanServer(includeEmpty)
             -- only takes a base as an inventory once all of its pets are in
             local expected = nil
             if type(animals) == "table" then expected = 0; for _, a in pairs(animals) do if type(a) == "table" and type(a.Index) == "string" then expected += 1 end end end
-            table.insert(bases, {plot = plot.Name, owner = name, displayName = display, userId = uid, mine = plot == mine or uid == LP.UserId, pets = pets, expected = expected, totalGen = total, empty = not name and #pets == 0})
+            -- here = the owner is in this server right now (a base can still show a player who left)
+            local here = name ~= nil and Players:FindFirstChild(name) ~= nil
+            table.insert(bases, {plot = plot.Name, owner = name, displayName = display, userId = uid, mine = plot == mine or uid == LP.UserId, pets = pets, expected = expected, here = here, totalGen = total, empty = not name and #pets == 0})
         end
     end
     table.sort(bases, function(a, b)

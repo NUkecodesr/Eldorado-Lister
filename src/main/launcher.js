@@ -301,16 +301,34 @@ class Launcher extends EventEmitter {
   }
 
   // the agent finished: fully close the Roblox process Zotac launched for that account (only that one)
-  async closeGame(username) {
+  // waitPid: a game launched a moment ago is matched to its process a second or two later; wait up
+  // to that long for it instead of leaving the window open. The kill is checked and repeated.
+  // detail: returns 'closed' | 'gone' (was not running any more) | 'unknown' (no process known) |
+  // 'stuck' (would not close) instead of true/false
+  async closeGame(username, { waitPid = 0, detail = false } = {}) {
+    const st = await this.closeGameNow(username, waitPid);
+    return detail ? st : st === 'closed';
+  }
+  async closeGameNow(username, waitPid) {
     const a = this.store.get('accounts').find(x => String(x.username).toLowerCase() === String(username).toLowerCase());
     if (a) this.closing[a.id] = Date.now();
-    const pid = a && this.pids[a.id];
-    if (!pid) { this.log('warn', `${username}: no Roblox process known (not launched by Zotac) — left open`); return false; }
-    if (!(await robloxPids()).includes(pid)) { delete this.pids[a.id]; return false; }
-    await new Promise(res => execFile('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true }, () => res()));
+    let pid = a && this.pids[a.id];
+    for (let t = 0; a && !pid && t < waitPid; t += 1000) {
+      await new Promise(r => setTimeout(r, 1000));
+      pid = this.pids[a.id]; this.closing[a.id] = Date.now();
+    }
+    if (!pid) { this.log('warn', `${username}: no Roblox process known (not launched by Zotac) — left open`); return 'unknown'; }
+    let killed = false;
+    for (let i = 0; i < 3; i++) {
+      if (!(await robloxPids()).includes(pid)) break;
+      await new Promise(res => execFile('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true }, () => res()));
+      killed = true;
+      await new Promise(r => setTimeout(r, 800));
+    }
+    if ((await robloxPids()).includes(pid)) { this.log('error', `${username}: Roblox process ${pid} would not close`); return 'stuck'; }
     delete this.pids[a.id];
-    this.log('info', `${username}: Roblox closed by Zotac (process ${pid})`);
-    return true;
+    if (killed) this.log('info', `${username}: Roblox closed by Zotac (process ${pid})`);
+    return killed ? 'closed' : 'gone';
   }
 
   // a game Zotac opened Legit must never run Zotac's scripts: if one of them talks to Zotac
