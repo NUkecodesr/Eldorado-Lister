@@ -508,6 +508,8 @@ local function deliver(job)
         api("POST", "/jobs/" .. job.id .. "/event", {event = "buyer_cancelled", round = round, reason = w})
         notify("Trade cancelled - sending it again")
         task.wait(3)
+        -- Zotac gives up on a buyer who keeps cancelling: never send the trade again after that
+        if not wanted(job) then return false, "cancelled by Zotac" end
     end
     return false, why
 end

@@ -22,7 +22,11 @@ const DEFAULT_DELIVERY_STEPS = {
   buyerOffline: 'Your trade is ready, but @{username} is offline in Steal a Brainrot. Please join the game now: we send the trade as soon as you are online.',
   manualFallback: 'Automatic delivery is unavailable right now. A seller will contact you shortly to deliver manually.',
   orderCancelled: 'Your order has been cancelled after {attempts} delivery attempts were unsuccessful ({reason}). Eldorado will refund you. Please contact support if you believe this is a mistake.',
-  outOfStock: "Sorry! {item} is no longer in stock, so we can't deliver it. Your order has been cancelled and Eldorado will refund you. Sorry for the trouble!"
+  usernameReminder: "Hi! We still need your Roblox username to deliver your order. Please send it here — the order is cancelled if we don't hear from you within {minutes} minutes.",
+  buyerKeptCancelling: "The trade was cancelled {count} times, so we've stopped the delivery and cancelled this order. Eldorado will refund you. Feel free to order again when you're ready to accept the trade!",
+  buyerNoShow: "We tried to send your trade for {minutes} minutes, but you were offline in Steal a Brainrot or didn't accept it. We've cancelled this order and Eldorado will refund you. Feel free to order again when you're online!",
+  buyerNoUsername: "We didn't receive your Roblox username within {minutes} minutes, so we've cancelled this order. Eldorado will refund you. Feel free to order again!",
+  outOfStock:"Sorry! {item} is no longer in stock, so we can't deliver it. Your order has been cancelled and Eldorado will refund you. Sorry for the trouble!"
 };
 
 const DEFAULT_TITLE = '{mutation} {name} | {gen}';
@@ -76,7 +80,7 @@ const DEFAULTS = {
     rules: { maxDeliveryTime: 'Hour1', deliveryTimes: ['Instant', 'Minute20', 'Hour1'], minFeedback: 95, minRatings: 5, ignoreOwn: true, ignoreTitleWords: '' },
     repricer: { enabled: false, intervalMin: 20, undercut: 0.01, floorPct: 70, onlyIfBeaten: true, scope: 'all', offerIds: [] },
     scanner: { autoexec: true },   // Auto Scanner: zotac_scanner.lua in autoexec (Roblox Accounts switch)
-    delivery: { enabled: false, markDelivered: true, recordProof: false, cancelOnFail: true, cancelOnUnavailable: true, closeOnFail: true, mode: 'single', agentTimeoutSec: 240, steps: DEFAULT_DELIVERY_STEPS },
+    delivery: { enabled: false, markDelivered: true, recordProof: false, cancelOnFail: true, cancelOnUnavailable: true, closeOnFail: true, giveUpOnBuyer: true, buyerCancelLimit: 3, buyerNoShowMin: 8, usernameWaitMin: 30, mode: 'single', agentTimeoutSec: 240, steps: DEFAULT_DELIVERY_STEPS },
     launcher: { autoLaunch: true, privateServer: '', exePath: '', multiInstance: true, cooldownSec: 120, closeAfterDelivery: true },
     extensionToken: rid(8),
     agentToken: rid(8),

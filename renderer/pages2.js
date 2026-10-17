@@ -394,6 +394,10 @@ const STEP_META = [
     ['deliverySuccess', 'Delivery success', 'all trades done', '{username}'],
     ['manualFallback', 'Manual fallback', 'when Zotac needs you: 3 failures with cancelling off, or pets it can not match', ''],
     ['orderCancelled', 'Order cancelled', 'after 3 failures: the order is cancelled and refunded', '{reason} {attempts}'],
+    ['usernameReminder', 'Username reminder', 'no username / confirmation yet, halfway to the limit', '{minutes}'],
+    ['buyerKeptCancelling', 'Given up: buyer kept cancelling', 'the buyer cancelled the trade too many times: cancelled and refunded', '{count}'],
+    ['buyerNoShow', 'Given up: buyer offline / no accept', 'the buyer stayed offline or never accepted the trade: cancelled and refunded', '{minutes}'],
+    ['buyerNoUsername', 'Given up: no username', 'no Roblox username within the limit: cancelled and refunded', '{minutes}'],
     ['outOfStock', 'Out of stock (cancelled)', 'the brainrot is not there (not tracked, gone from the base, or missing in game twice): cancelled and refunded', '{item} {reason}']]]
 ];
 const TUTORIAL = {
@@ -682,6 +686,11 @@ PAGES.delivery = async root => {
         setting('Mark order delivered', 'Calls Eldorado "deliver" after all trades succeed', sw(cfg.markDelivered, v => saveSettings({ delivery: { markDelivered: v } }))),
         setting('Cancel order if delivery fails', 'After 3 failed attempts: tell the buyer why and cancel the order on Eldorado (refund). Off = manual fallback', sw(cfg.cancelOnFail !== false, v => saveSettings({ delivery: { cancelOnFail: v } }))),
         setting('Cancel when brainrots are unavailable', 'The ordered brainrot is not tracked, left the base in a rescan, or the game showed it missing twice: tell the buyer it is out of stock and cancel (refund). Never after a pet already reached the buyer. Off = manual fallback', sw(cfg.cancelOnUnavailable !== false, v => saveSettings({ delivery: { cancelOnUnavailable: v } }))),
+        setting('Give up on the buyer', 'Cancel the order (refund) with a message saying why when the buyer keeps cancelling the trade, stays offline / never accepts it, or never sends a username. Off = keep retrying (3 tries), then the normal cancel', sw(cfg.giveUpOnBuyer !== false, v => saveSettings({ delivery: { giveUpOnBuyer: v } }))),
+        cfg.giveUpOnBuyer !== false ? [
+          setting('· Trade cancels allowed', 'The buyer cancelling or closing the trade this many times ends the order', num(cfg.buyerCancelLimit || 3, v => saveSettings({ delivery: { buyerCancelLimit: Math.max(1, Number(v) || 3) } }))),
+          setting('· Offline / no accept (min)', 'Minutes the buyer may be offline, out of the server or ignore the trade request before the order ends (also after 3 failed tries)', num(cfg.buyerNoShowMin || 8, v => saveSettings({ delivery: { buyerNoShowMin: Math.max(1, Number(v) || 8) } }))),
+          setting('· No username (min)', 'Minutes without the buyer\'s Roblox username or confirmation (a reminder goes out halfway); counted again from every buyer message', num(cfg.usernameWaitMin || 30, v => saveSettings({ delivery: { usernameWaitMin: Math.max(5, Number(v) || 30) } })))] : null,
         setting('Close games when a delivery fails', 'Closes every Roblox window Zotac opened for that order (the script account and the stock account) once it stops, unless another order needs it', sw(cfg.closeOnFail !== false, v => saveSettings({ delivery: { closeOnFail: v } }))),
         setting('Record video proof', 'Records the Roblox window during delivery (Video Proof page)', sw(cfg.recordProof, v => saveSettings({ delivery: { recordProof: v } }))),
         setting('Script connect timeout', 'Seconds a queued trade waits for the account\'s delivery script to connect (a running trade gets 7–10 min)', num(cfg.agentTimeoutSec, v => saveSettings({ delivery: { agentTimeoutSec: v } })))));

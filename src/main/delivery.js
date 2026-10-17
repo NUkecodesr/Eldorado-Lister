@@ -9,6 +9,10 @@ const TALK_APP_ID = '49mLECOW';
 // the agent saw the ordered brainrot missing: not in its own base, not in the trade window, or not in
 // the stock account's base (Security steal). Twice for one order = it is not there: no third try
 const UNAVAILABLE_RE = /^only \d+ .+ in base$| not found in the trade window| not found in @\S+'s base$/;
+// the buyer closed / cancelled the trade window (agent reasons)
+const BUYER_CANCEL_RE = /closed the trade|brainrots are still in your base \(cancelled\?\)/;
+// the buyer never showed up for the trade: offline, not in the server, never accepted the request
+const BUYER_NOSHOW_RE = /is offline|not found in trade search|did not accept the trade request/;
 const GUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/ig;
 
 // Injected into the eldorado.gg bridge page.
@@ -181,7 +185,7 @@ class Delivery extends EventEmitter {
       orderId: order.id, buyer: order.buyer, title: order.title, conversationId: null, price: order.price != null ? Number(order.price) : null,
       state: 'awaitUsername', username: null, robloxId: null, quantity,
       petIds: pets.map(p => p.id), accounts, step: 0, attempts: 0, jobs: [], log: [], createdAt: Date.now(),
-      sim: !!order.sim
+      sim: !!order.sim, timed: true   // timed: the username wait limit applies (orders from before it never get it)
     };
     // Bought more than Zotac can match to pets (offer quantity raised outside Zotac, pets removed,
     // offer not listed by Zotac): never trade fewer than were paid for. The brainrots are not
@@ -640,6 +644,7 @@ class Delivery extends EventEmitter {
       const first = !j.toldOffline; j.toldOffline = true;
       this.store.save(); this.emit('job', j);
       const d = this.map[j.orderId];
+      if (d && !d.noShowSince) { d.noShowSince = Date.now(); this.store.save(); }
       this.log('info', `Job ${id}: buyer @${j.buyerUsername} is offline in Steal a Brainrot - waiting for them`);
       if (d && first) await this.say(d, 'buyerOffline', { username: j.buyerUsername || d.username || '' });
       return true;
@@ -648,10 +653,48 @@ class Delivery extends EventEmitter {
       j.startedAt = Date.now(); j.reoffers = (j.reoffers || 0) + 1;
       this.store.save(); this.emit('job', j);
       const d = this.map[j.orderId];
+      if (d && this.countBuyerCancel(d)) {
+        // enough: the agent is told to stop before it sends the trade again; the order is given up
+        // when its result comes in (a trade that still went through is delivered as normal)
+        j.cancelRequested = true; this.store.save();
+        this.log('warn', `Job ${id}: @${j.buyerUsername} cancelled the trade ${d.buyerCancels} times — giving up on this order`);
+        return true;
+      }
       this.log('warn', `Job ${id}: @${j.buyerUsername} cancelled the trade (${body.reason || '?'}) — sending it again`);
       if (d) await this.say(d, 'buyerCancelled', { round: body.round || j.reoffers });
     }
     return true;
+  }
+
+  // --- giving up on the buyer -------------------------------------------
+  // A buyer who keeps cancelling the trade, stays offline / never accepts it, or never sends a
+  // Roblox username is not waited on forever: the order is cancelled (Eldorado refunds) with a
+  // message that says which. Limits in Delivery Settings; switch "Give up on the buyer" off for the
+  // old behaviour (3 failed tries, then the general cancel / seller fallback).
+  get buyerRules() {
+    const c = this.cfg;
+    return { on: c.giveUpOnBuyer !== false, cancels: Math.max(1, Number(c.buyerCancelLimit) || 3), noShowMin: Math.max(1, Number(c.buyerNoShowMin) || 8), usernameMin: Math.max(5, Number(c.usernameWaitMin) || 30) };
+  }
+  // one more trade the buyer cancelled; true = the limit is reached (the order gets given up)
+  countBuyerCancel(d) {
+    d.buyerCancels = (d.buyerCancels || 0) + 1;
+    const r = this.buyerRules;
+    if (r.on && d.buyerCancels >= r.cancels && !d.giveUp) d.giveUp = { kind: 'cancels', count: d.buyerCancels };
+    this.store.save();
+    return !!(r.on && d.giveUp);
+  }
+  async buyerGiveUp(d) {
+    if (['done', 'cancelled', 'manual'].includes(d.state) || !d.giveUp) return;
+    const g = d.giveUp;
+    const why = g.kind === 'cancels' ? `buyer cancelled the trade ${g.count} times`
+      : g.kind === 'noShow' ? `buyer was offline or did not accept the trade for ${g.minutes} min`
+        : `buyer sent no Roblox username for ${g.minutes} min`;
+    const msg = { cancels: 'buyerKeptCancelling', noShow: 'buyerNoShow', username: 'buyerNoUsername' }[g.kind];
+    d.debug = this.debugReport(d, why);
+    this.log('warn', `Order ${d.orderId}: giving up — ${why}`);
+    const traded = this.store.get('pets').filter(p => d.petIds.includes(p.id) && p.delivered && p.tradedTo).length;
+    if (traded) return this.needsYou(d, `${why}; ${traded} pet(s) of this order already reached the buyer, so it is not cancelled`);
+    return this.cancelOrder(d, `Gave up: ${why}`, msg, { count: g.count || 0, minutes: g.minutes || 0 }, `Buyer did not complete the delivery: ${why}`);
   }
 
   // permanent memory of pets that left a base: stolen by the mother, delivered to a buyer, or (from
@@ -797,9 +840,21 @@ class Delivery extends EventEmitter {
       d.step++; d.attempts = 0;
       this.queueNext(d);
     } else {
+      // the buyer hit a limit (kept cancelling): the agent stopped on Zotac's word, the order is given up
+      if (d.giveUp) return this.buyerGiveUp(d);
       d.attempts++;
       this.log('warn', `Job ${id} failed (${reason}) attempt ${d.attempts}`);
       if (UNAVAILABLE_RE.test(reason || '') && (d.unavailable = (d.unavailable || 0) + 1) >= 2) return this.unavailable(d, reason, j);
+      const r = this.buyerRules;
+      // the last re-offer of a job the buyer cancelled comes back as the job's failure
+      if (BUYER_CANCEL_RE.test(reason || '') && this.countBuyerCancel(d)) return this.buyerGiveUp(d);
+      // offline / never accepted / not in the server: given up once that lasted long enough
+      if (BUYER_NOSHOW_RE.test(reason || '')) {
+        d.noShowSince = d.noShowSince || j.startedAt || j.createdAt || Date.now();
+        const minutes = Math.round((Date.now() - d.noShowSince) / 60000);
+        if (r.on && (minutes >= r.noShowMin || d.attempts >= 3)) { d.giveUp = { kind: 'noShow', minutes: Math.max(1, minutes) }; return this.buyerGiveUp(d); }
+      }
+      if (r.on && d.attempts >= 3 && d.buyerCancels && BUYER_CANCEL_RE.test(reason || '')) { d.giveUp = { kind: 'cancels', count: d.buyerCancels }; return this.buyerGiveUp(d); }
       if (d.attempts >= 3) return this.fail(d, reason, j);
       await this.say(d, 'deliveryFailed', { reason: reason || 'trade failed' });
       setTimeout(() => this.queueNext(d), 15000);
@@ -937,6 +992,25 @@ class Delivery extends EventEmitter {
       }
     }
     if (jobs.length > 500) jobs.splice(0, jobs.length - 400);
+    this.checkUsernameWait(now);
+  }
+
+  // a buyer who never sends (or confirms) their Roblox username: reminded halfway, the order is
+  // given up at the limit. Counted from the order or the buyer's last chat message.
+  checkUsernameWait(now = Date.now()) {
+    const r = this.buyerRules;
+    if (!r.on) return;
+    for (const d of Object.values(this.map)) {
+      if (!d || !d.timed || !['awaitUsername', 'awaitConfirm'].includes(d.state)) continue;
+      const lastIn = d.log.reduce((t, l) => (l.in ? Math.max(t, l.t || 0) : t), 0);
+      const since = Math.max(d.createdAt || 0, lastIn);
+      const mins = (now - since) / 60000;
+      if (mins >= r.usernameMin) { d.giveUp = { kind: 'username', minutes: Math.round(mins) }; this.buyerGiveUp(d); continue; }
+      if (mins >= r.usernameMin / 2 && (d.remindedAt || 0) < since) {
+        d.remindedAt = now; this.store.save();
+        this.say(d, 'usernameReminder', { minutes: Math.max(1, Math.round(r.usernameMin - mins)) });
+      }
+    }
   }
 
   // --- manual controls from the UI ---------------------------------------
