@@ -140,6 +140,7 @@ local function plotCaches()
 end
 local function plotAnimalList(plotName)
     local ct = plotCaches()[plotName]
+    if not ct and os.clock() - plotCacheAt > 2 then plotCacheMap = nil; ct = plotCaches()[plotName] end
     if not ct then return nil end
     local ok, list = pcall(function() return ct.AnimalList end)
     return ok and type(list) == "table" and list or nil
@@ -828,13 +829,26 @@ end
 waitForPets()
 runOnce(true)
 pcall(runServer)
+local function rescanWanted()
+    if not httpRequest or ZOTAC_TOKEN == "PASTE_AGENT_TOKEN" then return false end
+    local ok, res = pcall(httpRequest, {
+        Url = "http://127.0.0.1:" .. ZOTAC_PORT .. "/scanner/wanted?account=" .. HttpService:UrlEncode(LP.Name),
+        Method = "GET", Headers = {["X-Zotac-Token"] = ZOTAC_TOKEN},
+    })
+    if not ok or not res or res.StatusCode ~= 200 then return false end
+    local okD, d = pcall(HttpService.JSONDecode, HttpService, res.Body)
+    return okD and type(d) == "table" and d.rescan == true
+end
 task.spawn(function()
     local t = 0
     while running do
-        task.wait(30)
+        task.wait(5)
         if not running then break end
-        heartbeat()
-        t += 30
-        if AUTO_SECONDS > 0 and t >= AUTO_SECONDS then t = 0; pcall(runOnce, false); pcall(runServer) end
+        t += 5
+        if rescanWanted() then lastSig = nil; pcall(runOnce, false) end
+        if t % 30 == 0 then
+            heartbeat()
+            if AUTO_SECONDS > 0 then pcall(runOnce, false); pcall(runServer) end
+        end
     end
 end)

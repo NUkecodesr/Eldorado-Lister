@@ -85,14 +85,16 @@ const autoScan = {
   say(msg, level = 'info') { this.log.push({ t: Date.now(), msg, level }); if (this.log.length > 300) this.log.shift(); store.log(level, '[AutoScan] ' + msg); this.emit(); },
   state() { return { running: this.running, total: this.total, done: this.done, failed: this.failed, current: this.current, log: this.log, batch: (store.get('settings').autoscan || {}).batch || 3, ids: (store.get('settings').autoscan || {}).ids || null }; },
   emit() { send('autoscan', this.state()); },
-  onImport(username, r) {
+  onImport(username, r, count) {
     if (r && r.incomplete) return;   // half-loaded base: keep waiting for the real scan
     const k = String(username || '').toLowerCase();
     const w = this.waiters[k];
-    if (w) { delete this.waiters[k]; w({ ok: true, added: r && r.added }); }
+    if (w) { delete this.waiters[k]; w({ ok: true, count: count != null ? count : (r && r.added) || 0 }); }
   },
+  wants(account) { return !!this.waiters[String(account || '').toLowerCase()]; },
   async start({ ids, batch } = {}) {
     if (this.running) return this.state();
+    ids = Array.isArray(ids) ? ids : [];
     const accts = store.get('accounts').filter(a => ids.includes(a.id) && a.cookieEnc);
     batch = Math.max(1, Math.min(10, Number(batch) || 3));
     store.patchSettings({ autoscan: { batch, ids } });
@@ -119,12 +121,16 @@ const autoScan = {
     if (this.stopFlag) return;
     const k = a.username.toLowerCase();
     const result = new Promise(res => { this.waiters[k] = res; setTimeout(() => { if (this.waiters[k] === res) { delete this.waiters[k]; res({ ok: false, why: 'no scan within 3 minutes (is the scanner in your executor\'s autoexec?)' }); } }, 180000); });
-    try { await launcher.launch(a.id, { force: true }); this.say(`@${a.username}: launched, waiting for the scan`); }
-    catch (e) { delete this.waiters[k]; this.failed++; this.say(`@${a.username}: ${e.message}`, 'error'); return; }
+    const already = launcher.isOnline(a);
+    if (already) this.say(`@${a.username}: already in game - asking its scanner for a fresh scan`);
+    else {
+      try { await launcher.launch(a.id, { force: true }); this.say(`@${a.username}: launched, waiting for the base to load`); }
+      catch (e) { delete this.waiters[k]; this.failed++; this.say(`@${a.username}: ${e.message}`, 'error'); return; }
+    }
     const r = await result;
-    if (r.ok) { this.done++; this.say(`@${a.username}: scanned (${r.added || 0} pets)`); }
+    if (r.ok) { this.done++; this.say(`@${a.username}: scanned (${r.count} pets)`); }
     else { this.failed++; this.say(`@${a.username}: ${r.why}`, 'warn'); }
-    setTimeout(() => launcher.closeGame(a.username).catch(() => {}), 1500);
+    if (!already) setTimeout(() => launcher.closeGame(a.username).catch(() => {}), 1500);   // only the windows Auto Scan opened
   },
   stop() { this.stopFlag = true; for (const k of Object.keys(this.waiters)) { const w = this.waiters[k]; delete this.waiters[k]; w({ ok: false, why: 'stopped' }); } this.say('Stopping...'); return this.state(); }
 };
@@ -252,7 +258,7 @@ function wire() {
   ipcMain.on('bridge:event', (_e, { type, payload }) => { if (type === 'talk:message') delivery.onMessage(payload); });
 
   try { syncAutoexec(); } catch (e) { store.log('warn', '[Autoexec] ' + e.message); }
-  startLocalServer({ store, bridge, delivery, onServerScan: saveServerScan, onArt: a => { try { art.remember(a); } catch (e) { store.log('warn', '[Scanner] art: ' + e.message); } }, onAgentClosing: acc => launcher.closeGame(acc), importScan: data => { const r = importPets(data, null, { replace: true }); refreshAvatarsSoon(); autoScan.onImport(data && data.username, r); send('pets:changed'); store.log('info', `[Scanner] ${data && data.username}: ${r.added} pets synced`); return r; }, onCookies: () => { send('auth:changed'); afterLogin(); } });
+  startLocalServer({ store, bridge, delivery, wantRescan: acc => autoScan.wants(acc), onServerScan: saveServerScan, onArt: a => { try { art.remember(a); } catch (e) { store.log('warn', '[Scanner] art: ' + e.message); } }, onAgentClosing: acc => launcher.closeGame(acc), importScan: data => { const r = importPets(data, null, { replace: true }); refreshAvatarsSoon(); autoScan.onImport(data && data.username, r, data && Array.isArray(data.pets) ? data.pets.length : null); send('pets:changed'); store.log('info', `[Scanner] ${data && data.username}: ${r.added} pets synced`); return r; }, onCookies: () => { send('auth:changed'); afterLogin(); } });
 }
 
 async function afterLogin() {
@@ -270,8 +276,8 @@ async function afterLogin() {
 function importPets(json, accountId, { replace = false } = {}) {
   const raw = typeof json === 'string' ? JSON.parse(json) : json;
   // a scan taken before the base finished loading: pets missing, keep what we have
-  if (replace && raw && Array.isArray(raw.pets) && raw.expected != null && raw.pets.length < raw.expected) {
-    store.log('warn', `[Scanner] ${raw.username}: base still loading (${raw.pets.length}/${raw.expected} pets) - not imported`);
+  if (replace && raw && Array.isArray(raw.pets) && !raw.pets.length && raw.expected > 0) {
+    store.log('warn', `[Scanner] ${raw.username}: base still loading (0/${raw.expected} pets) - not imported`);
     return { added: 0, removed: 0, incomplete: true };
   }
   if (replace && raw && Array.isArray(raw.pets) && !raw.pets.length && raw.expected == null) {
