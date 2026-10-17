@@ -628,6 +628,9 @@ end
 -- / outside where the walk home starts. Walked like a player: MoveTo per spot, a ladder by pushing
 -- into it like holding W. (Tested live 2026-10-17 with the steal tester: floor 3, ladder.)
 local function flatDist(a, b) return ((a - b) * Vector3.new(1, 0, 1)).Magnitude end
+-- the character the walk started with is still there and alive (lasers / a fall kill and respawn it:
+-- steering the old one does nothing)
+local function alive(hum, root) return hum and root and hum.Parent ~= nil and root.Parent ~= nil and hum.Health > 0 and LP.Character == hum.Parent end
 local function nodeWorld(route, pivot, i)
     local n = route.nodes[i]
     return pivot:PointToWorldSpace(Vector3.new(n[1], n[2], n[3]))
@@ -678,15 +681,16 @@ local function walkStraight(pos, within, timeout)
     if not (hum and root and pos) then return false end
     local t0, lastPos, still = os.clock(), root.Position, os.clock()
     while flatDist(root.Position, pos) > within and os.clock() - t0 < timeout and running do
+        if not alive(hum, root) then return false end
         hum:MoveTo(pos)
         local w0 = os.clock()
         repeat
             RunService.Heartbeat:Wait()
             if (root.Position - lastPos).Magnitude > 0.5 then lastPos, still = root.Position, os.clock()
             elseif os.clock() - still > 1 then hum.Jump = true; still = os.clock() end
-        until flatDist(root.Position, pos) <= within or os.clock() - w0 > 2 or not running
+        until flatDist(root.Position, pos) <= within or os.clock() - w0 > 2 or not running or not alive(hum, root)
     end
-    return flatDist(root.Position, pos) <= within
+    return alive(hum, root) and flatDist(root.Position, pos) <= within
 end
 -- a ladder: the way into it comes from the route (walk spot before it -> the ladder), never from
 -- where the character stands. Line up at its foot, then push into it until the top of the climb.
@@ -720,7 +724,7 @@ local function climbLadder(route, pivot, path, k, hum, root)
     pcall(function() RunService:UnbindFromRenderStep("ZotacClimbPush") end)
     RunService:BindToRenderStep("ZotacClimbPush", Enum.RenderPriority.Input.Value + 1, function() if pushing then hum:Move(dir, false) end end)
     local t0, bestY, gainAt = os.clock(), root.Position.Y, os.clock()
-    while root.Position.Y < topY - 0.5 and os.clock() - t0 < 15 and running do
+    while root.Position.Y < topY - 0.5 and os.clock() - t0 < 15 and running and alive(hum, root) do
         RunService.Heartbeat:Wait()
         if root.Position.Y > bestY + 0.3 then bestY, gainAt = root.Position.Y, os.clock() end
         if os.clock() - gainAt > 1.5 then hum.Jump = true; gainAt = os.clock() end   -- not grabbing: hop onto it
@@ -732,7 +736,55 @@ local function climbLadder(route, pivot, path, k, hum, root)
     hum:Move(Vector3.zero)
     return last, root.Position.Y >= topY - 0.5
 end
-local function followRoute(route, pivot, path, timeout)
+-- base lock: while a base is locked its lasers (LaserHitbox.Main parts) collide and push you out,
+-- and the countdown shows on Purchases.PlotBlock.Main.BillboardGui.RemainingTime ("86s" / "1:05").
+-- Never walk into them: wait at the line until the lock is over.
+local laserCache = setmetatable({}, {__mode = "k"})
+local function lasersOf(plot)
+    local c = laserCache[plot]
+    if c and os.clock() - c.at < 30 then return c.parts end
+    local parts = {}
+    for _, d in ipairs(plot:GetDescendants()) do
+        if d:IsA("BasePart") and d.Name == "Main" and d.Parent and d.Parent.Name == "LaserHitbox" then table.insert(parts, d) end
+    end
+    laserCache[plot] = {at = os.clock(), parts = parts}
+    return parts
+end
+local function lasersOn(plot)
+    for _, p in ipairs(lasersOf(plot)) do if p.Parent and p.CanCollide then return true end end
+    return false
+end
+local function lockSeconds(plot)
+    local n = plot:FindFirstChild("Purchases"); n = n and n:FindFirstChild("PlotBlock"); n = n and n:FindFirstChild("Main"); n = n and n:FindFirstChild("BillboardGui")
+    local rt = n and n:FindFirstChild("RemainingTime")
+    local t = rt and rt:IsA("TextLabel") and tostring(rt.Text) or ""
+    local m, s = t:match("^(%d+):(%d+)$")
+    if m then return tonumber(m) * 60 + tonumber(s) end
+    local s2 = t:match("^(%d+)s$")
+    return s2 and tonumber(s2) or nil
+end
+local function baseLocked(plot) local left = lockSeconds(plot); return lasersOn(plot) or (left ~= nil and left > 0), left end
+local function waitUnlocked(plot, maxWait)
+    local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+    local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+    if hum and root then hum:MoveTo(root.Position) end   -- stop at the line, not in the lasers
+    local t0, said = os.clock(), -math.huge
+    while running and os.clock() - t0 < maxWait do
+        local locked, left = baseLocked(plot)
+        if not locked then return true end
+        if os.clock() - said > 10 then said = os.clock(); notify(("Base locked - waiting%s"):format(left and (" " .. left .. "s") or "")) end
+        task.wait(0.5)
+    end
+    return not baseLocked(plot)
+end
+local boxCache = setmetatable({}, {__mode = "k"})
+local function insideBase(plot, pos)
+    local b = boxCache[plot]
+    if not b then local cf, size = plot:GetBoundingBox(); b = {cf = cf, size = size}; boxCache[plot] = b end
+    local lp = b.cf:PointToObjectSpace(pos)
+    return math.abs(lp.X) <= b.size.X / 2 and math.abs(lp.Z) <= b.size.Z / 2
+end
+local function followRoute(route, pivot, path, timeout, plot)
     local char = LP.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -740,6 +792,7 @@ local function followRoute(route, pivot, path, timeout)
     local t0, k = os.clock(), 1
     while k <= #path do
         if not running or os.clock() - t0 > timeout then hum:Move(Vector3.zero); return false end
+        if not alive(hum, root) then log("warn", ("route: character died / respawned at spot %d/%d"):format(k, #path)); return false end
         local i = path[k]
         if route.nodes[i][4] == 1 then
             local last, ok = climbLadder(route, pivot, path, k, hum, root)
@@ -747,13 +800,19 @@ local function followRoute(route, pivot, path, timeout)
             k = last + 1
         else
             local wp = nodeWorld(route, pivot, i)
+            -- crossing the base's edge (in or out) while it is locked = the lasers: wait for the lock
+            if plot and insideBase(plot, root.Position) ~= insideBase(plot, wp) and baseLocked(plot) then
+                log("info", ("route: base locked (%ss) - waiting at the lasers"):format(tostring(lockSeconds(plot) or "?")))
+                if not waitUnlocked(plot, 120) then log("warn", "route: base stayed locked"); return false end
+                t0 = os.clock()   -- the wait does not count against the walk
+            end
             hum:MoveTo(wp)
             local tW, lastPos, still = os.clock(), root.Position, os.clock()
             repeat
                 RunService.Heartbeat:Wait()
                 if (root.Position - lastPos).Magnitude > 0.5 then lastPos, still = root.Position, os.clock()
                 elseif os.clock() - still > 1 then hum.Jump = true; still = os.clock() end   -- caught on a step
-            until flatDist(root.Position, wp) < 1.8 or os.clock() - tW > 4 or not running
+            until flatDist(root.Position, wp) < 1.8 or os.clock() - tW > 4 or not running or not alive(hum, root)
             k += 1
         end
     end
@@ -775,7 +834,7 @@ local function routeTo(route, plot, slot)
         if not walkStraight(entryPos, 3, 45) and not walkTo(entryPos, 3, 45) then return false end
     end
     local path = routePath(route, start, {[goal + 1] = true})
-    return path ~= nil and followRoute(route, pivot, path, 150)
+    return path ~= nil and followRoute(route, pivot, path, 150, plot)
 end
 -- out of a base along the recorded way, down to the ground at its front / outside
 local function routeOut(route, plot)
@@ -787,7 +846,7 @@ local function routeOut(route, plot)
     local goals = {}
     for _, e in ipairs(route.exits) do goals[e + 1] = true end
     local path = routePath(route, start, goals)
-    return path ~= nil and followRoute(route, pivot, path, 150)
+    return path ~= nil and followRoute(route, pivot, path, 150, plot)
 end
 local function inRange(p)
     local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
@@ -814,15 +873,17 @@ local function stealPets(job, took)
     repeat
         plr = Players:FindFirstChild(from)
         if not plr then
-            task.wait(1)
+            task.wait(0.3)
             if os.clock() - lastWant > 5 then lastWant = os.clock(); if not wanted(job) then return false, "cancelled by Zotac" end end
         end
     until plr or os.clock() - t0 > STEAL_WAIT_PLAYER or not running
     if not plr then return false, "@" .. from .. " never joined the private server" end
+    log("info", ("steal: @%s is in the server (%.0fs)"):format(from, os.clock() - t0))
     -- 2. its base, with the pets loaded
     local plot, tp = nil, os.clock()
-    repeat plot = plotOwnedBy(plr); if not plot then task.wait(1) end until plot or os.clock() - tp > 60
+    repeat plot = plotOwnedBy(plr); if not plot then task.wait(0.3) end until plot or os.clock() - tp > 60
     if not plot then return false, "base of @" .. from .. " not found" end
+    do local locked, left = baseLocked(plot); log("info", ("steal: base of @%s found%s"):format(from, locked and (" - locked" .. (left and (" " .. left .. "s") or "")) or ", open")) end
     local home = findMyPlot()
     local hit = home and home:FindFirstChild("DeliveryHitbox", true)
     local homePos = hit and hit:IsA("BasePart") and hit.Position or (home and home:GetPivot().Position)
@@ -855,11 +916,16 @@ local function stealPets(job, took)
         if not target then return false, pet.name .. " not found in @" .. from .. "'s base" end
         local prompt, podium = stealPromptFor(plot, target)
         if not prompt then return false, "no steal prompt at " .. pet.name end
+        local char0 = LP.Character
+        local died = function() local h = char0 and char0:FindFirstChildOfClass("Humanoid"); return LP.Character ~= char0 or not h or h.Health <= 0 end
+        log("info", ("steal: %s is on podium %s - walking there"):format(pet.name, tostring(podium and podium.Name)))
         -- 3. walk there (the recorded way into the base; pathfinding only without a route), steal
         -- (a locked base keeps the prompt off: wait for it)
         local walked = route and podium and routeTo(route, plot, podium.Name)
-        if route and not walked then log("warn", "recorded route to podium " .. tostring(podium and podium.Name) .. " did not get there - trying pathfinding") end
+        if died() then return false, "died on the way to " .. pet.name .. " (lasers or a fall)" end
+        if route and not walked and not inRange(prompt) then return false, "recorded route did not reach podium " .. tostring(podium and podium.Name) end
         if not inRange(prompt) and not walkTo(promptPos(prompt) or target:GetPivot().Position, math.max(4, (prompt.MaxActivationDistance or 10) - 2), 60) then return false, "could not walk to " .. pet.name end
+        log("info", ("steal: at podium %s"):format(tostring(podium and podium.Name)))
         local tE = os.clock()
         while not prompt.Enabled and os.clock() - tE < 70 do task.wait(1) end
         if not prompt.Enabled then return false, "@" .. from .. "'s base stays locked" end
@@ -873,9 +939,14 @@ local function stealPets(job, took)
         end
         if not got then return false, "steal prompt did not pick up " .. pet.name end
         notify(("Took %s (%d/%d) - walking home"):format(pet.name, i, #job.pets))
+        log("info", ("steal: took %s - walking out"):format(pet.name))
         -- 4. home: out of their base the recorded way, then into your own base's delivery spot
         if route and not routeOut(route, plot) then log("warn", "recorded way out did not work - walking home directly") end
-        if not (route and walkStraight(homePos, 3, 90)) then walkTo(homePos, 4, 90) end
+        if died() then return false, "died carrying " .. pet.name .. " (it goes back to their base)" end
+        log("info", "steal: out of their base - walking home")
+        if not (route and walkStraight(homePos, 3, 90)) and not died() then walkTo(homePos, 4, 90) end
+        if died() then return false, "died carrying " .. pet.name .. " on the way home" end
+        log("info", ("steal: home (still carrying: %s)"):format(tostring(LP:GetAttribute("Stealing") == true)))
         local tH = os.clock()
         repeat task.wait(0.5) until LP:GetAttribute("Stealing") ~= true or os.clock() - tH > 20
         if LP:GetAttribute("Stealing") == true then return false, "could not bring " .. pet.name .. " home" end
@@ -896,7 +967,7 @@ local function steal(job)
 end
 
 if not game:IsLoaded() then game.Loaded:Wait() end
-task.wait(4)
+task.wait(1)
 if ZOTAC_TOKEN == "PASTE_AGENT_TOKEN" then notify("Copy this script from Zotac so the token is filled in") return end
 if not httpRequest then notify("Your executor has no request() - cannot reach Zotac") return end
 notify("Delivery agent online for @" .. LP.Name)
@@ -931,6 +1002,6 @@ while running do
         log(okDone and "info" or "warn", ("job %s %s%s"):format(job.id, okDone and "done" or "failed", why and (" - " .. why) or ""))
         if job.closeWhenIdle then closeAt = os.clock() + 15 end
     else
-        task.wait(3)
+        task.wait(1)
     end
 end

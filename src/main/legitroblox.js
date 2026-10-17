@@ -46,7 +46,14 @@ class LegitRoblox extends EventEmitter {
       return fs.existsSync(exe) ? { version: s.version, exe, at: s.at } : null;
     } catch { return null; }
   }
+  // Roblox's current client version, asked at most every 10 min (every Legit launch checks it)
   async latest() {
+    if (this.latestHit && Date.now() - this.latestHit.at < 10 * 60000) return this.latestHit.v;
+    const v = await this.latestNow();
+    this.latestHit = { v, at: Date.now() };
+    return v;
+  }
+  async latestNow() {
     const r = await fetch(VERSION_URL);
     if (!r.ok) throw new Error('Roblox version check HTTP ' + r.status);
     const j = await r.json();

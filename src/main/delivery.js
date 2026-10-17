@@ -408,15 +408,19 @@ class Delivery extends EventEmitter {
     d.jobs.push(job.id);
     this.store.save();
     this.emit('job', job);
+    // both games load at the same time (the mother is launched for the job, the stock account
+    // here): the steal starts as soon as both are in, instead of one launch after the other
+    this.openHost(job);
   }
 
   // the stock account of a running steal is opened with real Roblox and closed again once it is
   // no longer needed. Hooks set by main (launcher); none in tests.
   openHost(j) {
     if (!this.hosts) return;
+    j.hostAt = Date.now();
     Promise.resolve().then(() => this.hosts.open(j.fromAccountId, j)).catch(e => {
       this.log('warn', `Job ${j.id}: could not open @${j.fromUsername} with real Roblox: ${e.message}`);
-      if (j.status === 'running') this.jobResult(j.id, false, `could not open @${j.fromUsername} with real Roblox: ${e.message}`);
+      if (['pending', 'running'].includes(j.status)) this.jobResult(j.id, false, `could not open @${j.fromUsername} with real Roblox: ${e.message}`);
     });
   }
   async closeHost(accountId) {
@@ -584,8 +588,9 @@ class Delivery extends EventEmitter {
     if (!j) return null;
     j.status = 'running'; j.startedAt = Date.now();
     this.store.save(); this.emit('job', j);
-    // the mother is in game and waits for the stock account: open it now (real Roblox)
-    if (j.kind === 'steal') this.openHost(j);
+    // the stock account was opened when the job was queued; asked again in case it closed since
+    // (the launcher skips one that is already running)
+    if (j.kind === 'steal' && Date.now() - (j.hostAt || 0) > 90000) this.openHost(j);
     return j;
   }
 

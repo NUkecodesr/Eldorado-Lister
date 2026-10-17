@@ -113,7 +113,7 @@ const autoScan = {
         const group = accts.slice(i, i + batch);
         this.current = group.map(a => a.username);
         this.say(`Batch ${Math.floor(i / batch) + 1}: ${this.current.map(u => '@' + u).join(', ')}`);
-        await Promise.all(group.map((a, j) => this.scanOne(a, j * 4000)));
+        await Promise.all(group.map((a, j) => this.scanOne(a, j * 2000)));
       }
       this.say(this.stopFlag ? 'Stopped' : `Finished: ${this.done} scanned, ${this.failed} failed`);
       this.running = false; this.current = []; this.emit();
@@ -757,7 +757,7 @@ function ipc() {
   handle('accounts:launch', (id, force) => { const a = store.get('accounts').find(x => x.id === id); return launcher.launch(id, { force: !!force, legit: !!(a && a.legit) }); });
   handle('legit:status', () => launcher.legit.status());
   handle('legit:install', () => launcher.legit.reinstall().then(exe => ({ exe })));
-  handle('accounts:launchAll', async () => { const out = []; for (const a of store.get('accounts').filter(x => x.cookieEnc)) { try { out.push({ username: a.username, ...(await launcher.launch(a.id, { legit: !!a.legit })) }); } catch (e) { out.push({ username: a.username, error: e.message }); } await new Promise(r => setTimeout(r, 4000)); } return out; });
+  handle('accounts:launchAll', async () => { const out = []; for (const a of store.get('accounts').filter(x => x.cookieEnc)) { try { out.push({ username: a.username, ...(await launcher.launch(a.id, { legit: !!a.legit })) }); } catch (e) { out.push({ username: a.username, error: e.message }); } await new Promise(r => setTimeout(r, 2000)); } return out; });
   handle('launcher:status', () => launcher.status());
   handle('launcher:fix', () => launcher.resetMultiInstance());
   handle('accounts:save', async a => {

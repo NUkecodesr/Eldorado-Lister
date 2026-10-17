@@ -53,9 +53,18 @@ async function authTicket(cookie) {
 // Accepts a classic ?privateServerLinkCode= link, a share link (?code=..&type=Server) or a bare share code.
 const NO_PS = 'No private server link set: Zotac never launches an account into a public server. Add your private server link in Roblox Accounts > Account Settings.';
 
+// share link -> link code: the same link always resolves the same, so it is looked up once per 30 min
+const psCache = new Map();
 async function resolvePrivateServer(link, cookie) {
   const s = String(link || '').trim();
   if (!s) return null;
+  const hit = psCache.get(s);
+  if (hit && Date.now() - hit.at < 30 * 60000) return hit.ps;
+  const ps = await resolvePrivateServerNow(s, cookie);
+  if (ps) psCache.set(s, { ps, at: Date.now() });
+  return ps;
+}
+async function resolvePrivateServerNow(s, cookie) {
   const classic = s.match(/privateServerLinkCode=([\w-]+)/i);
   if (classic) {
     const place = s.match(/games\/(\d+)/);

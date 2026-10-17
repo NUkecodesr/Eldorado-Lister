@@ -179,7 +179,55 @@ local function climb(pivot, path, k, label)
     hum:Move(Vector3.zero)
     return last, root.Position.Y >= topY - 0.5
 end
-local function follow(pivot, path, label)
+-- base lock: while a base is locked its lasers (LaserHitbox.Main parts) collide and push you out,
+-- and the countdown shows on Purchases.PlotBlock.Main.BillboardGui.RemainingTime ("86s" / "1:05").
+-- Never walk into them: wait at the line until the lock is over.
+local laserCache = setmetatable({}, {__mode = "k"})
+local function lasersOf(plot)
+    local c = laserCache[plot]
+    if c and os.clock() - c.at < 30 then return c.parts end
+    local parts = {}
+    for _, d in ipairs(plot:GetDescendants()) do
+        if d:IsA("BasePart") and d.Name == "Main" and d.Parent and d.Parent.Name == "LaserHitbox" then table.insert(parts, d) end
+    end
+    laserCache[plot] = {at = os.clock(), parts = parts}
+    return parts
+end
+local function lasersOn(plot)
+    for _, p in ipairs(lasersOf(plot)) do if p.Parent and p.CanCollide then return true end end
+    return false
+end
+local function lockSeconds(plot)
+    local n = plot:FindFirstChild("Purchases"); n = n and n:FindFirstChild("PlotBlock"); n = n and n:FindFirstChild("Main"); n = n and n:FindFirstChild("BillboardGui")
+    local rt = n and n:FindFirstChild("RemainingTime")
+    local t = rt and rt:IsA("TextLabel") and tostring(rt.Text) or ""
+    local m, s = t:match("^(%d+):(%d+)$")
+    if m then return tonumber(m) * 60 + tonumber(s) end
+    local s2 = t:match("^(%d+)s$")
+    return s2 and tonumber(s2) or nil
+end
+local function baseLocked(plot) local left = lockSeconds(plot); return lasersOn(plot) or (left ~= nil and left > 0), left end
+local function waitUnlocked(plot, maxWait)
+    local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+    local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+    if hum and root then hum:MoveTo(root.Position) end   -- stop at the line, not in the lasers
+    local t0 = os.clock()
+    while not stopFlag and os.clock() - t0 < maxWait do
+        local locked, left = baseLocked(plot)
+        if not locked then return true end
+        setStatus(("Base locked - waiting%s (lasers on)"):format(left and (" " .. left .. "s") or ""))
+        task.wait(0.5)
+    end
+    return not baseLocked(plot)
+end
+local boxCache = setmetatable({}, {__mode = "k"})
+local function insideBase(plot, pos)
+    local b = boxCache[plot]
+    if not b then local cf, size = plot:GetBoundingBox(); b = {cf = cf, size = size}; boxCache[plot] = b end
+    local lp = b.cf:PointToObjectSpace(pos)
+    return math.abs(lp.X) <= b.size.X / 2 and math.abs(lp.Z) <= b.size.Z / 2
+end
+local function follow(pivot, path, label, plot)
     local root, hum = hr()
     local k = 1
     while k <= #path do
@@ -193,6 +241,9 @@ local function follow(pivot, path, label)
             if not ok then setStatus(("%s: ladder climb FAILED at node %d"):format(label, k)); hum:Move(Vector3.zero); return false end
             k = last + 1
         else
+            if plot and insideBase(plot, root.Position) ~= insideBase(plot, wp) and baseLocked(plot) then
+                if not waitUnlocked(plot, 120) then setStatus(label .. ": base stayed locked"); return false end
+            end
             hum:MoveTo(wp)
             local tW, lastPos, still = os.clock(), root.Position, os.clock()
             repeat
@@ -229,7 +280,7 @@ local function stealOne(plot, model)
     local path = dijkstra(start, {[goal] = true})
     if not path then setStatus("No route to podium " .. pod.Name); busy = false; return end
     for _, i in ipairs(path) do dot(W(pivot, i), Color3.fromRGB(255, 220, 60), 0.7) end
-    if not follow(pivot, path, "to podium " .. pod.Name) then setStatus("Stopped"); busy = false; return end
+    if not follow(pivot, path, "to podium " .. pod.Name, plot) then setStatus("Stopped"); busy = false; return end
     -- 2. steal
     local pp = promptPos(prompt)
     setStatus(("At podium %s: %.1f studs from the prompt (range %s), prompt %s"):format(pod.Name, pp and (hr().Position - pp).Magnitude or -1, tostring(prompt.MaxActivationDistance), prompt.Enabled and "on" or "OFF"))
@@ -253,7 +304,7 @@ local function stealOne(plot, model)
     local out = here and dijkstra(here, goals)
     if out then
         for _, i in ipairs(out) do dot(W(pivot, i), Color3.fromRGB(255, 120, 60), 0.7) end
-        follow(pivot, out, "out of the base")
+        follow(pivot, out, "out of the base", plot)
     else setStatus("No way out on the route - walking home directly") end
     local home = myPlot()
     local hit = home and home:FindFirstChild("DeliveryHitbox", true)
