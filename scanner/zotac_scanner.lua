@@ -516,6 +516,12 @@ end
 local modelsSent = {}
 local modelsOut = nil
 
+-- how many pets the base holds: its podiums
+local function slotCount(plot)
+    local p = plot:FindFirstChild("AnimalPodiums")
+    return p and #p:GetChildren() or nil
+end
+
 local function readPlot(plot, overheads, used, withModels)
     local entries, info = {}, {}
     local animals = plotAnimalList(plot.Name)
@@ -602,7 +608,7 @@ local function scan()
     local pets, animals, info = readPlot(plot, overheads, {}, true)
     local expected = nil
     if animals then expected = 0; for _, a in pairs(animals) do if type(a) == "table" and type(a.Index) == "string" then expected += 1 end end end
-    return {expected = expected, username = LP.Name, userId = LP.UserId, displayName = LP.DisplayName, scannedAt = os.time(), pets = pets, traitsKnown = animals ~= nil or #overheads > 0, uuidInfo = info}
+    return {expected = expected, slots = slotCount(plot), username = LP.Name, userId = LP.UserId, displayName = LP.DisplayName, scannedAt = os.time(), pets = pets, traitsKnown = animals ~= nil or #overheads > 0, uuidInfo = info}
 end
 
 local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request
@@ -692,7 +698,7 @@ local function scanServer(includeEmpty)
             if type(animals) == "table" then expected = 0; for _, a in pairs(animals) do if type(a) == "table" and type(a.Index) == "string" then expected += 1 end end end
             -- here = the owner is in this server right now (a base can still show a player who left)
             local here = name ~= nil and Players:FindFirstChild(name) ~= nil
-            table.insert(bases, {plot = plot.Name, owner = name, displayName = display, userId = uid, mine = plot == mine or uid == LP.UserId, pets = pets, expected = expected, here = here, totalGen = total, empty = not name and #pets == 0})
+            table.insert(bases, {plot = plot.Name, owner = name, displayName = display, userId = uid, mine = plot == mine or uid == LP.UserId, pets = pets, expected = expected, here = here, slots = slotCount(plot), totalGen = total, empty = not name and #pets == 0})
         end
     end
     table.sort(bases, function(a, b)

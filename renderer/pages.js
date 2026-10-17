@@ -185,8 +185,9 @@ document.addEventListener('mousedown', e => {
 PAGES.autolist = async root => {
   const s = S.settings; const al = s.autolist; const rules = s.rules;
   const q = AL.filter.q.toLowerCase();
-  // pets taken off Auto List stay in their account's inventory; the "Removed" filter shows them
-  const removedView = AL.filter.status === 'removed';
+  // pets taken off Auto List stay in their account's inventory (Roblox Accounts), hidden here
+  if (AL.filter.status === 'removed') AL.filter.status = 'available';
+  const removedView = false;
   const pets = S.pets.filter(p =>
     (!AL.filter.account || p.accountId === AL.filter.account) &&
     (removedView ? !!p.alHidden : !p.alHidden && (AL.filter.status === 'all' || p.status === AL.filter.status)) &&
@@ -259,7 +260,7 @@ PAGES.autolist = async root => {
   const removeFromList = async ids => {
     const r = await run(() => M.call('pets:autolistRemove', ids)); if (!r) return;
     ids.forEach(id => AL.selected.delete(id));
-    toast([r.hidden ? `${r.hidden} removed from Auto List (still in the account inventory; filter "Removed" puts them back)` : '', r.deleted ? `${r.deleted} pasted pet(s) removed` : ''].filter(Boolean).join(' · '), 'good', 6000);
+    toast([r.hidden ? `${r.hidden} removed from Auto List (still in the account inventory on Roblox Accounts)` : '', r.deleted ? `${r.deleted} pasted pet(s) removed` : ''].filter(Boolean).join(' · '), 'good', 6000);
     await refreshData(); render();
   };
   const putBack = async ids => { const n = await run(() => M.call('pets:autolistRestore', ids)); ids.forEach(id => AL.selected.delete(id)); if (n) toast(`${n} back in Auto List`, 'good'); await refreshData(); render(); };
@@ -452,7 +453,7 @@ PAGES.autolist = async root => {
   // ---- pet list ----
   const sortBtn = (key, label) => h('button', { class: 'x-chip' + (AL.sort === key ? ' on' : ''), onclick: () => { if (AL.sort === key) AL.dir = -AL.dir; else { AL.sort = key; AL.dir = key === 'name' ? 1 : -1; } render(); } },
     label, AL.sort === key ? (AL.dir > 0 ? ' ↑' : ' ↓') : '');
-  const statusPills = h('div', { class: 'x-stpills' }, [['available', 'Ready'], ['listed', 'Listed'], ['sold', 'Sold'], ['all', 'All'], ['removed', `Removed (${S.pets.filter(p => p.alHidden).length})`]]
+  const statusPills = h('div', { class: 'x-stpills' }, [['available', 'Ready'], ['listed', 'Listed'], ['sold', 'Sold'], ['all', 'All']]
     .map(([k, l]) => h('button', { class: AL.filter.status === k ? 'on' : '', onclick: () => { AL.filter.status = k; AL.selected.clear(); render(); } }, l)));
   const sortBar = h('div', { class: 'x-sortbar' },
     statusPills,
@@ -1149,6 +1150,25 @@ async function loadThumbs(pets, { pictures = true } = {}) {
 }
 const XRANGES = [['', 'All ranges'], ['0-1e6', '< 1M/s'], ['1e6-1e7', '1M – 10M/s'], ['1e7-1e8', '10M – 100M/s'], ['1e8-1e9', '100M – 1B/s'], ['1e9-1e15', '1B+/s']];
 const RA = { filter: { account: '', q: '', mutation: '', min: '', max: '', range: '' }, view: 'account', tab: 'accounts', sort: 'desc', stock: false, org: 'name', open: null, limit: 60, showEmpty: false };
+// Roblox Accounts header tiles: accounts, pets in stock, how many are listed, base slots used.
+// Slots = podiums of each base, read by the scanner (accounts never scanned since 1.22 count as unknown).
+function accountStats() {
+  const accts = S.accounts;
+  const inBase = S.pets.filter(p => p.accountId && !p.delivered && !p.session);   // sold-not-delivered pets still sit in the base
+  const stock = inBase.filter(p => p.status !== 'sold');
+  const listed = stock.filter(p => p.status === 'listed').length;
+  const stockAccts = new Set(stock.map(p => p.accountId)).size;
+  const withSlots = accts.filter(a => Number(a.slots) > 0);
+  const total = withSlots.reduce((n, a) => n + Number(a.slots), 0);
+  const used = inBase.filter(p => withSlots.some(a => a.id === p.accountId)).length;
+  const ic = name => (typeof mxSvg === 'function' ? mxSvg(name, 16) : null);
+  return h('div', { class: 'x-tiles x-acc-stats' },
+    xTile('ACCOUNTS', String(accts.length), 'x-plain', `${accts.filter(a => a.hasCookie).length} connected`, ic('people')),
+    xTile('PETS IN STOCK', String(stock.length), 'x-plain', `across ${stockAccts} account${stockAccts === 1 ? '' : 's'}`, ic('layers')),
+    xTile('LISTED', `${listed}/${stock.length}`, 'x-plain', 'pets currently listed', ic('check')),
+    xTile('BASE SLOTS USED', total ? `${used}/${total}` : '—', total ? (total - used <= 0 ? 'x-red' : 'x-green') : 'x-plain',
+      total ? `${Math.max(0, total - used)} free${withSlots.length < accts.length ? ` · ${accts.length - withSlots.length} base${accts.length - withSlots.length === 1 ? '' : 's'} not scanned yet` : ''}` : 'scan the bases to count their slots', ic('folder')));
+}
 PAGES.accounts = async root => {
   const f = RA.filter;
   const LST = {}; try { for (const x of await M.call('launcher:status')) LST[x.id] = x; } catch { /* old backend */ }
@@ -1374,6 +1394,7 @@ PAGES.accounts = async root => {
         h('button', { class: 'btn sm primary', title: 'Sign in to a stock account on roblox.com; the account and its cookie are added', onclick: async () => { const r = await run(() => M.call('accounts:loginBrowser', null)); if (r) { toast(`${r.created ? 'Added' : 'Updated'} @${r.username} — cookie saved`, 'good'); await refreshData(); render(); } } }, '⎆ Browser Login'),
         h('button', { class: 'btn sm primary', onclick: () => editAcct() }, '+ Account'),
         h('button', { class: 'btn sm danger', onclick: () => { Object.assign(RA.filter, { account: '', q: '', mutation: '', min: '', max: '', range: '' }); render(); } }, 'Clear'))),
+    accountStats(),
     h('div', { class: 'x-tabs' }, h('button', { class: RA.tab === 'accounts' ? 'on' : '', onclick: () => { RA.tab = 'accounts'; render(); } }, 'Roblox Accounts'), h('button', { class: RA.tab === 'settings' ? 'on' : '', onclick: () => { RA.tab = 'settings'; render(); } }, 'Account Settings')),
     body);
 };

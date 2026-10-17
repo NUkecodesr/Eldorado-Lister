@@ -49,6 +49,13 @@ const serverScans = {};
 function saveServerScan(d) {
   const id = String(d.jobId || d.by || 'server');
   serverScans[id] = { ...d, jobId: id, receivedAt: Date.now() };
+  // slot counts of saved accounts' bases (every server scan has them)
+  let slotsChanged = false;
+  for (const b of d.bases || []) {
+    const a = b.owner && Number(b.slots) > 0 && store.get('accounts').find(x => x.username.toLowerCase() === String(b.owner).toLowerCase());
+    if (a && Number(b.slots) > (Number(a.slots) || 0)) { a.slots = Number(b.slots); slotsChanged = true; }   // far bases stream in partly: keep the highest count seen
+  }
+  if (slotsChanged) store.save();
   const ids = Object.keys(serverScans).sort((a, b) => serverScans[b].receivedAt - serverScans[a].receivedAt);
   for (const old of ids.slice(5)) delete serverScans[old];
   send('server:scan', { jobId: id });
@@ -119,7 +126,7 @@ const autoScan = {
       // without the game's count (its data not on the scanning client yet, so no uuids either) a
       // base is only taken after 90 s of waiting
       if (b.expected == null ? (!pets.length || Date.now() - (this.waitSince[k] || 0) < 90000) : pets.length < b.expected) continue;
-      const r = importPets({ username: b.owner, userId: b.userId, pets, expected: b.expected, traitsKnown: true, remote: true }, null, { replace: true, onlySaved: true });
+      const r = importPets({ username: b.owner, userId: b.userId, pets, expected: b.expected, slots: b.slots, traitsKnown: true, remote: true }, null, { replace: true, onlySaved: true });
       if (!r || r.skipped === true || r.incomplete) continue;
       store.log('info', `[Scanner] ${b.owner}: ${r.added} pets synced (server scan by @${d.by})`);
       send('pets:changed');
@@ -467,6 +474,8 @@ function importPets(json, accountId, { replace = false, onlySaved = false } = {}
     if (!importPets.warned.has(k)) { importPets.warned.add(k); store.log('warn', `[Scanner] @${raw.username} is not a saved account - its base is not synced (add it in Roblox Accounts)`); }
     return { added: 0, removed: 0, skipped: true, notSaved: raw.username };
   }
+  // how many pets that base holds (its podiums), for Roblox Accounts → Base slots
+  if (replace && raw && raw.username && Number(raw.slots) > 0) { const sa = accounts.find(a => a.username.toLowerCase() === String(raw.username).toLowerCase()); if (sa && Number(raw.slots) > (Number(sa.slots) || 0)) sa.slots = Number(raw.slots); }
   if (replace && raw && raw.uuidInfo && raw.username) {
     const ui = raw.uuidInfo, k = String(raw.username).toLowerCase();
     importPets.uuidLogged = importPets.uuidLogged || new Set();
