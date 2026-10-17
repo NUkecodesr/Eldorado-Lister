@@ -7,7 +7,7 @@ const crypto = require('crypto');
 const NOISE = /^(_ga|_gid|_gcl|_fbp|_ttp|_hj|ajs_|amp_|_clck|_clsk|intercom|__stripe|_uet|mp_|_tt_|ttcsid|_scid|_rdt|_pin|__hs|hubspot|_dd_s|OptanonConsent)/i;
 let lastCookieSig = '';
 
-function startLocalServer({ store, bridge, delivery, importScan, onServerScan, onArt, wantRescan, onCookies, onAgentClosing }) {
+function startLocalServer({ onClientError, store, bridge, delivery, importScan, onServerScan, onArt, wantRescan, onCookies, onAgentClosing }) {
   const port = store.get('settings').localPort || 47321;
   const server = http.createServer(async (req, res) => {
     const send = (code, obj) => {
@@ -88,9 +88,13 @@ function startLocalServer({ store, bridge, delivery, importScan, onServerScan, o
           const acc = String(body.account || url.searchParams.get('account') || '');
           if (acc && body.closing) {   // client is closing: offline now, so a new job relaunches it right away
             delete delivery.lastSeen[acc.toLowerCase()];
-            if (onAgentClosing) setTimeout(() => onAgentClosing(acc), 2500);   // then end the Roblox process itself
+            if (onAgentClosing) onAgentClosing(acc);   // closed on purpose (no crash relaunch), the process is ended a moment later
             for (const k of Object.keys(delivery.lastAgentPoll)) if (k.toLowerCase() === acc.toLowerCase()) delete delivery.lastAgentPoll[k];
-          } else if (acc) delivery.lastSeen[acc.toLowerCase()] = Date.now();
+          } else if (acc) {
+            delivery.lastSeen[acc.toLowerCase()] = Date.now();
+            // Roblox's error screen (kicked, disconnected): the game is useless, end and reopen it
+            if (body.error && onClientError) onClientError(acc, String(body.error));
+          }
           return send(200, { ok: true });
         }
         if (url.pathname === '/agent/jobs' && req.method === 'GET') {

@@ -972,6 +972,24 @@ if ZOTAC_TOKEN == "PASTE_AGENT_TOKEN" then notify("Copy this script from Zotac s
 if not httpRequest then notify("Your executor has no request() - cannot reach Zotac") return end
 notify("Delivery agent online for @" .. LP.Name)
 
+-- heartbeat every 10 s, also while a job runs (Zotac reopens a game that froze), and Roblox's
+-- error screen (kicked / disconnected) reported at once (Zotac ends and reopens that game)
+local clientError = nil
+pcall(function()
+    game:GetService("GuiService").ErrorMessageChanged:Connect(function(msg)
+        if running and msg and msg ~= "" then
+            clientError = tostring(msg)
+            pcall(api, "POST", "/heartbeat", {account = LP.Name, error = clientError})
+        end
+    end)
+end)
+task.spawn(function()
+    while running do
+        pcall(api, "POST", "/heartbeat", {account = LP.Name, error = clientError})
+        task.wait(10)
+    end
+end)
+
 local lastBeat = 0
 local closeAt = nil
 while running do

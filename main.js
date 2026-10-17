@@ -277,6 +277,8 @@ function wire() {
   // no private server link: nothing is launched; the job waits (you can still join and run the
   // script yourself) and the app tells you why
   launcher.on('launchBlocked', ({ reason }) => send('toast', { text: reason, kind: 'error' }));
+  // a game a delivery needs crashed / froze / errored: its job starts over on a fresh launch
+  launcher.on('crashed', c => { send('toast', { text: `@${c.username}: Roblox ${c.why} - opening it again`, kind: 'error' }); delivery.accountCrashed(c); });
 
   bridge.on('state', s => send('bridge:state', s));
   const reqs = [];
@@ -303,7 +305,7 @@ function wire() {
   ipcMain.on('bridge:event', (_e, { type, payload }) => { if (type === 'talk:message') delivery.onMessage(payload); });
 
   try { syncAutoexec(); } catch (e) { store.log('warn', '[Autoexec] ' + e.message); }
-  startLocalServer({ store, bridge, delivery, wantRescan: acc => autoScan.wants(acc), onServerScan: saveServerScan, onArt: a => { try { art.remember(a); } catch (e) { store.log('warn', '[Scanner] art: ' + e.message); } }, onAgentClosing: acc => launcher.closeGame(acc), importScan: data => { const r = importPets(data, null, { replace: true, onlySaved: true }); if (r.skipped === true) return r; refreshAvatarsSoon(); autoScan.onImport(data && data.username, r, data && Array.isArray(data.pets) ? data.pets.length : null); send('pets:changed'); store.log('info', `[Scanner] ${data && data.username}: ${r.added} pets synced`); return r; }, onCookies: () => { send('auth:changed'); afterLogin(); } });
+  startLocalServer({ store, bridge, delivery, wantRescan: acc => autoScan.wants(acc), onServerScan: saveServerScan, onArt: a => { try { art.remember(a); } catch (e) { store.log('warn', '[Scanner] art: ' + e.message); } }, onAgentClosing: acc => { launcher.markClosing(acc); setTimeout(() => launcher.closeGame(acc).catch(() => {}), 2500); }, onClientError: (acc, msg) => launcher.clientError(acc, msg), importScan: data => { const r = importPets(data, null, { replace: true, onlySaved: true }); if (r.skipped === true) return r; refreshAvatarsSoon(); autoScan.onImport(data && data.username, r, data && Array.isArray(data.pets) ? data.pets.length : null); send('pets:changed'); store.log('info', `[Scanner] ${data && data.username}: ${r.added} pets synced`); return r; }, onCookies: () => { send('auth:changed'); afterLogin(); } });
 }
 
 async function afterLogin() {

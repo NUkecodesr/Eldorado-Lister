@@ -123,6 +123,10 @@ class Launcher extends EventEmitter {
       this.checkLegitClean().catch(() => {});
     }, 20000);
     this.attachWarned = {};  // accountId -> launch time already warned about
+    this.closing = {};       // accountId -> ts: closed on purpose (by Zotac or by its agent)
+    // a game Zotac opened that crashed, was closed, froze or sits on Roblox's error screen while a
+    // delivery job needs it: ended and opened again (checked every 5 s)
+    this.watch = setInterval(() => this.checkCrashes().catch(e => this.log('warn', 'crash check: ' + e.message)), 5000);
   }
   get cfg() { return this.store.get('settings').launcher; }
   log(level, msg) { this.emit('log', this.store.log(level, '[Launcher] ' + msg)); }
@@ -215,9 +219,61 @@ class Launcher extends EventEmitter {
     this.ensureMultiInstance();
     return true;
   }
+  // closed on purpose from here on (no crash relaunch for it)
+  markClosing(username) {
+    const a = this.store.get('accounts').find(x => String(x.username).toLowerCase() === String(username).toLowerCase());
+    if (a) this.closing[a.id] = Date.now();
+    return a;
+  }
+  // the account's script reported Roblox's error screen (kicked / disconnected): end that game, the
+  // crash check then relaunches it when a job needs it
+  async clientError(username, message) {
+    const a = this.store.get('accounts').find(x => String(x.username).toLowerCase() === String(username).toLowerCase());
+    if (!a || !this.pids[a.id] || (this.closing[a.id] && Date.now() - this.closing[a.id] < 30000)) return;
+    this.log('warn', `${a.username}: Roblox error screen (${String(message).slice(0, 120)})`);
+    this.errored = this.errored || {};
+    this.errored[a.id] = String(message).slice(0, 120);
+    return this.checkCrashes();
+  }
+  async checkCrashes() {
+    const ids = Object.keys(this.pids);
+    if (!ids.length || this.checking) return;
+    this.checking = true;
+    try {
+      const alive = new Set(await robloxPids());
+      for (const id of ids) {
+        const pid = this.pids[id];
+        const a = this.acct(id);
+        if (!a || !pid) { delete this.pids[id]; continue; }
+        if (this.closing[id] && Date.now() - this.closing[id] < 30000) { if (!alive.has(pid)) delete this.pids[id]; continue; }
+        const name = String(a.username || '').toLowerCase();
+        const poll = Object.entries(this.delivery.lastAgentPoll || {}).find(([k]) => k.toLowerCase() === name);
+        const heard = Math.max(poll ? poll[1] : 0, (this.delivery.lastSeen || {})[name] || 0);
+        let why = null;
+        if (!alive.has(pid)) why = 'crashed or was closed';
+        else if (this.errored && this.errored[id]) why = 'showed an error (' + this.errored[id] + ')';
+        // a SCRIPT game whose agent talked before but went quiet for a minute: frozen
+        else if (this.mode[id] === 'script' && heard && heard > (this.lastLaunch[id] || 0) && Date.now() - heard > 60000) why = 'froze (no heartbeat for 60 s)';
+        if (!why) continue;
+        if (this.errored) delete this.errored[id];
+        const needed = this.delivery.needsAccount ? this.delivery.needsAccount(id) : false;
+        // no delivery needs that game: a gone one is forgotten, a running one is left alone
+        if (!needed) {
+          if (!alive.has(pid)) { delete this.pids[id]; this.log('info', `${a.username}: Roblox ${why} - no delivery needs it, not reopened`); }
+          continue;
+        }
+        if (alive.has(pid)) await new Promise(res => execFile('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true }, () => res()));
+        delete this.pids[id];
+        this.log('warn', `${a.username}: Roblox ${why} - opening it again`);
+        this.emit('crashed', { id, username: a.username, legit: this.mode[id] === 'legit', why });
+      }
+    } finally { this.checking = false; }
+  }
+
   // the agent finished: fully close the Roblox process Zotac launched for that account (only that one)
   async closeGame(username) {
     const a = this.store.get('accounts').find(x => String(x.username).toLowerCase() === String(username).toLowerCase());
+    if (a) this.closing[a.id] = Date.now();
     const pid = a && this.pids[a.id];
     if (!pid) { this.log('warn', `${username}: no Roblox process known (not launched by Zotac) — left open`); return false; }
     if (!(await robloxPids()).includes(pid)) { delete this.pids[a.id]; return false; }
@@ -248,7 +304,7 @@ class Launcher extends EventEmitter {
     }
   }
 
-  stop() { clearInterval(this.sweep); if (this.holder) try { this.holder.kill(); } catch { /* gone */ } }
+  stop() { clearInterval(this.sweep); clearInterval(this.watch); if (this.holder) try { this.holder.kill(); } catch { /* gone */ } }
 
   // legit = open real Roblox from Zotac's own clean install (no executor, so no Zotac scripts in it)
   async launch(id, { force = false, legit = false } = {}) {
@@ -299,6 +355,7 @@ class Launcher extends EventEmitter {
       }
     })();
     this.mode[id] = legit ? 'legit' : 'script';
+    delete this.closing[id];
     this.log('info', `Launched ${a.username} into the private server${legit ? ' (Legit: real Roblox, no executor)' : ''}`);
     this.emit('launched', { id, username: a.username });
     return { launched: true, privateServer: !!ps };

@@ -94,6 +94,7 @@ class Delivery extends EventEmitter {
     this.talkState = 'off'; this.talkError = null;
     this.lastAgentPoll = {};      // account -> ts
     this.lastSeen = {};           // lowercased account -> ts of the last in-game heartbeat
+    this.bootAt = Date.now();
     this.timer = setInterval(() => this.checkTimeouts(), 10000);
     bridge.on('state', s => { if (s === 'connecting') this.talkState = 'off'; });
   }
@@ -539,6 +540,37 @@ class Delivery extends EventEmitter {
     return e;
   }
 
+  // a delivery job runs in this account's game, or a steal takes from it
+  needsAccount(id) {
+    return this.store.get('jobs').some(j => ['pending', 'running'].includes(j.status) && (j.accountId === id || (j.kind === 'steal' && j.fromAccountId === id)));
+  }
+  // its Roblox crashed / froze / was closed (launcher): the job in that game starts over on a fresh
+  // launch (a crash is not a failed try, at most 3 per job); a stock account a steal takes from is
+  // opened again
+  accountCrashed({ id, username, why }) {
+    const n = String(username || '').toLowerCase();
+    delete this.lastSeen[n];   // offline now, so the relaunch is not skipped
+    for (const k of Object.keys(this.lastAgentPoll)) if (k.toLowerCase() === n) delete this.lastAgentPoll[k];
+    for (const j of this.store.get('jobs')) {
+      if (!['pending', 'running'].includes(j.status)) continue;
+      if (j.accountId === id) {
+        j.crashes = (j.crashes || 0) + 1;
+        if (j.crashes > 3) { this.jobResult(j.id, false, `Roblox of @${username} ${why} - 3 times in this job`); continue; }
+        j.status = 'pending'; j.startedAt = null; j.createdAt = Date.now(); j.cancelRequested = false;
+        j.reason = `Roblox ${why} - opened again (${j.crashes}/3)`;
+        this.log('warn', `Job ${j.id}: Roblox of @${username} ${why} - starting the job over on a fresh launch (${j.crashes}/3)`);
+        this.store.save();
+        this.emit('job', j);   // the launcher opens the account again
+      } else if (j.kind === 'steal' && j.fromAccountId === id) {
+        j.hostCrashes = (j.hostCrashes || 0) + 1;
+        if (j.hostCrashes > 3) { this.jobResult(j.id, false, `@${username}'s Roblox ${why} - 3 times in this steal`); continue; }
+        this.log('warn', `Job ${j.id}: @${username}'s Roblox ${why} - opening it again (${j.hostCrashes}/3)`);
+        this.store.save();
+        this.openHost(j);
+      }
+    }
+  }
+
   // the agent asks whether its job is still wanted: anything but running (stopped, timed out) = stop
   jobStatus(id) { const j = this.store.get('jobs').find(x => x.id === id); return !j ? 'gone' : j.cancelRequested ? 'cancelled' : j.status; }
 
@@ -739,6 +771,16 @@ class Delivery extends EventEmitter {
     const jobs = this.store.get('jobs');
     const now = Date.now();
     const acc = j => String(j.account || '').toLowerCase();
+    // Zotac restarted while a job ran (an update, a crash of the app): Zotac no longer knows that
+    // game. 90 s after the start, a running job whose account sent nothing since = its game is gone
+    // (crashed or closed): it starts over on a fresh launch, like a crash seen live
+    if (!this.bootChecked && now - this.bootAt > 90000) {
+      this.bootChecked = true;
+      const heardSince = name => { const p = Object.entries(this.lastAgentPoll).find(([k]) => k.toLowerCase() === name); return Math.max(p ? p[1] : 0, this.lastSeen[name] || 0) > this.bootAt; };
+      for (const j of jobs.filter(x => x.status === 'running' && (x.startedAt || 0) < this.bootAt && x.accountId && !heardSince(acc(x)))) {
+        if (j.status === 'running') this.accountCrashed({ id: j.accountId, username: j.account, why: 'stopped answering (Zotac restarted while it ran)' });
+      }
+    }
     for (const j of jobs) {
       if (j.status === 'pending') {
         // queued behind another job of the same account: that agent is busy trading, not missing
