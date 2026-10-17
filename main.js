@@ -13,6 +13,7 @@ const { Delivery } = require('./src/main/delivery');
 const { startLocalServer } = require('./src/main/localserver');
 const { checkUpdate, installUpdate } = require('./src/main/updater');
 const webmfix = require('./src/main/webmfix');
+const { LegitRoblox } = require('./src/main/legitroblox');
 const { Launcher, decryptCookie } = require('./src/main/launcher');
 const { Art } = require('./src/main/art');
 const { Wiki } = require('./src/main/wiki');
@@ -125,6 +126,9 @@ const autoScan = {
     const k = a.username.toLowerCase();
     const result = new Promise(res => { this.waiters[k] = res; setTimeout(() => { if (this.waiters[k] === res) { delete this.waiters[k]; res({ ok: false, why: 'no scan within 3 minutes (is the scanner in your executor\'s autoexec?)' }); } }, 180000); });
     const already = launcher.isOnline(a);
+    // Legit = real Roblox without the executor: no scanner can run in it, and Zotac never opens it
+    // with the executor
+    if (a.legit && !already) { delete this.waiters[k]; this.failed++; this.say(`@${a.username}: Legit mode, no scanner runs in it — skipped (its pets stay as last scanned)`, 'warn'); return; }
     if (already) this.say(`@${a.username}: already in game - asking its scanner for a fresh scan`);
     else {
       try { await launcher.launch(a.id, { force: true }); this.say(`@${a.username}: launched, waiting for the base to load`); }
@@ -244,8 +248,28 @@ function wire() {
   watcher = new Watcher({ store, eld });
   delivery = new Delivery({ store, eld, bridge });
   launcher = new Launcher({ store, delivery });
+  // real Roblox for Legit mode, in its own folder (never the executor's patched install)
+  launcher.legit = new LegitRoblox({ dir: path.join(process.env.LOCALAPPDATA || app.getPath('userData'), 'Zotac Lister', 'LegitRoblox'), log: (lvl, msg) => store.log(lvl, msg) });
+  launcher.legit.on('progress', p => send('legit:progress', p));
   launcher.on('launched', () => send('launcher:changed'));
   delivery.on('job', j => launcher.onJob(j));
+  // Security mode: the stock account a steal takes from is opened with real Roblox (never the
+  // executor) and closed again afterwards, only when Zotac opened it for that
+  const hostOpened = new Set();
+  delivery.hosts = {
+    open: async id => {
+      const a = store.get('accounts').find(x => x.id === id);
+      if (!a) throw new Error('account not found');
+      if (!(store.get('settings').launcher || {}).autoLaunch) { send('toast', { text: `Security mode: open @${a.username} with ▶ Start (Legit) now, Auto-launch is off`, kind: 'error' }); return; }
+      const r = await launcher.launch(id, { legit: true });
+      if (r.launched) hostOpened.add(id);
+    },
+    close: async id => {
+      if (!hostOpened.delete(id)) return;
+      const a = store.get('accounts').find(x => x.id === id);
+      if (a) await launcher.closeGame(a.username);
+    }
+  };
   // no private server link: nothing is launched; the job waits (you can still join and run the
   // script yourself) and the app tells you why
   launcher.on('launchBlocked', ({ reason }) => send('toast', { text: reason, kind: 'error' }));
@@ -657,8 +681,11 @@ function ipc() {
   handle('accounts:list', () => store.get('accounts').map(publicAccount));
   handle('accounts:setCookie', (id, cookie) => launcher.setCookie(id, cookie));
   handle('accounts:loginBrowser', async id => { const r = await launcher.loginBrowser(id || null, win); send('pets:changed'); return r; });
-  handle('accounts:launch', (id, force) => launcher.launch(id, { force: !!force }));
-  handle('accounts:launchAll', async () => { const out = []; for (const a of store.get('accounts').filter(x => x.cookieEnc)) { try { out.push({ username: a.username, ...(await launcher.launch(a.id)) }); } catch (e) { out.push({ username: a.username, error: e.message }); } await new Promise(r => setTimeout(r, 4000)); } return out; });
+  // manual Start: the account's own mode (SCRIPT = executor client, Legit = real Roblox)
+  handle('accounts:launch', (id, force) => { const a = store.get('accounts').find(x => x.id === id); return launcher.launch(id, { force: !!force, legit: !!(a && a.legit) }); });
+  handle('legit:status', () => launcher.legit.status());
+  handle('legit:install', () => launcher.legit.reinstall().then(exe => ({ exe })));
+  handle('accounts:launchAll', async () => { const out = []; for (const a of store.get('accounts').filter(x => x.cookieEnc)) { try { out.push({ username: a.username, ...(await launcher.launch(a.id, { legit: !!a.legit })) }); } catch (e) { out.push({ username: a.username, error: e.message }); } await new Promise(r => setTimeout(r, 4000)); } return out; });
   handle('launcher:status', () => launcher.status());
   handle('launcher:fix', () => launcher.resetMultiInstance());
   handle('accounts:save', async a => {
@@ -821,8 +848,8 @@ function ipc() {
     captureHwnd = null;
     const d = orderId && store.get('deliveries')[orderId];
     const byName = account && store.get('accounts').find(a => String(a.username).toLowerCase() === String(account).toLowerCase());
-    const job = store.get('jobs').filter(j => j.orderId === orderId && j.status === 'running' && j.kind !== 'transfer').pop();
-    const acctId = byName ? byName.id : (d && d.mother && !d.noGather) ? d.mother : job ? job.accountId : null;
+    const job = store.get('jobs').filter(j => j.orderId === orderId && j.status === 'running' && j.kind !== 'steal').pop();
+    const acctId = byName ? byName.id : (d && d.mother) ? d.mother : job ? job.accountId : null;
     const pid = acctId && launcher.pids[acctId];
     if (pid) captureHwnd = await windowOfPid(pid);
     return { account: acctId, hwnd: captureHwnd };

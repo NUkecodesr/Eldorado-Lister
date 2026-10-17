@@ -380,7 +380,7 @@ const STEP_META = [
   ['STEP 1 - GREETING', 'Order received, asking the buyer for their username', 'gold', [
     ['greeting', 'Greeting', 'new order without a Roblox username: asks for it', '{buyer} {orderId}'],
     ['greetingKnownUser', 'Greeting (username given at checkout)', 'the buyer is only asked to confirm it', '{buyer} {username}'],
-    ['multiAccount', 'Multi-account order', 'pets on several accounts and gathering is off or failed (more than one trade)', '{accounts}']]],
+    ['multiAccount', 'Multi-account order', 'Single mode, pets on several accounts (one trade per account)', '{accounts}']]],
   ['STEP 2 - USERNAME CHECK', "Validating and confirming the buyer's Roblox username", 'purple', [
     ['confirmUsername', 'Username confirmation', 'Yes/No prompt', '{username}'],
     ['invalidReply', 'Invalid confirmation reply', 'buyer typed something other than 1 or 2', ''],
@@ -388,8 +388,8 @@ const STEP_META = [
     ['usernameNotFound', 'Username not found', 'no Roblox account with that name', '']]],
   ['STEP 3 - DELIVERY', 'Trade machine flow — sending the trade and handling retries', 'gold', [
     ['deliveryStarting', 'Delivery starting', 'username confirmed, launching delivery', '{username}'],
-    ['gathering', 'Gathering onto one account', 'quantity order spread over accounts: moving it to one account first', '{quantity} {accounts} {mother}'],
-    ['deliveryAccountStep', 'Account step', 'multi-account orders when gathering is off or failed, before each account', '{step} {accounts} {account}'],
+    ['gathering', 'Gathering onto one account', 'Security mode, pets on several accounts: the mother takes them first', '{quantity} {accounts} {mother}'],
+    ['deliveryAccountStep', 'Account step', 'Single mode, pets on several accounts: before each account\'s trade', '{step} {accounts} {account}'],
     ['buyerCancelled', 'Buyer cancelled the trade', 'the trade is sent again at once (up to 2 more times)', '{round}'],
     ['deliveryFailed', 'Delivery failed (retrying)', 'agent reported a failed trade', '{reason}'],
     ['deliverySuccess', 'Delivery success', 'all trades done', '{username}'],
@@ -408,7 +408,7 @@ const TUTORIAL = {
   how: [
     ['A buyer pays', ['the order enters the ', ['Delivery Queue'], ' and Zotac greets them in the order chat.']],
     ['The buyer sends their Roblox username', ['Zotac looks it up and asks them to confirm with 1 (yes) or 2 (no).']],
-    ['Pets on several accounts', ['they are first ', ['gathered'], ' onto the account holding the most (one account at a time, max 2 games open), so the buyer gets one trade.']],
+    ['Delivery mode', [['Single'], ': each account trades its own pets to the buyer. ', ['Security'], ': one SCRIPT account (the mother) takes the pets in game from the stock accounts, opened with real Roblox one at a time (max 2 games open), then does one trade to the buyer.']],
     ['A trade job is created', ['the account is opened if needed and its script sends the trade to the buyer. If the buyer cancels, it is sent again.']],
     ['Done', ['when the script reports success, Zotac tells the buyer, optionally marks the order as delivered and records the trade on video. After 3 failed tries the order is ', ['cancelled'], ' on Eldorado (or left to you if that is switched off).']]
   ]
@@ -426,7 +426,7 @@ async function openOrderSimulator() {
   const petSel = h('select', null, avail.map(p => h('option', { value: p.id }, `${p.name}${p.mutation && p.mutation !== 'None' ? ' · ' + p.mutation : ''} · ${formatGen(p.gen)} · @${(S.accounts.find(a => a.id === p.accountId) || {}).username || '?'}`)));
   const buyerIn = h('input', { type: 'text', value: 'EldoradoBuyer', placeholder: 'Eldorado buyer name' });
   // quantity: how many identical copies (same name, mutation, gen/s, traits) the buyer bought;
-  // copies on other accounts are gathered onto one account first, like a real order
+  // copies on other accounts are delivered like a real order (Security: the mother takes them first)
   const nk = x => String(x || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const sameKey = p => [nk(p.name), nk(p.mutation || 'None'), Math.round(Number(p.gen) || 0), (p.traits || []).map(nk).sort().join(',')].join('|');
   const qtyIn = h('input', { type: 'number', min: 1, value: 1, style: { width: '80px' } });
@@ -436,7 +436,7 @@ async function openOrderSimulator() {
     const same = pet ? avail.filter(p => sameKey(p) === sameKey(pet)) : [];
     const accts = [...new Set(same.map(p => (S.accounts.find(a => a.id === p.accountId) || {}).username || '?'))];
     qtyIn.max = Math.max(1, same.length);
-    qtyHint.textContent = `${same.length} identical in stock${accts.length > 1 ? ' on ' + accts.map(a => '@' + a).join(', ') + ' (×2+ gathers onto one account)' : ''}`;
+    qtyHint.textContent = `${same.length} identical in stock${accts.length > 1 ? ' on ' + accts.map(a => '@' + a).join(', ') + ((S.settings.delivery || {}).mode === 'security' ? ' (Security: the mother takes them first)' : ' (Single: one trade per account)') : ''}`;
   };
   petSel.addEventListener('change', showQty); showQty();
   const start = await new Promise(res => modal('Simulate an order', h('div', { class: 'grid' },
@@ -475,11 +475,11 @@ async function openOrderSimulator() {
     try {
       const jobs = (await M.call('delivery:jobs')).filter(j => j.orderId === orderId);
       const j = jobs[jobs.length - 1];
-      // a gathered order runs several jobs at once: show each live one (receive, transfer, buyer trade)
+      // live jobs of the order (Security mode: the mother's steal, then the buyer trade)
       const live = jobs.filter(x => ['pending', 'running'].includes(x.status));
       const show = live.length ? live : (j ? [j] : []);
-      const one = x => `${x.kind === 'receive' ? 'receive' : x.kind === 'transfer' ? 'transfer' : 'trade'} ${x.status}` +
-        (x.kind === 'receive' ? ` (@${x.fromUsername} → @${x.account})` : x.account ? ` (@${x.account} → @${x.buyerUsername})` : '') + (x.reason ? ' — ' + x.reason : '');
+      const one = x => `${x.kind === 'steal' ? 'steal' : 'trade'} ${x.status}` +
+        (x.kind === 'steal' ? ` (@${x.account} takes from @${x.fromUsername})` : x.account ? ` (@${x.account} → @${x.buyerUsername})` : '') + (x.reason ? ' — ' + x.reason : '');
       if (show.length) job = ' · ' + show.map(one).join(' · ');
     } catch { /* jobs not loaded */ }
     status.textContent = `Order ${orderId} · ${cur.state}${cur.username ? ' · Roblox @' + cur.username : ''}${job}`;
@@ -634,6 +634,27 @@ PAGES.delivery = async root => {
     !['done', 'cancelled'].includes(d.state) ? h('button', { class: 'btn sm danger', title: 'Stop (local only)', onclick: async () => { if (await confirmBox('Stop Zotac working on this order? Only Zotac stops: the Eldorado order is NOT cancelled and the buyer is not messaged. Its pets go back in stock.')) run(() => M.call('delivery:manual', d.orderId, 'cancel'), 'Stopped'); } }, '✕') : null,
     h('button', { class: 'btn sm ghost', onclick: () => modal('Conversation', h('div', { class: 'log', style: { maxHeight: '60vh' } }, d.log.map(l => h('div', { class: l.err ? 'l-error' : 'l-info' }, `${new Date(l.t).toLocaleTimeString()} ${l.in ? '◀ ' + l.in : l.out ? '▶ ' + l.out : '✕ ' + l.err}`))), [{ label: t('close') }]) }, 'Log'));
   const thumb = d => h('div', { class: 'mx-dthumb' }, String(d.title || d.orderId || '?').trim()[0] || '?');
+  // Single / Security: a popup says what the mode does and what it needs; orders already
+  // delivering keep the mode they started with
+  const mode = cfg.mode === 'security' ? 'security' : 'single';
+  const pickMode = k => {
+    if (k === mode) return;
+    const scriptAccts = S.accounts.filter(a => a.hasCookie && !a.legit);
+    const body = k === 'security'
+      ? h('div', null,
+        h('p', null, 'Security mode: one account in SCRIPT mode is the mother. For each order Zotac opens the stock accounts that hold its pets with real Roblox (Legit, no executor) in your private server, one at a time. The mother walks into their base, takes the pets with the game\'s own steal prompt, brings them home, then does ONE trade to the buyer.'),
+        h('p', null, 'Only the mother ever runs Zotac\'s scripts. The trade to the buyer is the only part recorded on video.'),
+        h('p', { class: scriptAccts.length ? 'muted' : 'mx-fail' }, scriptAccts.length
+          ? `Mother candidates now (SCRIPT, logged in): ${scriptAccts.map(a => '@' + a.username).join(', ')}. Zotac picks the best one per order.`
+          : 'No logged-in account is in SCRIPT mode yet: orders will stop for you until one is (Roblox Accounts → SCRIPT).'))
+      : h('div', null,
+        h('p', null, 'Single mode: every account trades its own pets to the buyer, one trade per account, with Zotac\'s delivery script running in each of them.'),
+        h('p', { class: 'muted' }, 'Accounts in Legit mode can\'t run the script: an order with pets on one stops for you.'));
+    modal(k === 'security' ? 'Security mode' : 'Single mode', body, [
+      { label: t('cancel') },
+      { label: k === 'security' ? 'Use Security mode' : 'Use Single mode', cls: 'primary', fn: async () => { await saveSettings({ delivery: { mode: k } }); toast(`Auto Delivery: ${k === 'security' ? 'Security' : 'Single'} mode`, 'good'); render(); } }
+    ]);
+  };
   const stateCls = { done: 'good', manual: 'bad', delivering: 'gold', cancelled: '' };
 
   const logs = (S.logs || []).filter(l => /\[(Delivery|Proof|Agent|Launcher|Sale)\]/.test(l.msg) && l.t > DV.clearedAt).slice(-150);
@@ -647,7 +668,10 @@ PAGES.delivery = async root => {
       h('div', { class: 'mx-rows' },
         setting('Mark order delivered', 'Calls Eldorado "deliver" after all trades succeed', sw(cfg.markDelivered, v => saveSettings({ delivery: { markDelivered: v } }))),
         setting('Cancel order if delivery fails', 'After 3 failed attempts: tell the buyer why and cancel the order on Eldorado (refund). Off = manual fallback', sw(cfg.cancelOnFail !== false, v => saveSettings({ delivery: { cancelOnFail: v } }))),
-        setting('Gather onto one account', 'Order spread over several accounts: the others trade their pets to the account holding the most (then close), and that account does ONE trade to the buyer. Off = one trade per account', sw(cfg.consolidate !== false, v => saveSettings({ delivery: { consolidate: v } }))),
+        setting('Delivery mode', mode === 'security'
+          ? 'Security: one account in SCRIPT mode (the mother) takes the pets in game from the stock accounts, which Zotac opens with real Roblox (Legit) one at a time, then does ONE trade to the buyer. Only the mother runs scripts'
+          : 'Single: every account trades its own pets to the buyer, one trade per account. Accounts in Legit mode can\'t trade',
+          h('div', { class: 'mx-pills sm' }, [['single', 'Single'], ['security', 'Security']].map(([k, l]) => h('button', { class: 'mx-pill' + (mode === k ? ' on' : ''), onclick: () => pickMode(k) }, l)))),
         setting('Record video proof', 'Records the Roblox window during delivery (Video Proof page)', sw(cfg.recordProof, v => saveSettings({ delivery: { recordProof: v } }))),
         setting('Script connect timeout', 'Seconds a queued trade waits for the account\'s delivery script to connect (a running trade gets 7–10 min)', num(cfg.agentTimeoutSec, v => saveSettings({ delivery: { agentTimeoutSec: v } }))))),
     mxCard(mxIco('user', 'purple'), 'Stock Accounts', 'Every logged-in account can deliver; Zotac opens the one an order needs', h('span', { class: 'mx-badge ' + (online ? 'good' : '') }, online ? 'SCRIPT CONNECTED' : 'NO SCRIPT ONLINE'),
@@ -687,8 +711,8 @@ PAGES.delivery = async root => {
     h('details', null, h('summary', null, 'Agent jobs & API'),
       table(jobs, [
         { label: 'Job', render: j => h('span', { class: 'mono' }, j.id) },
-        { label: 'Kind', render: j => h('span', { class: 'pill' + (j.pair ? ' purple' : '') }, j.kind === 'receive' ? 'receive' : j.kind === 'transfer' ? 'transfer' : 'trade') },
-        { label: 'Account', k: 'account' }, { label: 'To', render: j => j.kind === 'receive' ? 'from @' + (j.fromUsername || '?') : (j.buyerUsername || '—') },
+        { label: 'Kind', render: j => h('span', { class: 'pill' + (j.kind === 'steal' ? ' purple' : '') }, j.kind === 'steal' ? 'steal' : 'trade') },
+        { label: 'Account', k: 'account' }, { label: 'To', render: j => j.kind === 'steal' ? 'from @' + (j.fromUsername || '?') : (j.buyerUsername || '—') },
         { label: 'Pets', render: j => j.pets.map(p => `${p.name}${p.mutation && p.mutation !== 'None' ? ' (' + p.mutation + ')' : ''}`).join(', ') },
         { label: 'Status', render: j => h('span', { class: 'pill ' + ({ done: 'good', failed: 'bad', running: 'gold', pending: 'info' }[j.status] || '') }, j.status) },
         { label: 'Reason', render: j => j.reason || '' }, { label: 'Created', render: j => ago(j.createdAt) }], { empty: 'No jobs.' }),

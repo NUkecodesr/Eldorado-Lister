@@ -91,6 +91,8 @@ textarea.x-json { min-height: 76px; font-size: 11px; background: #0c0906; }
 .x-ab { border-radius: 6px; padding: 2px 10px; font-size: 11px; font-weight: 700; cursor: pointer; border: 1px solid; background: transparent; }
 .x-ab.legit { color: var(--good); border-color: rgba(63, 207, 114, .5); background: rgba(63, 207, 114, .08); opacity: .6; }
 .x-ab.legit.on { opacity: 1; background: rgba(63, 207, 114, .25); }
+.x-ab.script { color: var(--gold); border-color: rgba(242, 182, 49, .5); background: rgba(242, 182, 49, .08); opacity: .6; letter-spacing: .06em; }
+.x-ab.script.on { opacity: 1; background: rgba(242, 182, 49, .22); }
 .x-ab.start { color: #04210f; background: var(--good); border-color: var(--good); }
 .x-ib { background: transparent; border: 1px solid var(--line2); color: var(--ink2); border-radius: 6px; padding: 2px 7px; cursor: pointer; font-size: 11px; }
 .x-ib:hover { color: var(--ink); border-color: #57482f; }

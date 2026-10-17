@@ -291,58 +291,23 @@ class Delivery extends EventEmitter {
     this.store.save();
   }
 
-  // pets of one order on several accounts: gathered onto one "mother" account first (one trade
-  // for the buyer) unless Gather is switched off; the old one-trade-per-account flow is the fallback
-  gathers(d) { return d.accounts.length > 1 && this.cfg.consolidate !== false && !d.noGather; }
-  async multiNote(d) { if (d.accounts.length > 1 && !this.gathers(d)) await this.say(d, 'multiAccount'); }
+  // Two delivery modes (Auto Delivery settings), fixed per order when its delivery starts:
+  //  single:   every account trades its own pets to the buyer (one trade per account). An account
+  //            in Legit mode can't run the delivery script, so its pets stop the order for you.
+  //  security: an account in SCRIPT mode is the mother. Each stock account holding pets of the order
+  //            is opened with real Roblox (Legit, no executor) in the private server, one at a time;
+  //            the mother steals its pets in game and brings them home, then does ONE trade to the
+  //            buyer. Only the mother ever runs Zotac's scripts.
+  modeOf(d) { return (d && d.mode) || (this.cfg.mode === 'security' ? 'security' : 'single'); }
+  async multiNote(d) { if (d.accounts.length > 1 && this.modeOf(d) === 'single') await this.say(d, 'multiAccount'); }
 
   async startDelivery(d) {
     d.state = 'delivering'; d.step = 0; d.confirmedAt = Date.now();
+    d.mode = this.modeOf(d);
     await this.say(d, 'deliveryStarting');
     if (this.cfg.recordProof) this.emit('proof', { action: 'start', orderId: d.orderId });
-    if (this.gathers(d)) return this.startGather(d);
+    if (d.mode === 'security') return this.startSecurity(d);
     this.queueNext(d);
-  }
-
-  // --- gather onto a mother account ----------------------------------------
-  // Mother = the account holding most of the order's pets (fewest transfers); ties go to an
-  // account whose game is already open, then one with a cookie (Zotac can launch it).
-  // No account is special: whichever is best right now. It must be able to run (game open, or a
-  // saved cookie so Zotac can launch it); then most of the order's pets (fewest hops), game already
-  // open, fewest failed jobs in the last 2 h, least recently used as mother (spreads the load).
-  pickMother(d) {
-    const pets = this.store.get('pets').filter(p => d.petIds.includes(p.id) && !p.delivered);
-    const accts = this.store.get('accounts');
-    const jobs = this.store.get('jobs');
-    const since = Date.now() - 2 * 3600e3;
-    const lastMother = id => Math.max(0, ...Object.values(this.map).filter(x => x && x.mother === id).map(x => x.createdAt || 0));
-    const score = id => {
-      const a = accts.find(x => x.id === id) || {};
-      const online = this.accountOnline(id);
-      return [online || a.cookieEnc ? 1 : 0, pets.filter(p => p.accountId === id).length, online,
-        -jobs.filter(j => j.accountId === id && j.status === 'failed' && (j.finishedAt || 0) > since).length, -lastMother(id)];
-    };
-    const order = [...d.accounts].sort((a, b) => { const x = score(a), y = score(b); for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return y[i] - x[i]; return 0; });
-    return order[0];
-  }
-
-  async startGather(d) {
-    const accts = this.store.get('accounts');
-    d.mother = d.mother || this.pickMother(d);
-    d.origAccounts = d.origAccounts || [...d.accounts];
-    const mother = accts.find(a => a.id === d.mother) || {};
-    if (!mother.username) { this.log('warn', `Order ${d.orderId}: mother account unknown — one trade per account instead`); return this.gatherFallback(d, 'mother account has no username'); }
-    d.gather = d.gather || {};
-    // feeders one after another (an open game first, then the one with most pets); the next one is
-    // queued, and so launched, only after the previous hop ended and its game closed (nextFeeder):
-    // never more than 2 games open (mother + one feeder), so a crash costs as little as possible
-    const petsOf = id => this.store.get('pets').filter(p => d.petIds.includes(p.id) && p.accountId === id).length;
-    const feeders = d.feeders = d.feeders || d.accounts.filter(id => id !== d.mother)
-      .sort((a, b) => (this.accountOnline(b) - this.accountOnline(a)) || (petsOf(b) - petsOf(a)));
-    this.log('info', `Order ${d.orderId}: gathering ×${d.quantity || d.petIds.length} onto @${mother.username} from ${feeders.map(id => '@' + ((accts.find(a => a.id === id) || {}).username || '?')).join(', ')}`);
-    await this.say(d, 'gathering', { mother: mother.username });
-    this.nextFeeder(d);
-    this.store.save(); this.emit('update', d);
   }
 
   accountOnline(id) {
@@ -353,134 +318,128 @@ class Delivery extends EventEmitter {
     return Date.now() - Math.max(poll ? poll[1] : 0, this.lastSeen[n] || 0) < 75000 ? 1 : 0;
   }
 
-  // queue the next feeder once no hop is in progress and the previous feeder's game has closed
-  // (waits up to 45 s for that, then goes on anyway)
-  nextFeeder(d) {
-    if (!d || d.state !== 'delivering' || d.noGather || !d.feeders) return;
-    const g = d.gather || {};
-    if (d.feeders.some(id => g[id] && !g[id].done && !g[id].failed)) return;
-    const next = d.feeders.find(id => !g[id]);
-    if (!next) return;
-    const prevOpen = d.feeders.some(id => g[id] && this.accountOnline(id));
-    this.nfWait = this.nfWait || {};
-    const since = this.nfWait[d.orderId] = this.nfWait[d.orderId] || Date.now();
-    if (prevOpen && Date.now() - since < 45000) { setTimeout(() => this.nextFeeder(d), 3000); return; }
-    delete this.nfWait[d.orderId];
-    this.queueTransfer(d, next);
+  // --- Security mode ---------------------------------------------------------
+  // The mother is chosen by state, never by name: an account in SCRIPT mode that can run (game
+  // open, or a saved cookie so Zotac can launch it); then most of the order's pets (fewest steals),
+  // game already open, fewest failed jobs in the last 2 h, least recently used as mother.
+  pickMother(d) {
+    const pets = this.store.get('pets').filter(p => d.petIds.includes(p.id) && !p.delivered);
+    const jobs = this.store.get('jobs');
+    const since = Date.now() - 2 * 3600e3;
+    const lastMother = id => Math.max(0, ...Object.values(this.map).filter(x => x && x !== d && x.mother === id).map(x => x.createdAt || 0));
+    const score = a => [pets.filter(p => p.accountId === a.id).length, this.accountOnline(a.id),
+      -jobs.filter(j => j.accountId === a.id && j.status === 'failed' && (j.finishedAt || 0) > since).length, -lastMother(a.id)];
+    const cands = this.store.get('accounts').filter(a => !a.legit && a.username && (a.cookieEnc || this.accountOnline(a.id)));
+    cands.sort((x, y) => { const p = score(x), q = score(y); for (let i = 0; i < p.length; i++) if (p[i] !== q[i]) return q[i] - p[i]; return 0; });
+    return cands.length ? cands[0].id : null;
   }
 
-  // one feeder -> mother hop = a pair of jobs: the feeder's agent sends the trade (pets added,
-  // READY, ACCEPT, checks they left its base, then closes its game), the mother's agent accepts
-  // the incoming request, checks the offer, READY, ACCEPT, checks they arrived.
-  queueTransfer(d, feederId) {
+  async startSecurity(d) {
+    const accts = this.store.get('accounts');
+    d.mother = d.mother || this.pickMother(d);
+    const mother = accts.find(a => a.id === d.mother);
+    if (!mother) return this.needsYou(d, 'Security mode needs an account in SCRIPT mode with a saved cookie to be the mother, and there is none (Roblox Accounts → SCRIPT)');
+    d.origAccounts = d.origAccounts || [...d.accounts];
+    d.steal = d.steal || {};
+    const petsOf = id => this.store.get('pets').filter(p => d.petIds.includes(p.id) && !p.delivered && p.accountId === id).length;
+    d.feeders = d.feeders || d.accounts.filter(id => id !== d.mother && petsOf(id) > 0).sort((x, y) => petsOf(y) - petsOf(x));
+    // a stock account Zotac can't open (no cookie) and that isn't in game: nobody can steal from it
+    const stuck = d.feeders.map(id => accts.find(a => a.id === id) || { id }).filter(a => !a.cookieEnc && !this.accountOnline(a.id));
+    if (stuck.length) return this.needsYou(d, `Security mode: ${stuck.map(a => '@' + (a.username || '?')).join(', ')} has no saved cookie, so Zotac can't open it for the mother — add the cookie or deliver by hand`);
+    const uname = id => '@' + ((accts.find(a => a.id === id) || {}).username || '?');
+    if (d.feeders.length) {
+      this.log('info', `Order ${d.orderId}: Security mode — mother @${mother.username} takes the pets from ${d.feeders.map(uname).join(', ')}`);
+      if (d.accounts.length > 1) await this.say(d, 'gathering', { mother: mother.username });
+    }
+    this.store.save(); this.emit('update', d);
+    this.nextSteal(d);
+  }
+
+  // stock accounts one at a time: the next one is only opened after the previous steal ended and
+  // its game closed, so at most 2 games are open (mother + one stock account). All done = the
+  // mother trades the buyer.
+  nextSteal(d) {
+    if (!d || d.state !== 'delivering' || !d.feeders) return;
+    const g = d.steal || (d.steal = {});
+    if (d.feeders.some(id => g[id] && !g[id].done)) return;
+    const next = d.feeders.find(id => !g[id]);
+    if (next) return this.queueSteal(d, next);
+    d.accounts = [d.mother]; d.step = 0; d.attempts = 0;
+    this.store.save();
+    this.queueNext(d);
+  }
+
+  queueSteal(d, feederId) {
     const accts = this.store.get('accounts');
     const feeder = accts.find(a => a.id === feederId) || {};
     const mother = accts.find(a => a.id === d.mother) || {};
     const pets = this.store.get('pets').filter(p => d.petIds.includes(p.id) && !p.delivered && p.accountId === feederId);
-    const g = d.gather[feederId] = d.gather[feederId] || { tries: 0, done: false };
+    const g = d.steal[feederId] = d.steal[feederId] || { tries: 0, done: false };
     if (!pets.length) {
-      // nothing left on the feeder: fine only if its pets really moved (or were delivered)
+      // nothing left on that account: fine only if its pets really moved (or were delivered)
       const missing = d.petIds.filter(id => !this.store.get('pets').some(p => p.id === id));
       if (missing.length) return this.needsYou(d, `${missing.length} pet(s) of this order are no longer in Zotac's pet list (removed by a rescan or by hand) — deliver by hand`);
-      g.done = true; return this.gatherCheck(d);
+      g.done = true; return this.nextSteal(d);
     }
-    g.tries++; g.started = false;
-    const list = pets.map(p => ({ id: p.id, name: p.name, mutation: p.mutation, gen: p.gen, traits: p.traits || [] }));
-    const base = { orderId: d.orderId, status: 'pending', createdAt: Date.now(), attempt: g.tries - 1, pets: list, pair: feederId };
-    const receive = { ...base, id: rid(6), kind: 'receive', accountId: mother.id, account: mother.username || null,
-      fromUsername: feeder.username, fromUserId: feeder.robloxUserId || null, fromDisplayName: feeder.displayName || null, closeWhenIdle: false };
-    const transfer = { ...base, id: rid(6), kind: 'transfer', accountId: feeder.id, account: feeder.username || null,
-      buyerUsername: mother.username, buyerUserId: mother.robloxUserId || null, inviteTimeout: 240, closeWhenIdle: true };
-    transfer.receiveId = receive.id;
-    g.receiveId = receive.id; g.transferId = transfer.id;
-    g.ids = [...(g.ids || []), receive.id, transfer.id];
-    this.store.get('jobs').push(receive, transfer);
-    d.jobs.push(receive.id, transfer.id);
+    g.tries++;
+    const job = {
+      id: rid(6), kind: 'steal', orderId: d.orderId, accountId: mother.id, account: mother.username || null,
+      fromAccountId: feeder.id, fromUsername: feeder.username || null, fromUserId: feeder.robloxUserId || null, fromDisplayName: feeder.displayName || null,
+      pets: pets.map(p => ({ id: p.id, name: p.name, mutation: p.mutation, gen: p.gen, traits: p.traits || [] })),
+      status: 'pending', createdAt: Date.now(), attempt: g.tries - 1, closeWhenIdle: false
+    };
+    g.jobId = job.id;
+    this.store.get('jobs').push(job);
+    d.jobs.push(job.id);
     this.store.save();
-    this.emit('job', receive); this.emit('job', transfer);
+    this.emit('job', job);
   }
 
-  // result of a transfer/receive job. Either side seeing the pets move is proof enough (the
-  // feeder saw them leave, or the mother saw them arrive); the other side's result is then ignored.
-  async pairResult(j, ok, reason) {
+  // the stock account of a running steal is opened with real Roblox and closed again once it is
+  // no longer needed. Hooks set by main (launcher); none in tests.
+  openHost(j) {
+    if (!this.hosts) return;
+    Promise.resolve().then(() => this.hosts.open(j.fromAccountId, j)).catch(e => {
+      this.log('warn', `Job ${j.id}: could not open @${j.fromUsername} with real Roblox: ${e.message}`);
+      if (j.status === 'running') this.jobResult(j.id, false, `could not open @${j.fromUsername} with real Roblox: ${e.message}`);
+    });
+  }
+  async closeHost(accountId) {
+    if (!this.hosts || !accountId) return;
+    // another steal still waits for that account: left open
+    if (this.store.get('jobs').some(x => x.kind === 'steal' && x.fromAccountId === accountId && ['pending', 'running'].includes(x.status))) return;
+    try { await this.hosts.close(accountId); } catch (e) { this.log('warn', `closing the stock account's game: ${e.message}`); }
+  }
+
+  // result of a steal. Done = the mother's agent saw the pets land in its own base: they are the
+  // mother's now, also when the order ended meanwhile (rule 9: a trade that happened is booked).
+  // pets of a steal that are in the mother's base now: off the stock account, onto the mother,
+  // in the ledger. Only pets still booked on the stock account move (a repeat report changes nothing).
+  bookSteal(j, ids) {
     const d = this.map[j.orderId];
-    if (!d || !d.gather) return;
-    const g = d.gather[j.pair];
-    if (!g || g.done || !(g.ids || []).includes(j.id)) return;
-    const jobs = this.store.get('jobs');
-    const active = d.state === 'delivering';
-    if (ok) {
-      // any try's success counts (a late "done" from an earlier try still means the pets moved)
-      g.done = true;
-      for (const p of this.store.get('pets')) if (j.pets.some(x => x.id === p.id)) { p.gatheredFrom = p.accountId; p.accountId = d.mother; }
-      const accN = id => (this.store.get('accounts').find(a => a.id === id) || {}).username || null;
-      this.record('gather', { orderId: d.orderId, from: accN(j.pair), to: accN(d.mother), pets: j.pets, jobId: j.id, sim: d.sim, note: j.kind + ' side confirmed' });
-      // the other side still pending never started: drop it. Running = it is in the same trade and
-      // reports done/failed on its own (its result no longer changes anything)
-      for (const x of jobs) if (g.ids.includes(x.id) && x.id !== j.id && x.status === 'pending') {
-        x.status = 'cancelled'; x.reason = 'transfer already confirmed by job ' + j.id; x.finishedAt = Date.now(); this.emit('job', x);
-      }
-      this.log('info', `Order ${d.orderId}: ${j.pets.length} pet(s) now on @${(this.store.get('accounts').find(a => a.id === d.mother) || {}).username}`);
-      this.emit('petsChanged');
-      this.store.save();
-      return active ? this.gatherCheck(d) : undefined;
-    }
-    if (!active) return;
-    if (j.id !== g.receiveId && j.id !== g.transferId) return;   // an old try failing late changes nothing
-    // remembered: the side reporting second (usually 'cancelled by Zotac') must not hide it
-    if (/base (is )?full/i.test(String(reason))) g.baseFull = String(reason);
-    const other = jobs.find(x => x.id === (j.id === g.receiveId ? g.transferId : g.receiveId));
-    // the other side never started: drop it. Still running: ask it to stop (agents only honour that
-    // BEFORE a trade window opens) and decide when it reports, so a trade in progress is never doubled.
-    if (other && other.status === 'pending') {
-      other.status = 'cancelled'; other.reason = 'other side failed: ' + (reason || 'unknown'); other.finishedAt = Date.now(); this.emit('job', other);
-    } else if (other && other.status === 'running') {
-      other.cancelRequested = true; this.store.save();
-      this.log('warn', `Order ${d.orderId}: ${j.kind} side failed (${reason}); waiting for the ${other.kind} side to stop`);
-      return;
-    }
-    this.log('warn', `Order ${d.orderId}: transfer from @${j.kind === 'transfer' ? j.account : j.fromUsername} failed (${reason}), try ${g.tries}`);
-    // the mother's base can't take more: stop gathering, the rest trade the buyer themselves
-    if (g.baseFull) {
-      reason = g.baseFull;
-      for (const id of d.feeders || []) { const x = d.gather[id]; if (!x) d.gather[id] = { tries: 0, failed: true, reason }; else if (!x.done) x.failed = true; }
-      for (const x of jobs) if (x.orderId === d.orderId && x.pair && x.status === 'pending') { x.status = 'cancelled'; x.reason = 'mother base full'; x.finishedAt = Date.now(); this.emit('job', x); }
-      this.log('warn', `Order ${d.orderId}: mother base full — remaining accounts trade the buyer directly`);
-      return this.gatherCheck(d);
-    }
-    // 3 tries: this feeder trades the buyer itself after the mother; other feeders keep gathering
-    if (g.tries >= 3) { g.failed = true; g.reason = reason; return this.gatherCheck(d); }
+    const pets = this.store.get('pets').filter(p => ids.includes(p.id) && j.pets.some(x => x.id === p.id) && p.accountId === j.fromAccountId);
+    if (!pets.length) return 0;
+    for (const p of pets) { p.gatheredFrom = p.accountId; p.accountId = j.accountId; }
+    this.record('gather', { orderId: j.orderId, from: j.fromUsername, to: j.account, pets, jobId: j.id, sim: !!(d && d.sim), note: 'stolen in game by the mother (Security mode)' });
+    this.log('info', `Order ${j.orderId}: ${pets.length} pet(s) taken from @${j.fromUsername}, now on @${j.account}`);
+    this.emit('petsChanged');
     this.store.save();
-    setTimeout(() => { if (d.state === 'delivering' && !g.done && !d.noGather) this.queueTransfer(d, j.pair); }, 10000);
+    return pets.length;
   }
 
-  gatherCheck(d) {
-    if (d.state !== 'delivering' || d.noGather) return;
-    const feeders = d.feeders || d.accounts.filter(id => id !== d.mother);
-    this.nextFeeder(d);
-    if (feeders.some(id => { const g = (d.gather || {})[id]; return !g || (!g.done && !g.failed); })) return;
-    // everything that could be gathered is on the mother: one trade from her, then one per
-    // feeder whose hop failed (their pets never moved)
-    const failed = feeders.filter(id => d.gather[id].failed);
-    d.accounts = [d.mother, ...failed]; d.step = 0; d.attempts = 0;
-    if (failed.length) {
-      this.log('warn', `Order ${d.orderId}: ${failed.length} account(s) could not be gathered — they trade the buyer after the mother`);
-      this.say(d, 'multiAccount');
-    }
+  async stealResult(j, ok, reason, moved = []) {
+    const d = this.map[j.orderId];
+    if (moved.length) this.bookSteal(j, moved);
+    const g = d && d.steal && d.steal[j.fromAccountId];
+    const current = !!(g && g.jobId === j.id && d.state === 'delivering');
+    if (ok || !current || g.tries >= 3) await this.closeHost(j.fromAccountId);
+    if (!current) return;   // an old try or an ended order: booked above, nothing more
+    if (ok) { g.done = true; this.store.save(); return this.nextSteal(d); }
+    this.log('warn', `Order ${d.orderId}: steal from @${j.fromUsername} failed (${reason}), try ${g.tries}`);
+    if (g.tries >= 3) return this.needsYou(d, `the mother @${j.account} could not take the pets from @${j.fromUsername} (3 tries, last: ${reason || 'unknown'}) — deliver by hand`);
     this.store.save();
-    this.queueNext(d);
-  }
-
-  // gathering did not work: give up on it for this order and trade from each account instead
-  async gatherFallback(d, reason) {
-    d.noGather = true; d.gatherFailReason = reason || 'unknown';
-    for (const j of this.store.get('jobs')) if (j.orderId === d.orderId && j.pair && j.status === 'pending') { j.status = 'cancelled'; j.reason = 'gather given up'; j.finishedAt = Date.now(); this.emit('job', j); }
-    const owners = [...new Set(this.store.get('pets').filter(p => d.petIds.includes(p.id) && !p.delivered).map(p => p.accountId).filter(Boolean))];
-    d.accounts = owners.length ? owners : d.accounts; d.step = 0; d.attempts = 0;
-    this.log('warn', `Order ${d.orderId}: gathering failed (${reason}) — one trade per account`);
-    await this.say(d, 'multiAccount');
-    this.store.save();
-    this.queueNext(d);
+    // the stock account's game stays open for the next try
+    setTimeout(() => { if (d.state === 'delivering' && !g.done && g.jobId === j.id) this.queueSteal(d, j.fromAccountId); }, 10000);
   }
 
   // pending jobs of the order are dropped; running ones are asked to stop (agents obey before a
@@ -544,13 +503,12 @@ class Delivery extends EventEmitter {
       this.store.save(); this.emit('job', j);
       const d = this.map[j.orderId];
       this.log('warn', `Job ${id}: @${j.buyerUsername} cancelled the trade (${body.reason || '?'}) — sending it again`);
-      if (d && !j.pair) await this.say(d, 'buyerCancelled', { round: body.round || j.reoffers });
+      if (d) await this.say(d, 'buyerCancelled', { round: body.round || j.reoffers });
     }
     return true;
   }
 
-  // agent asks whether its job is still wanted (a cancelled pair side stops waiting)
-  // permanent memory of pets that left a base: hop to the mother, delivered to a buyer, or (from
+  // permanent memory of pets that left a base: stolen by the mother, delivered to a buyer, or (from
   // importPets) gone without Zotac trading them. Kept even after the pets list forgets them.
   record(kind, { orderId = null, from = null, to = null, toUserId = null, pets = [], jobId = null, sim = false, note = null } = {}) {
     const list = this.store.get('trades') || this.store.set('trades', []);
@@ -562,6 +520,7 @@ class Delivery extends EventEmitter {
     return e;
   }
 
+  // the agent asks whether its job is still wanted: anything but running (stopped, timed out) = stop
   jobStatus(id) { const j = this.store.get('jobs').find(x => x.id === id); return !j ? 'gone' : j.cancelRequested ? 'cancelled' : j.status; }
 
   queueNext(d) {
@@ -582,9 +541,11 @@ class Delivery extends EventEmitter {
       d.step++;
       return this.queueNext(d);
     }
+    // Legit = real Roblox without the executor: no delivery script can run in it
+    if (acct.legit) return this.needsYou(d, `@${acct.username} is in Legit mode (real Roblox, no scripts), so it can't trade the buyer — switch it to SCRIPT, or use Security mode`);
     const job = {
       id: rid(6), kind: 'deliver', orderId: d.orderId, accountId, account: acct.username || null,
-      buyerUsername: d.username, buyerUserId: d.robloxId, gathered: !!d.mother && !d.noGather,
+      buyerUsername: d.username, buyerUserId: d.robloxId, gathered: !!d.mother,
       pets: pets.map(p => ({ id: p.id, name: p.name, mutation: p.mutation, gen: p.gen, traits: p.traits || [] })),
       status: 'pending', createdAt: Date.now(), attempt: d.attempts,
       closeWhenIdle: (this.store.get('settings').launcher || {}).closeAfterDelivery !== false
@@ -600,30 +561,37 @@ class Delivery extends EventEmitter {
   nextJob(account) {
     this.lastAgentPoll[account || '*'] = Date.now();
     const jobs = this.store.get('jobs');
-    // a transfer is only handed to the feeder once the mother's agent is waiting for it
-    const ready = x => x.kind !== 'transfer' || (jobs.find(y => y.id === x.receiveId) || {}).status === 'running';
-    const j = account ? jobs.find(x => x.status === 'pending' && x.account && x.account.toLowerCase() === String(account).toLowerCase() && ready(x)) : null;
+    const j = account ? jobs.find(x => x.status === 'pending' && x.account && x.account.toLowerCase() === String(account).toLowerCase()) : null;
     if (!j) return null;
     j.status = 'running'; j.startedAt = Date.now();
     this.store.save(); this.emit('job', j);
+    // the mother is in game and waits for the stock account: open it now (real Roblox)
+    if (j.kind === 'steal') this.openHost(j);
     return j;
   }
 
-  async jobResult(id, ok, reason) {
+  async jobResult(id, ok, reason, extra = {}) {
     const j = this.store.get('jobs').find(x => x.id === id);
-    if (!j || !['running', 'pending'].includes(j.status)) return false;
+    if (!j) return false;
+    // steal: pets that landed in the mother's base (all of them when done, else what the agent says)
+    const moved = j.kind !== 'steal' ? [] : ok ? j.pets.map(p => p.id) : (Array.isArray(extra && extra.moved) ? extra.moved.map(String) : []);
+    if (!['running', 'pending'].includes(j.status)) {
+      // a steal Zotac already ended (timeout, stop) still moved pets: booked anyway (rule 9)
+      if (moved.length) this.bookSteal(j, moved);
+      return false;
+    }
     j.status = ok ? 'done' : 'failed'; j.finishedAt = Date.now(); j.reason = reason || null;
     this.store.save(); this.emit('job', j);
+    if (j.kind === 'steal') { await this.stealResult(j, ok, reason, moved); return true; }   // stock -> mother, not a delivery
     const d = this.map[j.orderId];
     // a pet really left for a buyer (agent checked the base): remembered for good, test trades too
-    if (ok && !j.pair) {
+    if (ok) {
       // off that account's inventory right away (test deliveries have no order but the pet is gone too)
       for (const p of this.store.get('pets')) if (j.pets.some(x => x.id === p.id)) { p.delivered = true; p.tradedTo = j.buyerUsername || null; p.tradedAt = Date.now(); if (p.status !== 'sold') { p.status = 'sold'; p.soldAt = p.soldAt || Date.now(); } }
       this.emit('petsChanged');
     }
-    if (ok && !j.pair) this.record('delivered', { orderId: j.orderId, from: j.account, to: j.buyerUsername, toUserId: j.buyerUserId, pets: j.pets, jobId: j.id, sim: (d && d.sim) || !!j.test, note: j.test ? 'test delivery' : (j.gathered ? 'gathered order' : null) });
+    if (ok) this.record('delivered', { orderId: j.orderId, from: j.account, to: j.buyerUsername, toUserId: j.buyerUserId, pets: j.pets, jobId: j.id, sim: (d && d.sim) || !!j.test, note: j.test ? 'test delivery' : (j.gathered ? 'gathered order' : null) });
     if (!d) return true;
-    if (j.pair) { await this.pairResult(j, ok, reason); return true; }   // feeder -> mother hop, not a delivery
     if (d.state !== 'delivering') { this.log('info', `Job ${j.id} ${ok ? 'done' : 'failed'} after order ${d.orderId} ended (${d.state}) — nothing more sent`); this.store.save(); return true; }
     if (ok) {
       // the pet really left the base (the agent checked): it is sold, no longer available
@@ -657,7 +625,7 @@ class Delivery extends EventEmitter {
     const MUT = { gold: '🟨', diamond: '💎', rainbow: '🌈', lava: '🌋', bloodrot: '🩸', celestial: '🌌', candy: '🍬', galaxy: '🌌', yinyang: '☯️', radioactive: '☢️', cursed: '😈', none: '🧊', normal: '🧊' };
     const mutEmoji = m => MUT[String(m || 'none').toLowerCase().replace(/[^a-z]/g, '')] || '🔷';
     const uname = id => (this.store.get('accounts').find(a => a.id === id) || {}).username;
-    const mother = d.mother && !d.noGather ? uname(d.mother) : null;
+    const mother = d.mother ? uname(d.mother) : null;
     const accounts = d.sampleAccounts || (mother ? [mother] : [...new Set(pets.map(p => uname(p.gatheredFrom || p.accountId)).filter(Boolean))]);
     const gatheredFrom = mother ? [...new Set((d.origAccounts || []).filter(id => id !== d.mother).map(uname).filter(Boolean))] : [];
     const price = d.price != null ? d.price : pets.reduce((s, p) => s + (Number(p.price) || 0), 0);
@@ -678,7 +646,7 @@ class Delivery extends EventEmitter {
     ];
     if (reason && outcome !== 'done') lines.push('', `⚠️ **Reason** — ${String(reason).slice(0, 400)}`);
     const who = [d.buyer ? '👤 ' + d.buyer : null, d.username ? (d.robloxId ? `🎮 [@${d.username}](https://www.roblox.com/users/${d.robloxId}/profile)` : '🎮 @' + d.username) : null,
-      accounts.length ? '📤 ' + accounts.map(a => '@' + a).join(', ') + (gatheredFrom.length ? ' (gathered from ' + gatheredFrom.map(a => '@' + a).join(', ') + ')' : '') : null, (d.attempts || 0) > (outcome === 'done' ? 0 : 1) ? `🔁 ${(d.attempts || 0) + (outcome === 'done' ? 1 : 0)} tries` : null].filter(Boolean);
+      accounts.length ? '📤 ' + accounts.map(a => '@' + a).join(', ') + (gatheredFrom.length ? ' (taken from ' + gatheredFrom.map(a => '@' + a).join(', ') + ')' : '') : null, (d.attempts || 0) > (outcome === 'done' ? 0 : 1) ? `🔁 ${(d.attempts || 0) + (outcome === 'done' ? 1 : 0)} tries` : null].filter(Boolean);
     lines.push('', '-# ' + [...who, '`' + d.orderId + '`'].join(' · '));
 
     // today's totals (local day): delivered, failed, money from delivered orders
@@ -741,7 +709,9 @@ class Delivery extends EventEmitter {
   checkTimeouts() {
     const limit = (this.cfg.agentTimeoutSec || 240) * 1000;
     const runLimit = Math.max(limit, 420000);   // agent waits up to 150s for the invite + 90s for accept
-    const pairLimit = Math.max(limit, 600000);  // mother waits up to 300s for the request + the trade
+    // a steal: up to 240s for the stock account to join + 60s for its base, then per pet the walk
+    // there, a locked base, the steal and the walk home (the agent gives up on each by itself)
+    const stealLimit = j => Math.max(limit, (420 + 300 * ((j.pets || []).length || 1)) * 1000);
     const jobs = this.store.get('jobs');
     const now = Date.now();
     const acc = j => String(j.account || '').toLowerCase();
@@ -751,12 +721,10 @@ class Delivery extends EventEmitter {
         if (jobs.some(x => x !== j && x.status === 'running' && acc(x) === acc(j))) continue;
         let since = j.createdAt;
         for (const x of jobs) if (x !== j && acc(x) === acc(j) && x.finishedAt) since = Math.max(since, x.finishedAt);
-        // a transfer is held until the mother waits for it (the receive job times out on its own)
-        if (j.kind === 'transfer') { const r = jobs.find(y => y.id === j.receiveId); if (!r || r.status === 'pending') continue; since = Math.max(since, r.startedAt || 0); }
         if (now - since > limit) {
           this.jobResult(j.id, false, `the delivery script never connected from @${j.account || 'the stock account'}: Roblox may have opened, but zotac_delivery.lua did not run (add your executor's autoexec folder on the Auto Delivery page, or execute the script)`);
         }
-      } else if (j.status === 'running' && now - (j.startedAt || j.createdAt) > (j.pair ? pairLimit : runLimit)) {
+      } else if (j.status === 'running' && now - (j.startedAt || j.createdAt) > (j.kind === 'steal' ? stealLimit(j) : runLimit)) {
         this.jobResult(j.id, false, 'timeout');
       }
     }

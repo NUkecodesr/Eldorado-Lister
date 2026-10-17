@@ -214,29 +214,11 @@ local function addItem(item)
     return false
 end
 
+-- still wanted = Zotac still has it running (stopped, cancelled or timed out = stop). No answer
+-- (app busy / restarting) = keep going.
 local function wanted(job)
     local r = api("GET", "/jobs/" .. job.id)
-    return not (r and (r.status == "cancelled" or r.status == "gone"))
-end
-
-local function theirItems(root)
-    local other = root:FindFirstChild("Other")
-    local sf = other and other:FindFirstChild("ScrollingFrame")
-    local items = {}
-    for _, it in ipairs(sf and sf:GetChildren() or {}) do
-        if it:IsA("Frame") and it.Visible then
-            local sp = it:FindFirstChild("Spacer")
-            local t = sp and sp:FindFirstChild("Title")
-            if t then
-                local texts = {}
-                for _, d in ipairs(it:GetDescendants()) do
-                    if d:IsA("TextLabel") and d.Text ~= "" then table.insert(texts, (d.Text:gsub("<[^>]->", ""))) end
-                end
-                table.insert(items, {title = (t.Text:gsub("<[^>]->", "")), all = table.concat(texts, " ")})
-            end
-        end
-    end
-    return items
+    return not (r and r.status and r.status ~= "running")
 end
 
 local function readyAndAccept(root, who, reReady)
@@ -442,7 +424,7 @@ local function deliverOnce(job)
         end
 
         for i = 1, w.n do
-            if not tradeRoot() then return false, (job.kind == "transfer" and ("@" .. buyer) or "buyer") .. " closed the trade", true end
+            if not tradeRoot() then return false, "buyer closed the trade", true end
             local target, pick, bestD = w.gens[i] or w.gens[1] or 0, nil, math.huge
             for _, it in ipairs(yourItems(root)) do
                 if not used[it.frame] and not isAdded(it) and matchScore(it, w.pet) == level then
@@ -460,7 +442,7 @@ local function deliverOnce(job)
     for _, it in ipairs(yourItems(root)) do if isAdded(it) then added += 1 end end
     if added ~= #job.pets then cancelTrade(); return false, ("offer has %d items, expected %d"):format(added, #job.pets) end
 
-    local okRA, whyRA, cancelledRA = readyAndAccept(root, job.kind == "transfer" and ("@" .. buyer) or "buyer")
+    local okRA, whyRA, cancelledRA = readyAndAccept(root, "buyer")
     if not okRA then return false, whyRA, cancelledRA end
 
     local deadline = os.clock() + 12
@@ -487,7 +469,7 @@ local function deliver(job)
         if ok then return true end
         why = w
         if not cancelled or round == rounds or not running or not wanted(job) then break end
-        log("warn", ("%s cancelled the trade (%s) - sending it again (%d/%d)"):format(job.kind == "transfer" and ("@" .. tostring(job.buyerUsername)) or "buyer", tostring(w), round, rounds - 1))
+        log("warn", ("%s cancelled the trade (%s) - sending it again (%d/%d)"):format("buyer", tostring(w), round, rounds - 1))
         api("POST", "/jobs/" .. job.id .. "/event", {event = "buyer_cancelled", round = round, reason = w})
         notify("Trade cancelled - sending it again")
         task.wait(3)
@@ -495,170 +477,216 @@ local function deliver(job)
     return false, why
 end
 
-local function mentionsName(o, names)
-    for _, d in ipairs(o:GetDescendants()) do
-        if (d:IsA("TextLabel") or d:IsA("TextButton")) and d.Text ~= "" then
-            local t = norm(d.Text)
-            for _, n in ipairs(names) do if n ~= "" and string.find(t, n, 1, true) then return true end end
+-- ===================== Security mode: steal from a Legit stock account =====================
+-- The stock account sits in the private server with real Roblox (no executor). This account (the
+-- mother) walks into its base, steals the ordered pets with the game's own steal prompt and walks
+-- them home. Only normal play: pathfinding walk at normal speed (no teleport, no speed change), the
+-- prompt held with InputHoldBegin/End for its own HoldDuration, nothing else touched.
+local PathfindingService = game:GetService("PathfindingService")
+local STEAL_WAIT_PLAYER = 240
+
+local function stripTags(t) return (tostring(t or ""):gsub("<[^>]->", "")) end
+local plotCache, plotCacheAt = nil, 0
+local function plotCaches()
+    if plotCache and os.clock() - plotCacheAt < 10 then return plotCache end
+    plotCache, plotCacheAt = {}, os.clock()
+    if not getgc then return plotCache end
+    local ok, gc = pcall(getgc, true)
+    if not ok then return plotCache end
+    for _, v in ipairs(gc) do
+        if type(v) == "table" then
+            local oi, idx = pcall(rawget, v, "Index")
+            if oi and type(idx) == "string" then
+                local oc, ct = pcall(rawget, v, "CacheTable")
+                if oc and type(ct) == "table" and not plotCache[idx] then plotCache[idx] = ct end
+            end
         end
     end
-    return false
+    return plotCache
 end
-local SKIP_GUI = {TradeLiveTrade = true, Chat = true, BubbleChat = true}
-local function incomingAccept(names)
-    for _, g in ipairs(PG:GetChildren()) do
-        if g:IsA("LayerCollector") and g.Enabled and not SKIP_GUI[g.Name] then
-            for _, b in ipairs(g:GetDescendants()) do
-                if b:IsA("GuiButton") and shown(b) then
-                    local lbl = b:FindFirstChildWhichIsA("TextLabel", true)
-                    local txt = string.upper((lbl and lbl.Text) or (b:IsA("TextButton") and b.Text) or "")
-                    if txt == "ACCEPT" or txt == "YES" then
-                        local p = b
-                        for _ = 1, 6 do
-                            p = p.Parent
-                            if not p or p == PG then break end
-                            if mentionsName(p, names) then return b, g end
-                            if p == g then break end
-                        end
-                    end
-                end
+local function plotOwnedBy(plr)
+    local plots = workspace:FindFirstChild("Plots")
+    if not plots then return nil end
+    for _, plot in ipairs(plots:GetChildren()) do
+        local ct = plotCaches()[plot.Name]
+        local ok, owner = pcall(function() return ct and ct.Owner end)
+        if ok and owner ~= nil then
+            if (typeof(owner) == "Instance" and owner == plr) or owner == plr.UserId or owner == plr.Name
+                or (type(owner) == "table" and (rawget(owner, "UserId") == plr.UserId or rawget(owner, "Name") == plr.Name)) then return plot end
+        end
+    end
+    for _, plot in ipairs(plots:GetChildren()) do   -- the sign: "<display name>'s base"
+        local sign = plot:FindFirstChild("PlotSign")
+        for _, d in ipairs(sign and sign:GetDescendants() or {}) do
+            if d:IsA("TextLabel") then
+                local who = stripTags(d.Text):match("^(.-)'s [Bb]ase$")
+                if who and (who == plr.DisplayName or who == plr.Name) then return plot end
             end
         end
     end
     return nil
 end
-local function describeRequestGuis(names)
-    local out = {}
-    for _, g in ipairs(PG:GetChildren()) do
-        if g:IsA("LayerCollector") and g.Enabled and not SKIP_GUI[g.Name] and mentionsName(g, names) then
-            local btns = {}
-            for _, b in ipairs(g:GetDescendants()) do
-                if b:IsA("GuiButton") and shown(b) then
-                    local lbl = b:FindFirstChildWhichIsA("TextLabel", true)
-                    table.insert(btns, b.Name .. "=" .. ((lbl and lbl.Text) or (b:IsA("TextButton") and b.Text) or ""))
-                end
-            end
-            table.insert(out, g.Name .. " [" .. table.concat(btns, ", "):sub(1, 200) .. "]")
+local function isPetModel(inst) return inst:IsA("Model") and inst:GetAttribute("__AssetDescendantCount") ~= nil end
+local function mutOk(model, pet)
+    local m = norm(model:GetAttribute("Mutation") or "none")
+    local want = norm(pet.mutation or "none")
+    local plainM, plainW = (m == "" or m == "none" or m == "normal"), (want == "" or want == "none" or want == "normal")
+    return m == want or (plainM and plainW)
+end
+local function genNear(model)
+    local debris = workspace:FindFirstChild("Debris")
+    local pos, best, bestD = model:GetPivot().Position, nil, 12
+    for _, part in ipairs(debris and debris:GetChildren() or {}) do
+        local gui = part:IsA("BasePart") and part:FindFirstChild("AnimalOverhead")
+        local nm = gui and gui:FindFirstChild("DisplayName")
+        if nm and stripTags(nm.Text) == model.Name then
+            local p = part.Position
+            local d = Vector2.new(p.X - pos.X, p.Z - pos.Z).Magnitude
+            if d < bestD then best, bestD = gui, d end
         end
     end
-    return #out > 0 and table.concat(out, " | ") or "no gui names the sender"
+    local g = best and best:FindFirstChild("Generation")
+    return g and parseMoney(g.Text) or nil
+end
+-- the steal prompt of the podium a pet stands on
+local function stealPromptFor(plot, model)
+    local podiums = plot:FindFirstChild("AnimalPodiums")
+    local pos, best, bestD = model:GetPivot().Position, nil, 20
+    for _, pod in ipairs(podiums and podiums:GetChildren() or {}) do
+        local ok, cf = pcall(function() return pod:GetPivot() end)
+        if ok then
+            local d = Vector2.new(cf.Position.X - pos.X, cf.Position.Z - pos.Z).Magnitude
+            if d < bestD then best, bestD = pod, d end
+        end
+    end
+    if not best then return nil end
+    local att = best:FindFirstChild("PromptAttachment", true)
+    for _, p in ipairs((att and att:GetChildren()) or best:GetDescendants()) do
+        if p:IsA("ProximityPrompt") and string.find(string.lower(p.ActionText or ""), "steal", 1, true) then return p end
+    end
+    for _, p in ipairs(best:GetDescendants()) do if p:IsA("ProximityPrompt") then return p end end
+    return nil
+end
+local function promptPos(p)
+    local par = p and p.Parent
+    if par and par:IsA("Attachment") then return par.WorldPosition end
+    if par and par:IsA("BasePart") then return par.Position end
+    return nil
+end
+-- walk like a player: pathfinding waypoints at the character's own speed
+local function walkTo(pos, within, timeout)
+    local char = LP.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not (hum and root and pos) then return false end
+    local t0 = os.clock()
+    local function close() return (root.Position - pos).Magnitude <= within end
+    local path = PathfindingService:CreatePath({AgentRadius = 2, AgentHeight = 5, AgentCanJump = true, WaypointSpacing = 6})
+    local okP = pcall(function() path:ComputeAsync(root.Position, pos) end)
+    if okP and path.Status == Enum.PathStatus.Success then
+        for _, wp in ipairs(path:GetWaypoints()) do
+            if not running or os.clock() - t0 > timeout then break end
+            if wp.Action == Enum.PathWaypointAction.Jump then hum.Jump = true end
+            hum:MoveTo(wp.Position)
+            local w0 = os.clock()
+            repeat RunService.Heartbeat:Wait() until (root.Position - wp.Position).Magnitude < 4 or os.clock() - w0 > 4 or not running
+            if close() then return true end
+        end
+    end
+    while not close() and os.clock() - t0 < timeout and running do   -- straight walk for the last bit
+        hum:MoveTo(pos)
+        local w0 = os.clock()
+        repeat RunService.Heartbeat:Wait() until close() or os.clock() - w0 > 3
+    end
+    return close()
+end
+local function holdPrompt(p)
+    local okB = pcall(function() p:InputHoldBegin() end)
+    if not okB then return false end
+    task.wait((tonumber(p.HoldDuration) or 1) + 0.25)
+    pcall(function() p:InputHoldEnd() end)
+    return true
 end
 
-local RECEIVE_WAIT = 300
-local function receive(job)
+-- took = ids of the pets that landed in this base (reported even when a later pet fails, so
+-- Zotac books every pet that really moved)
+local function stealPets(job, took)
     local from = tostring(job.fromUsername or "")
-    if from == "" then return false, "job has no sender" end
-    if #(job.pets or {}) == 0 then return false, "job has no pets" end
-    local names = {norm(from)}
-    local disp = norm(job.fromDisplayName)
-    if #disp >= 3 and disp ~= norm(LP.DisplayName) and disp ~= norm(LP.Name) then table.insert(names, disp) end
-
-    local want = {}
-    for _, p in ipairs(job.pets) do
-        local k = norm(p.name) .. "|" .. norm(p.mutation)
-        want[k] = want[k] or {pet = p, n = 0}
-        want[k].n += 1
-    end
-    local before = {}
-    for k, w in pairs(want) do before[k] = countInBase(w.pet) end
-
-    if tradeRoot() and string.lower(tostring(tradePartner(tradeRoot()))) ~= string.lower(from) then cancelTrade(); task.wait(1.5) end
-
-    local function round(waitFor)
-        notify("Waiting for @" .. from .. " to send " .. #job.pets .. " brainrot(s)")
-        local t0, lastWant, lastDiag, lastPress, root = os.clock(), os.clock(), os.clock(), -99, nil
-        while os.clock() - t0 < waitFor do
-            if not running then return false, "agent stopped" end
-            root = tradeRoot()
-            if root then
-                local who = tradePartner(root)
-                if who and string.lower(who) == string.lower(from) then break end
-                log("warn", "trade window opened with @" .. tostring(who) .. ", not @" .. from .. " - cancelling")
-                cancelTrade(); root = nil; task.wait(2)
-            end
-            if os.clock() - lastPress > 3 then
-                local b, g = incomingAccept(names)
-                if b then
-                    lastPress = os.clock()
-                    log("info", "accepting trade request from @" .. from .. " (" .. g.Name .. ")")
-                    fire(b.Activated, nil, 1)
-                end
-            end
-            if os.clock() - lastDiag > 30 then lastDiag = os.clock(); log("info", "waiting for @" .. from .. ": " .. describeRequestGuis(names)) end
-            if os.clock() - lastWant > 5 then
-                lastWant = os.clock()
-                if not wanted(job) then return false, "cancelled by Zotac" end
-            end
-            task.wait(0.5)
-        end
-        if not root then return false, "no trade request from @" .. from .. " arrived" end
-        notify("Trade open with @" .. from .. " - waiting for their offer")
-
-        local tOffer, stableSince, lastSig = os.clock(), nil, nil
-        while tradeRoot() and os.clock() - tOffer < 90 do
-            local items, complete = theirItems(root), true
-            for _, w in pairs(want) do
-                local n = 0
-                for _, it in ipairs(items) do if matchScore(it, w.pet) >= 2 then n += 1 end end
-                if n < w.n then complete = false end
-            end
-            local sig = #items
-            if complete and sig == lastSig then
-                stableSince = stableSince or os.clock()
-                if os.clock() - stableSince > 2 then break end
-            else
-                stableSince = nil
-            end
-            lastSig = sig
-            task.wait(0.5)
-        end
-        if not tradeRoot() then return false, "@" .. from .. " closed the trade", true end
-        if not stableSince then
-            local seen = {}
-            for _, it in ipairs(theirItems(root)) do table.insert(seen, it.title) end
-            log("warn", "@" .. from .. " offered: " .. table.concat(seen, ", "):sub(1, 400))
-            cancelTrade()
-            return false, "@" .. from .. "'s offer is missing brainrots"
-        end
-
-        -- "Your Offer n/cap": n = your pets after this trade, cap = base slots. Over = no room.
-        local yours = root:FindFirstChild("Your")
-        for _, d in ipairs(yours and yours:GetDescendants() or {}) do
-            if d:IsA("TextLabel") and shown(d) then
-                local n, cap = string.match(d.Text, "^%s*(%d+)%s*/%s*(%d+)%s*$")
-                if n and tonumber(n) > tonumber(cap) then
-                    cancelTrade()
-                    return false, ("mother base full (%s/%s)"):format(n, cap)
-                end
-            end
-        end
-
-        local okRA, whyRA, cancelledRA = readyAndAccept(root, "@" .. from, true)
-        if not okRA then return false, whyRA, cancelledRA end
-
-        local deadline = os.clock() + 15
-        repeat
+    if from == "" or #(job.pets or {}) == 0 then return false, "job has no stock account or pets" end
+    -- 1. the stock account must be in this server (Zotac opens it with real Roblox)
+    notify("Waiting for @" .. from .. " to join")
+    local plr, t0, lastWant = nil, os.clock(), os.clock()
+    repeat
+        plr = Players:FindFirstChild(from)
+        if not plr then
             task.wait(1)
-            local allIn = true
-            for k, w in pairs(want) do
-                if countInBase(w.pet) < before[k] + w.n then allIn = false end
+            if os.clock() - lastWant > 5 then lastWant = os.clock(); if not wanted(job) then return false, "cancelled by Zotac" end end
+        end
+    until plr or os.clock() - t0 > STEAL_WAIT_PLAYER or not running
+    if not plr then return false, "@" .. from .. " never joined the private server" end
+    -- 2. its base, with the pets loaded
+    local plot, tp = nil, os.clock()
+    repeat plot = plotOwnedBy(plr); if not plot then task.wait(1) end until plot or os.clock() - tp > 60
+    if not plot then return false, "base of @" .. from .. " not found" end
+    local home = findMyPlot()
+    local hit = home and home:FindFirstChild("DeliveryHitbox", true)
+    local homePos = hit and hit:IsA("BasePart") and hit.Position or (home and home:GetPivot().Position)
+    if not homePos then return false, "own base not found" end
+    local used = {}
+    for i, pet in ipairs(job.pets) do
+        if not running then return false, "agent stopped" end
+        local mineBefore = countInBase(pet)
+        -- the matching pet in their base (closest gen/s once its name tag is in range)
+        local target, tFind = nil, os.clock()
+        repeat
+            local best, bestD = nil, math.huge
+            for _, c in ipairs(plot:GetChildren()) do
+                if isPetModel(c) and not used[c] and norm(c.Name) == norm(pet.name) and mutOk(c, pet) then
+                    local g = genNear(c)
+                    local d = g and math.abs(g - (tonumber(pet.gen) or 0)) or 1e15
+                    if d < bestD then best, bestD = c, d end
+                end
             end
-            if allIn then return true end
-        until os.clock() > deadline
-        return false, "trade closed but the brainrots did not arrive in the base", true
+            target = best
+            if not target then task.wait(1) end
+        until target or os.clock() - tFind > 30
+        if not target then return false, pet.name .. " not found in @" .. from .. "'s base" end
+        local prompt = stealPromptFor(plot, target)
+        if not prompt then return false, "no steal prompt at " .. pet.name end
+        -- 3. walk there, steal (a locked base keeps the prompt off: wait for it)
+        if not walkTo(promptPos(prompt) or target:GetPivot().Position, math.max(4, (prompt.MaxActivationDistance or 10) - 2), 60) then return false, "could not walk to " .. pet.name end
+        local tE = os.clock()
+        while not prompt.Enabled and os.clock() - tE < 70 do task.wait(1) end
+        if not prompt.Enabled then return false, "@" .. from .. "'s base stays locked" end
+        local got = false
+        for _ = 1, 3 do
+            holdPrompt(prompt)
+            local tS = os.clock()
+            repeat task.wait(0.2) until LP:GetAttribute("Stealing") == true or os.clock() - tS > 3
+            if LP:GetAttribute("Stealing") == true then got = true break end
+            walkTo(promptPos(prompt) or target:GetPivot().Position, 4, 10)
+        end
+        if not got then return false, "steal prompt did not pick up " .. pet.name end
+        notify(("Took %s (%d/%d) - walking home"):format(pet.name, i, #job.pets))
+        -- 4. home: into your own base's delivery spot
+        walkTo(homePos, 4, 90)
+        local tH = os.clock()
+        repeat task.wait(0.5) until LP:GetAttribute("Stealing") ~= true or os.clock() - tH > 20
+        if LP:GetAttribute("Stealing") == true then return false, "could not bring " .. pet.name .. " home" end
+        local tC = os.clock()
+        repeat task.wait(0.5) until countInBase(pet) > mineBefore or os.clock() - tC > 12
+        if countInBase(pet) <= mineBefore then return false, pet.name .. " did not land in your base" end
+        used[target] = true
+        table.insert(took, pet.id)
+        log("info", ("stole %s from @%s (%d/%d)"):format(pet.name, from, i, #job.pets))
     end
-
-    -- the feeder re-sends by itself when a window closes early (its own re-offer loop): wait for it
-    local why
-    for r = 1, 3 do
-        local ok, w, cancelled = round(r == 1 and RECEIVE_WAIT or 120)
-        if ok then return true end
-        why = w
-        if not cancelled or r == 3 or not running or not wanted(job) then break end
-        log("warn", ("trade with @%s closed early (%s) - waiting for it again (%d/2)"):format(from, tostring(w), r))
-        task.wait(2)
-    end
-    return false, why
+    return true
+end
+local function steal(job)
+    local took = {}
+    local okS, okDone, why = pcall(stealPets, job, took)
+    if not okS then return false, "script error: " .. tostring(okDone), took end
+    return okDone, why, took
 end
 
 if not game:IsLoaded() then game.Loaded:Wait() end
@@ -685,15 +713,15 @@ while running do
     local job = r and r.job
     if job then
         closeAt = nil
-        if job.kind == "receive" then
-            log("info", ("job %s: receive %d brainrot(s) from @%s"):format(job.id, #(job.pets or {}), tostring(job.fromUsername)))
+        if job.kind == "steal" then
+            log("info", ("job %s: take %d brainrot(s) from @%s's base"):format(job.id, #(job.pets or {}), tostring(job.fromUsername)))
         else
             log("info", ("job %s: %d brainrot(s) -> @%s"):format(job.id, #(job.pets or {}), tostring(job.buyerUsername)))
         end
-        local ok, okDone, why = pcall(job.kind == "receive" and receive or deliver, job)
+        local ok, okDone, why, moved = pcall(job.kind == "steal" and steal or deliver, job)
         if not ok then okDone, why = false, "script error: " .. tostring(okDone) end
-        api("POST", "/jobs/" .. job.id, {status = okDone and "done" or "failed", reason = why})
-        notify(okDone and (job.kind == "receive" and ("Received from @" .. tostring(job.fromUsername)) or ("Delivered to @" .. tostring(job.buyerUsername))) or ("Delivery failed: " .. tostring(why)))
+        api("POST", "/jobs/" .. job.id, {status = okDone and "done" or "failed", reason = why, moved = moved})
+        notify(okDone and (job.kind == "steal" and ("Took the pets from @" .. tostring(job.fromUsername)) or ("Delivered to @" .. tostring(job.buyerUsername))) or ("Delivery failed: " .. tostring(why)))
         log(okDone and "info" or "warn", ("job %s %s%s"):format(job.id, okDone and "done" or "failed", why and (" - " .. why) or ""))
         if job.closeWhenIdle then closeAt = os.clock() + 15 end
     else

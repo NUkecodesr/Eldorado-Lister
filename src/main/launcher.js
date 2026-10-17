@@ -105,11 +105,15 @@ class Launcher extends EventEmitter {
     this.lastLaunch = {};   // accountId -> ts
     this.holder = null;     // multi-instance mutex holder process
     this.pids = {};         // accountId -> Roblox process Zotac launched for it
+    this.mode = {};         // accountId -> 'script' | 'legit' (how Zotac last opened it)
+    this.legit = null;      // LegitRoblox (set by main)
     // a waiting delivery job whose account dropped out of the game (client closed, kicked)
     // gets its account launched again; checked every 20s, launch cooldown still applies
     this.sweep = setInterval(() => {
       for (const j of this.store.get('jobs')) if (j.status === 'pending' && Date.now() - j.createdAt > 15000) this.onJob(j);
+      this.checkLegitClean().catch(() => {});
     }, 20000);
+    this.attachWarned = {};  // accountId -> launch time already warned about
   }
   get cfg() { return this.store.get('settings').launcher; }
   log(level, msg) { this.emit('log', this.store.log(level, '[Launcher] ' + msg)); }
@@ -214,9 +218,31 @@ class Launcher extends EventEmitter {
     return true;
   }
 
+  // a game Zotac opened Legit must never run Zotac's scripts: if one of them talks to Zotac
+  // (heartbeat / job poll after that launch), the executor attached itself to the real client
+  async checkLegitClean() {
+    const ids = Object.keys(this.mode).filter(id => this.mode[id] === 'legit' && this.pids[id]);
+    if (!ids.length) return;
+    const alive = await robloxPids();
+    for (const id of ids) {
+      const a = this.acct(id);
+      if (!a || !alive.includes(this.pids[id]) || this.attachWarned[id] === this.lastLaunch[id]) continue;
+      const name = String(a.username || '').toLowerCase();
+      const poll = Object.entries(this.delivery.lastAgentPoll || {}).find(([k]) => k.toLowerCase() === name);
+      const t = Math.max(poll ? poll[1] : 0, (this.delivery.lastSeen || {})[name] || 0);
+      if (t > (this.lastLaunch[id] || 0) + 5000) {
+        this.attachWarned[id] = this.lastLaunch[id];
+        const msg = `@${a.username} was opened Legit (real Roblox), but Zotac's script is running in it: your executor attached itself to that game. Turn off its auto-attach / auto-inject so Legit accounts stay clean`;
+        this.log('warn', msg);
+        this.emit('launchBlocked', { reason: msg });
+      }
+    }
+  }
+
   stop() { clearInterval(this.sweep); if (this.holder) try { this.holder.kill(); } catch { /* gone */ } }
 
-  async launch(id, { force = false } = {}) {
+  // legit = open real Roblox from Zotac's own clean install (no executor, so no Zotac scripts in it)
+  async launch(id, { force = false, legit = false } = {}) {
     const a = this.acct(id);
     if (!a) throw new Error('Account not found');
     const cookie = decryptCookie(a.cookieEnc);
@@ -224,6 +250,8 @@ class Launcher extends EventEmitter {
     // never into a public server: other players could steal or trade-snipe the stock
     if (!String(this.cfg.privateServer || '').trim()) { const e = new Error(NO_PS); e.code = 'NO_PS'; throw e; }
     if (!force && this.isOnline(a)) return { skipped: 'already online' };
+    // a legit game sends no heartbeat: "already open" = the process Zotac started for it still runs
+    if (!force && this.pids[id] && (await robloxPids()).includes(this.pids[id])) return { skipped: 'already running' };
     const cool = (this.cfg.cooldownSec || 120) * 1000;
     // cooldown only while the game Zotac launched is still running (loading); if it already closed, launch again now
     if (!force && this.lastLaunch[id] && Date.now() - this.lastLaunch[id] < cool) {
@@ -232,13 +260,19 @@ class Launcher extends EventEmitter {
       if (alive) return { skipped: 'launched recently' };
     }
 
+    // the clean client is installed / updated BEFORE the login ticket is made (tickets expire fast)
+    let exe = this.cfg.exePath || null;
+    if (legit) {
+      if (!this.legit) throw new Error('Legit Roblox is not available in this build');
+      exe = await this.legit.ensure();
+    }
     this.ensureMultiInstance();
     const ps = await resolvePrivateServer(this.cfg.privateServer, cookie);
     if (!ps) { const e = new Error(NO_PS); e.code = 'NO_PS'; throw e; }
     const ticket = await authTicket(cookie);
     const uri = launchUri(ticket, ps ? ps.placeId : SAB_PLACE_ID, ps && ps.linkCode);
     const before = new Set(await robloxPids());
-    if (this.cfg.exePath) spawn(this.cfg.exePath, [uri], { detached: true, stdio: 'ignore' }).unref();
+    if (exe) spawn(exe, [uri], { detached: true, stdio: 'ignore' }).unref();
     else await shell.openExternal(uri);
     this.lastLaunch[id] = Date.now();
     // remember which Roblox process is this account's: the one whose command line carries this
@@ -255,7 +289,8 @@ class Launcher extends EventEmitter {
         if (pid) { this.pids[id] = pid; this.log('info', `${a.username}: Roblox process ${pid}${mine ? '' : ' (guessed)'}`); return; }
       }
     })();
-    this.log('info', `Launched ${a.username} into the private server`);
+    this.mode[id] = legit ? 'legit' : 'script';
+    this.log('info', `Launched ${a.username} into the private server${legit ? ' (Legit: real Roblox, no executor)' : ''}`);
     this.emit('launched', { id, username: a.username });
     return { launched: true, privateServer: !!ps };
   }
@@ -265,8 +300,10 @@ class Launcher extends EventEmitter {
     if (!this.cfg.autoLaunch || job.status !== 'pending' || !job.accountId) return;
     const a = this.acct(job.accountId);
     if (!a || !a.cookieEnc || this.isOnline(a)) return;
+    // an account in Legit mode is never opened with the executor, not even for a delivery
+    if (a.legit && !job.legit) { this.emit('launchBlocked', { job, reason: `@${a.username} is in Legit mode: Zotac never opens it with the executor` }); return; }
     try {
-      const r = await this.launch(a.id);
+      const r = await this.launch(a.id, { legit: !!job.legit });
       if (r.launched) this.log('info', `Auto-launched ${a.username} for order ${job.orderId}`);
     } catch (e) {
       this.log('error', `Auto-launch ${a.username}: ${e.message}`);

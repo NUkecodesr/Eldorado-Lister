@@ -1115,7 +1115,13 @@ const RA = { filter: { account: '', q: '', mutation: '', min: '', max: '', range
 PAGES.accounts = async root => {
   const f = RA.filter;
   const LST = {}; try { for (const x of await M.call('launcher:status')) LST[x.id] = x; } catch { /* old backend */ }
+  const setMode = async (a, legit) => {
+    if (!await run(() => M.call('accounts:save', { id: a.id, legit }))) return;
+    toast(legit ? `@${a.username}: Legit — Start opens real Roblox, never the executor` : `@${a.username}: SCRIPT — Start opens Roblox with your executor`, 'good', 5000);
+    await refreshData(); render();
+  };
   const launch = async (a, force) => {
+    if (a.legit) toast(`Opening real Roblox for @${a.username}… (the first time Zotac installs it, ~240 MB)`, 'info', 6000);
     const r = await run(() => M.call('accounts:launch', a.id, force));
     if (!r) return;
     if (r.skipped === 'already online') return toast(`${a.username} is already in game`, 'info');
@@ -1229,7 +1235,11 @@ PAGES.accounts = async root => {
         h('span', { class: 'x-slot' }, h('i'), `${mine.length} pets`),
         h('button', { class: 'x-ib', title: 'Copy username', onclick: e => { e.stopPropagation(); xCopy(a.username, 'Username copied'); } }, '⎘'),
         h('button', { class: 'x-ab', title: 'List this account\'s available pets on Eldorado', onclick: e => { e.stopPropagation(); startAcct(a); } }, 'List'),
-        h('button', { class: 'x-ab start', title: a.hasCookie ? 'Launch Roblox on this account (private server)' : 'Add the account cookie first (✎)', disabled: !a.hasCookie, onclick: e => { e.stopPropagation(); launch(a); } }, '▶ Start'),
+        // how ▶ Start opens this account: SCRIPT = with your executor (Zotac's scripts run),
+        // Legit = real Roblox from Zotac's own clean install (no executor, no scripts)
+        h('button', { class: 'x-ab script' + (!a.legit ? ' on' : ''), title: 'SCRIPT: Start opens Roblox with your executor, Zotac\'s scanner/delivery scripts run', onclick: e => { e.stopPropagation(); if (a.legit) setMode(a, false); } }, 'SCRIPT'),
+        h('button', { class: 'x-ab legit' + (a.legit ? ' on' : ''), title: 'Legit: Start opens real Roblox (no executor, no scripts). Zotac never opens a Legit account with the executor', onclick: e => { e.stopPropagation(); if (!a.legit) setMode(a, true); } }, 'Legit'),
+        h('button', { class: 'x-ab start', title: a.hasCookie ? (a.legit ? 'Open real Roblox on this account (private server)' : 'Open Roblox with your executor on this account (private server)') : 'Add the account cookie first (✎)', disabled: !a.hasCookie, onclick: e => { e.stopPropagation(); launch(a); } }, '▶ Start'),
         h('button', { class: 'x-ib', title: 'Edit', onclick: e => { e.stopPropagation(); editAcct(a); } }, '✎'),
         h('button', { class: 'x-ib del', title: 'Remove account', onclick: async e => { e.stopPropagation(); if (await confirmBox(`Remove ${a.username} from Zotac? Its unlisted pets go with it. (Not possible while it has listed pets or sold pets not delivered yet.)`)) { if (await run(() => M.call('accounts:delete', a.id))) { await refreshData(); render(); } } } }, '🗑'),
         h('span', { class: 'x-caret' }, open ? '▴' : '▾')),
@@ -1243,6 +1253,16 @@ PAGES.accounts = async root => {
     const net = gross - fee - expenses;
     const L = S.settings.launcher || {};
     const setL = patch => saveSettings({ launcher: patch });
+    if (!RA.legitSt || Date.now() - RA.legitAt > 60000) { RA.legitAt = Date.now(); M.call('legit:status').then(st => { RA.legitSt = st; if (S.page === 'accounts') soft(); }).catch(e => { RA.legitSt = { error: e.message }; }); }
+    const lst = RA.legitSt || {};
+    const legitRow = h('div', { class: 'x-panel', style: { padding: '10px 12px', marginTop: '10px' } },
+      h('b', null, 'Real Roblox (Legit mode)'),
+      h('div', { class: 'muted', style: { fontSize: '12px', marginTop: '4px' } },
+        lst.installed ? `Installed ${lst.installed.version}${lst.upToDate ? ' — up to date' : (lst.latest && lst.latest.version ? ' — update to ' + lst.latest.version + ' on next Legit start' : '')}` : 'Not installed yet — installed on the first Legit start (~240 MB from Roblox)'),
+      h('div', { class: 'mono muted', style: { fontSize: '11px' } }, lst.dir || ''),
+      h('div', { class: 'row', style: { marginTop: '6px' } },
+        h('button', { class: 'btn sm', onclick: async () => { toast('Installing real Roblox…', 'info'); const r = await run(() => M.call('legit:install')); if (r) { RA.legitSt = null; toast('Real Roblox installed', 'good'); render(); } } }, lst.installed ? 'Reinstall' : 'Install now'),
+        lst.dir ? h('button', { class: 'btn sm ghost', onclick: () => M.call('open:path', lst.dir) }, 'Folder') : null));
     const launcherCard = h('div', { class: 'x-panel', style: { marginBottom: '12px' } },
       h('div', { class: 'x-ptitle' }, h('span', { class: 'x-glyph' }, '▶'), 'ACCOUNT LAUNCHER'),
       h('p', { class: 'x-ptext' }, 'Start opens Roblox on that account from its saved cookie. With auto-launch on, a delivery job for an account whose script is offline launches it automatically. Put the delivery script in your executor\'s autoexec so it runs on join.'),
@@ -1255,7 +1275,7 @@ PAGES.accounts = async root => {
       setting('Multi-instance', 'Hold Roblox\'s single-instance lock so several accounts can run together', sw(L.multiInstance !== false, v => setL({ multiInstance: v }))),
       setting('Close game after delivery', 'The stock account\'s Roblox closes 15s after its last delivery; it is launched again for the next order', sw(L.closeAfterDelivery !== false, v => setL({ closeAfterDelivery: v }))),
       setting('Relaunch cooldown (s)', 'Do not relaunch the same account within this time', num(L.cooldownSec || 120, v => setL({ cooldownSec: Number(v) || 120 }))));
-    return h('div', null, launcherCard,
+    return h('div', null, launcherCard, legitRow,
       h('div', { class: 'x-tiles' }, xTile('GROSS REVENUE', money(gross), 'x-green'), xTile('REVENUE -15%', money(gross - fee)),
         h('div', { class: 'x-tile x-red' }, h('div', { class: 'x-tile-b' }, h('div', { class: 'x-tile-k' }, 'EXPENSES'), h('div', { class: 'x-tile-v' }, money(expenses)), h('div', { class: 'x-tile-s' }, h('a', { href: '#', onclick: e => { e.preventDefault(); addExpense(); } }, '+ add expense')))),
         xTile('NET PROFIT', money(net), net >= 0 ? 'x-green' : 'x-red')),

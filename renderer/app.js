@@ -210,16 +210,24 @@ function wire() {
   M.on('delivery:update', () => { if (S.page === 'delivery') soft(); });
   M.on('delivery:job', () => { if (S.page === 'delivery') soft(); });
   M.on('talk:message', m => { S.talkLog.push(m); if (S.talkLog.length > 100) S.talkLog.shift(); if (S.page === 'chat') soft(); });
+  // Legit install progress: one toast that keeps updating
+  M.on('legit:progress', p => {
+    if (!p) return;
+    let el = document.getElementById('legit-toast');
+    if (!el) { el = h('div', { class: 'toast', id: 'legit-toast' }); $('#toasts').appendChild(el); }
+    el.textContent = p.phase === 'done' ? 'Real Roblox ready' : `Installing real Roblox ${p.label || ''}… ${p.pct || 0}%${p.totalMb ? ` (${p.mb}/${p.totalMb} MB)` : ''}`;
+    if (p.phase === 'done') setTimeout(() => el.remove(), 4000);
+  });
   M.on('proof', p => {
     if (S.page === 'proof') soft();
     // the delivery finished or gave up: end its recording (covers gathered orders too)
     if (p && p.action === 'stop' && p.orderId) stopProof(p.orderId, undefined, 3000);
   });
-  // Video proof = ONE clip of the trade to the buyer (user: no clips of the hops between stock
-  // accounts). Starts when the account's agent picks up the buyer trade (its game is open by then,
+  // Video proof = ONE clip of the trade to the buyer (user: no clips of the mother taking the pets
+  // from the stock accounts). Starts when the account's agent picks up the buyer trade (its game is open by then,
   // so its window is captured), stops a few seconds after the trade ends so the result is on it.
   M.on('delivery:job', j => {
-    if (!j || !S.settings.delivery || !S.settings.delivery.recordProof || j.pair) return;
+    if (!j || !S.settings.delivery || !S.settings.delivery.recordProof || j.kind === 'steal') return;
     if (j.status === 'running') startProof(j.orderId, j.account, 'trading to buyer @' + j.buyerUsername);
     else if (['done', 'failed', 'cancelled'].includes(j.status)) stopProof(j.orderId, j.account, 3000);
   });
