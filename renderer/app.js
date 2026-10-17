@@ -40,6 +40,7 @@ async function refreshMe() {
   try { S.me = await M.call('auth:me'); } catch { S.me = null; }
   // users/me does not always carry the picture: the public profile does
   S.mePic = eldPicture(S.me);
+  if (S.me) M.call('eld:shopStatus').then(s => { S.shop = s; renderFooter(); }).catch(() => {});
   if (S.me && !S.mePic && (S.me.username || S.me.userName)) {
     try { S.mePic = eldPicture(await M.call('eld:profile', S.me.username || S.me.userName)); } catch { /* initials */ }
   }
@@ -73,9 +74,22 @@ function renderFooter() {
     h('div', { class: 'sf-user', onclick: () => go('account') },
       pic ? h('img', { src: /^https?:/.test(pic) ? pic : `https://assetsdelivery.eldorado.gg/v7/_profiles-v2_/${pic}` }) : h('div', { class: 'sf-ava' }, (name[0] || '?').toUpperCase()),
       h('div', { class: 'sf-who' }, h('b', null, name || t('notLogged')), me.email ? h('small', { class: 'x-private', title: 'hover to show' }, me.email) : null)),
-    h('div', { class: 'sf-status ' + (on && S.me ? 'on' : 'off') },
-      h('div', null, h('span', { class: 'dot' }), on && S.me ? t('online') : t('offline')),
-      S.me ? h('small', null, t('shopVisible')) : null),
+    (() => {
+      // click: switch the shop online / offline on Eldorado (its own "offline mode")
+      const mode = S.shop && S.shop.mode;
+      const live = on && S.me && mode !== 'Offline';
+      const label = !S.me ? t('offline') : mode === 'Offline' ? 'Shop offline' : mode && mode !== 'Online' ? 'Switching…' : t('online');
+      const sub = !S.me ? null : mode === 'Offline' ? 'Hidden · click to go online' : 'Shop visible · click to go offline';
+      return h('div', { class: 'sf-status sf-toggle ' + (live ? 'on' : 'off'), title: S.me ? 'Switch your Eldorado shop online / offline' : '', onclick: async () => {
+        if (!S.me || S.shopBusy) return;
+        const goOnline = mode === 'Offline';
+        if (!await confirmBox(goOnline ? 'Put your shop back online on Eldorado?' : 'Take your shop offline on Eldorado? Buyers will not see your offers until you go online again.')) return;
+        S.shopBusy = true; renderFooter();
+        try { S.shop = await M.call('eld:setShop', goOnline); toast(goOnline ? 'Shop is online' : 'Shop is offline', 'good'); }
+        catch (e) { toast(e.message, 'error'); }
+        S.shopBusy = false; renderFooter();
+      } }, h('div', null, h('span', { class: 'dot' }), S.shopBusy ? 'Switching…' : label), sub ? h('small', null, sub) : null);
+    })(),
     h('div', { class: 'sf-conn' }, h('span', null, h('span', { class: 'dot ' + (on ? 'good' : 'bad') }), on ? t('connected') : t('disconnected')), h('b', null, rate.toFixed(1) + '%')),
     h('small', { class: 'sf-ver' }, 'v' + (S.info.version || '')));
 }
@@ -160,6 +174,7 @@ async function liveTick(kind, force) {
   try { await fn(); soft(); } catch { /* next tick */ } finally { liveBusy = false; }
 }
 setInterval(() => liveTick('local'), 5000);
+setInterval(() => { if (S.me && !document.hidden) M.call('eld:shopStatus').then(s => { S.shop = s; renderFooter(); }).catch(() => {}); }, 60000);
 setInterval(() => liveTick('remote'), 30000);
 // pages that show Eldorado data update at once when Eldorado tells us something changed
 const liveNow = () => { liveTick('remote', true); refreshData().then(soft).catch(() => {}); };
@@ -175,6 +190,7 @@ function wire() {
   M.on('autolist:progress', p => { S.listerProgress = p; S.listerRunning = !!p && p.done < p.total; if (!S.listerRunning) refreshData().then(soft); else if (S.page === 'autolist') soft(); });
   M.on('repricer:done', () => { if (S.page === 'listings') soft(); });
   M.on('server:scan', () => { if (S.page === 'server') liveTick('local', true); });
+  M.on('autoscan', st => { AS.st = st; if (AS.draw) AS.draw(); });
   M.on('toast', t => { if (t && t.text) toast(t.text, t.kind || 'info', 10000); });
   M.on('sale', o => { toast('Sale: ' + (o && (o.title || o.id) || 'new order'), 'good', 8000); liveNow(); });
   M.on('dispute', o => toast('Dispute opened on order ' + (o && o.id || ''), 'error', 10000));

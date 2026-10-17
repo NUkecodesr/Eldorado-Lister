@@ -253,6 +253,9 @@ class Eldorado {
     }
     return field === 'RobloxUsername' ? robloxOf(o) : null;   // older order shape
   }
+  // the shop's visibility, as Eldorado's own "offline mode" switch: offlineMode Online | Offline
+  async shopStatus() { const r = await this.b.get('offerUser/me'); return { mode: (r && (r.offlineMode || r.mode)) || null, raw: r }; }
+  setShopOnline(on) { return this.b.put(on ? 'offerUser/me/switchOnline' : 'offerUser/me/switchOffline'); }
   orderConversation(orderId) { return this.b.get(`v1/orders/me/${orderId}/conversation`); }
   sendOrderMessage(orderId, message) {
     return this.b.post(`v1/conversation-management/me/conversations/order/${orderId}/quick-reply`, { message });

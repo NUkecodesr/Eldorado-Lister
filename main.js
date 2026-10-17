@@ -75,6 +75,59 @@ async function refreshAvatars() {
   }
   store.save(); send('pets:changed');
 }
+// --- Auto Scan -------------------------------------------------------------
+// Opens the chosen logged-in accounts in batches (into the private server); the scanner in
+// autoexec imports each base as soon as it loads, then that account's Roblox is closed and the
+// next batch starts. An account that does not report within the time limit counts as failed.
+const autoScan = {
+  running: false, stopFlag: false, total: 0, done: 0, failed: 0, current: [], log: [],
+  waiters: {},
+  say(msg, level = 'info') { this.log.push({ t: Date.now(), msg, level }); if (this.log.length > 300) this.log.shift(); store.log(level, '[AutoScan] ' + msg); this.emit(); },
+  state() { return { running: this.running, total: this.total, done: this.done, failed: this.failed, current: this.current, log: this.log, batch: (store.get('settings').autoscan || {}).batch || 3, ids: (store.get('settings').autoscan || {}).ids || null }; },
+  emit() { send('autoscan', this.state()); },
+  onImport(username, r) {
+    const k = String(username || '').toLowerCase();
+    const w = this.waiters[k];
+    if (w) { delete this.waiters[k]; w({ ok: true, added: r && r.added }); }
+  },
+  async start({ ids, batch } = {}) {
+    if (this.running) return this.state();
+    const accts = store.get('accounts').filter(a => ids.includes(a.id) && a.cookieEnc);
+    batch = Math.max(1, Math.min(10, Number(batch) || 3));
+    store.patchSettings({ autoscan: { batch, ids } });
+    if (!accts.length) { this.say('No logged-in accounts selected', 'warn'); return this.state(); }
+    if (!String((store.get('settings').launcher || {}).privateServer || '').trim()) { this.say('No private server link set - Auto Scan never opens accounts in a public server', 'error'); return this.state(); }
+    if (!lastAutoexec.some(f => /zotac_scanner\.lua$/i.test(f))) syncAutoexec();
+    Object.assign(this, { running: true, stopFlag: false, total: accts.length, done: 0, failed: 0, current: [] });
+    this.say(`Started: ${accts.length} account(s), ${batch} per batch`);
+    (async () => {
+      for (let i = 0; i < accts.length && !this.stopFlag; i += batch) {
+        const group = accts.slice(i, i + batch);
+        this.current = group.map(a => a.username);
+        this.say(`Batch ${Math.floor(i / batch) + 1}: ${this.current.map(u => '@' + u).join(', ')}`);
+        await Promise.all(group.map((a, j) => this.scanOne(a, j * 4000)));
+      }
+      this.say(this.stopFlag ? 'Stopped' : `Finished: ${this.done} scanned, ${this.failed} failed`);
+      this.running = false; this.current = []; this.emit();
+      send('pets:changed');
+    })();
+    return this.state();
+  },
+  async scanOne(a, delay) {
+    await new Promise(r => setTimeout(r, delay));
+    if (this.stopFlag) return;
+    const k = a.username.toLowerCase();
+    const result = new Promise(res => { this.waiters[k] = res; setTimeout(() => { if (this.waiters[k] === res) { delete this.waiters[k]; res({ ok: false, why: 'no scan within 3 minutes (is the scanner in your executor\'s autoexec?)' }); } }, 180000); });
+    try { await launcher.launch(a.id, { force: true }); this.say(`@${a.username}: launched, waiting for the scan`); }
+    catch (e) { delete this.waiters[k]; this.failed++; this.say(`@${a.username}: ${e.message}`, 'error'); return; }
+    const r = await result;
+    if (r.ok) { this.done++; this.say(`@${a.username}: scanned (${r.added || 0} pets)`); }
+    else { this.failed++; this.say(`@${a.username}: ${r.why}`, 'warn'); }
+    setTimeout(() => launcher.closeGame(a.username).catch(() => {}), 3000);
+  },
+  stop() { this.stopFlag = true; for (const k of Object.keys(this.waiters)) { const w = this.waiters[k]; delete this.waiters[k]; w({ ok: false, why: 'stopped' }); } this.say('Stopping...'); return this.state(); }
+};
+
 const updateHooks = {
   log: msg => store.log('info', msg),
   onDone: sha => { if (sha) store.patchSettings({ autoUpdate: { installedSha: sha } }); }
@@ -198,7 +251,7 @@ function wire() {
   ipcMain.on('bridge:event', (_e, { type, payload }) => { if (type === 'talk:message') delivery.onMessage(payload); });
 
   try { syncAutoexec(); } catch (e) { store.log('warn', '[Autoexec] ' + e.message); }
-  startLocalServer({ store, bridge, delivery, onServerScan: saveServerScan, onAgentClosing: acc => launcher.closeGame(acc), importScan: data => { const r = importPets(data, null, { replace: true }); refreshAvatarsSoon(); store.log('info', `[Scanner] ${data && data.username}: ${r.added} pets synced`); return r; }, onCookies: () => { send('auth:changed'); afterLogin(); } });
+  startLocalServer({ store, bridge, delivery, onServerScan: saveServerScan, onAgentClosing: acc => launcher.closeGame(acc), importScan: data => { const r = importPets(data, null, { replace: true }); refreshAvatarsSoon(); autoScan.onImport(data && data.username, r); store.log('info', `[Scanner] ${data && data.username}: ${r.added} pets synced`); return r; }, onCookies: () => { send('auth:changed'); afterLogin(); } });
 }
 
 async function afterLogin() {
@@ -261,9 +314,12 @@ function importPets(json, accountId, { replace = false } = {}) {
 function scannerScript(which = 'scanner') {
   const s = store.get('settings');
   const file = path.join(__dirname, 'scanner', which === 'delivery' ? 'zotac_delivery.lua' : 'zotac_scanner.lua');
-  return fs.readFileSync(file, 'utf8')
+  let src = fs.readFileSync(file, 'utf8')
     .replace('local ZOTAC_PORT  = 47321', `local ZOTAC_PORT  = ${s.localPort || 47321}`)
     .replace('local ZOTAC_TOKEN = "PASTE_AGENT_TOKEN"', `local ZOTAC_TOKEN = "${s.agentToken}"`);
+  // the autoexec copy scans quietly (no window) on every account Zotac opens
+  if (which === 'scanner-auto') src = src.replace('local SHOW_GUI = true', 'local SHOW_GUI = false');
+  return src;
 }
 
 // Delivery agent in the executor's autoexec, so it starts by itself in every Roblox client the
@@ -272,6 +328,7 @@ function scannerScript(which = 'scanner') {
 // so autoexec never runs a stale version or an old token.
 let lastAutoexec = [];
 function syncAutoexec() {
+  if (process.env.ZOTAC_NO_AUTOEXEC) return lastAutoexec;   // test copies must not overwrite the real autoexec
   const base = process.env.LOCALAPPDATA || '';
   const roam = process.env.APPDATA || '';
   const targets = [
@@ -285,19 +342,19 @@ function syncAutoexec() {
     // folders picked on the Auto Delivery page (any executor, wherever it is installed)
     ...((store.get('settings').delivery || {}).autoexecDirs || []).map(dir => ({ dir, always: true }))
   ].filter((t, i, all) => all.findIndex(x => x.dir.toLowerCase() === t.dir.toLowerCase()) === i);
-  const script = scannerScript('delivery');
+  const files = [['zotac_delivery.lua', scannerScript('delivery')], ['zotac_scanner.lua', scannerScript('scanner-auto')]];
   const done = [];
-  for (const t of targets) {
-    const f = path.join(t.dir, 'zotac_delivery.lua');
-    try { const old = path.join(t.dir, 'meowl_delivery.lua'); if (fs.existsSync(old)) { fs.unlinkSync(old); if (!fs.existsSync(f)) fs.writeFileSync(f, ''); } } catch { /* in use */ }
+  for (const t of targets) for (const [name, script] of files) {
+    const f = path.join(t.dir, name);
+    if (name === 'zotac_delivery.lua') try { const old = path.join(t.dir, 'meowl_delivery.lua'); if (fs.existsSync(old)) { fs.unlinkSync(old); if (!fs.existsSync(f)) fs.writeFileSync(f, ''); } } catch { /* in use */ }
     try {
-      if (!fs.existsSync(t.dir) || (!t.always && !fs.existsSync(f))) continue;
+      if (!fs.existsSync(t.dir) || (!t.always && !fs.existsSync(f) && name === 'zotac_delivery.lua') || (!t.always && name !== 'zotac_delivery.lua' && !fs.existsSync(path.join(t.dir, 'zotac_delivery.lua')))) continue;
       if (fs.existsSync(f) && fs.readFileSync(f, 'utf8') === script) { done.push(f); continue; }
       fs.writeFileSync(f, script);
       done.push(f);
     } catch (e) { store.log('warn', `[Autoexec] ${f}: ${e.message}`); }
   }
-  if (done.length) store.log('info', '[Autoexec] delivery agent installed: ' + done.join(', '));
+  if (done.length) store.log('info', '[Autoexec] delivery agent + scanner installed: ' + done.join(', '));
   lastAutoexec = done;
   return done;
 }
@@ -550,6 +607,13 @@ function ipc() {
   handle('delivery:simState', orderId => delivery.simState(orderId));
   handle('delivery:cancelJob', id => delivery.cancelJob(id));
   handle('agent:syncAutoexec', () => syncAutoexec());
+  handle('eld:shopStatus', () => eld.shopStatus());
+  handle('eld:setShop', async on => { await eld.setShopOnline(!!on); await new Promise(r => setTimeout(r, 800)); return eld.shopStatus(); });
+  handle('autoscan:state', () => autoScan.state());
+  handle('autoscan:start', opts => autoScan.start(opts));
+  handle('autoscan:stop', () => autoScan.stop());
+  handle('autoscan:clear', () => { autoScan.log = []; autoScan.emit(); return true; });
+  handle('scanner:autoexecScript', () => scannerScript('scanner-auto'));
   handle('agent:autoexecStatus', () => lastAutoexec);
   // diagnostics: raw Eldorado answers for the image upload (no listing is created)
   handle('eld:testUpload', async b64 => bridge.request('POST', 'files/me/Offer', { form: { image: { base64: b64, filename: 'test.png', type: 'image/png' } } }));

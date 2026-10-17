@@ -91,6 +91,48 @@ function xPetThumb(p, onclick) {
   }
   return h('span', { class: 'x-althumb ph', title: 'No card yet: Generate Images' }, '·');
 }
+// ---- Auto Scan window: pick logged-in accounts, batch size, Start; live progress + log ----
+const AS = { st: null, sel: null, draw: null };
+async function openAutoScan() {
+  if (!AS.st) AS.st = await M.call('autoscan:state');
+  const accts = S.accounts.filter(a => a.hasCookie);
+  if (!AS.sel) AS.sel = new Set((AS.st.ids || accts.map(a => a.id)).filter(id => accts.some(a => a.id === id)));
+  const bg = h('div', { class: 'modal-bg', onmousedown: e => { if (e.target === bg) close(); } });
+  const close = () => { AS.draw = null; bg.remove(); };
+  let batch = AS.st.batch || 3;
+  const body = h('div', { class: 'modal as-modal' });
+  bg.append(body);
+  $('#modal-root').append(bg);
+  const draw = () => {
+    const st = AS.st || {};
+    const pct = st.total ? Math.round((st.done + st.failed) / st.total * 100) : 0;
+    body.textContent = '';
+    body.append(
+      h('div', { class: 'as-head' }, h('div', { class: 'as-ico' }, '⌕'), h('div', { class: 'grow' }, h('b', null, 'Auto Scan'), h('small', null, 'Scans every logged-in account in batches and imports automatically')),
+        h('button', { class: 'as-x', onclick: close }, '✕')),
+      h('div', { class: 'as-row' }, h('span', null, 'Accounts per batch'),
+        h('input', { type: 'number', min: '1', max: '10', value: batch, disabled: st.running, onchange: e => { batch = Math.max(1, Math.min(10, Number(e.target.value) || 1)); } }),
+        h('div', { class: 'grow' }),
+        st.running ? h('button', { class: 'btn danger', onclick: () => M.call('autoscan:stop') }, '■ Stop')
+          : h('button', { class: 'btn primary', onclick: async () => { AS.st = await run(() => M.call('autoscan:start', { ids: [...AS.sel], batch })) || AS.st; draw(); } }, '▶ Start')),
+      h('div', { class: 'as-sel' }, h('span', null, 'ACCOUNTS TO SCAN ', h('b', null, `${AS.sel.size}/${accts.length}`)), h('div', { class: 'grow' }),
+        h('a', { href: '#', onclick: e => { e.preventDefault(); accts.forEach(a => AS.sel.add(a.id)); draw(); } }, 'All'), ' · ',
+        h('a', { href: '#', onclick: e => { e.preventDefault(); AS.sel.clear(); draw(); } }, 'None')),
+      accts.length ? h('div', { class: 'as-chips' }, accts.map(a => h('button', { class: 'as-chip' + (AS.sel.has(a.id) ? ' on' : '') + ((st.current || []).includes(a.username) ? ' busy' : ''), disabled: st.running, onclick: () => { AS.sel.has(a.id) ? AS.sel.delete(a.id) : AS.sel.add(a.id); draw(); } },
+        h('span', { class: 'dot' }), '@' + a.username)))
+        : h('div', { class: 'muted' }, 'No logged-in accounts: add a cookie or use browser login on Roblox Accounts.'),
+      h('div', { class: 'as-sel' }, h('span', null, st.running ? `Scanning… ${st.done + st.failed}/${st.total}` + ((st.current || []).length ? ' · ' + st.current.map(u => '@' + u).join(', ') : '') : (st.total ? `Done: ${st.done} scanned, ${st.failed} failed` : 'Idle')), h('div', { class: 'grow' }),
+        h('a', { href: '#', onclick: async e => { e.preventDefault(); await M.call('autoscan:clear'); } }, 'Clear log')),
+      h('div', { class: 'as-bar' }, h('i', { style: { width: pct + '%' } })),
+      h('div', { class: 'as-card' }, h('div', { class: 'as-sel' }, h('span', null, '‹› EXECUTOR SCRIPT (AUTOEXEC)'), h('div', { class: 'grow' }),
+          h('button', { class: 'btn sm', onclick: async () => xCopy(await M.call('scanner:autoexecScript'), 'Scanner script copied') }, '⎘ Copy script')),
+        h('small', { class: 'muted' }, 'Zotac puts this scanner (and the delivery script) into your executor\'s autoexec by itself (Synapse Z, AppData executors, and the folders added on Auto Delivery). Each opened account scans its base, Zotac imports it and closes that Roblox.')),
+      h('div', { class: 'as-log' }, (st.log || []).length ? st.log.slice().reverse().map(l => h('div', { class: 'l-' + l.level }, `${new Date(l.t).toLocaleTimeString()}  ${l.msg}`))
+        : h('div', { class: 'muted' }, 'No runs yet — set the batch size and press Start.')));
+  };
+  AS.draw = draw;
+  draw();
+}
 function xDot(m) { const c = xMutColor(m); return h('span', { class: 'x-mut' }, h('i', { style: { background: c || '#4b4233' } }), m && !/^none$/i.test(m) ? m : h('span', { class: 'muted' }, 'None')); }
 function xJsonCount(text) {
   try {
@@ -1260,7 +1302,7 @@ PAGES.accounts = async root => {
           modal('Free Slots', h('div', null, h('p', { class: 'muted' }, `${rows.reduce((s2, r) => s2 + r.free, 0)} free slots across ${rows.length} accounts (cap ${XSLOT_CAP} each).`),
             table(rows, [{ label: 'Account', render: r => '@' + r.a.username }, { label: 'Free', num: true, render: r => r.free }], { empty: 'All accounts are full.', maxHeight: '360px' })), [{ label: t('close') }]);
         } }, '▦ Free Slots'),
-        h('button', { class: 'btn sm', onclick: () => go('autolist') }, '⌕ Auto Scan'),
+        h('button', { class: 'btn sm primary', onclick: () => openAutoScan() }, '⌕ Auto Scan'),
         h('button', { class: 'btn sm', title: 'Launch every account that has a cookie and is not in game', onclick: async () => { toast('Launching accounts…', 'info'); const r = await run(() => M.call('accounts:launchAll')); if (r) toast(r.map(x => `${x.username}: ${x.error || x.skipped || 'launched'}`).join(' · ') || 'No accounts with cookies', 'good', 9000); } }, '▶ Launch All'),
         h('button', { class: 'btn sm', title: 'Restart the multi-instance helper (when a new client closes the old one)', onclick: () => run(() => M.call('launcher:fix'), 'Launcher reset') }, '⟳ Fix Launch'),
         h('button', { class: 'btn sm primary', title: 'Sign in to a stock account on roblox.com; the account and its cookie are added', onclick: async () => { const r = await run(() => M.call('accounts:loginBrowser', null)); if (r) { toast(`${r.created ? 'Added' : 'Updated'} @${r.username} — cookie saved`, 'good'); await refreshData(); render(); } } }, '⎆ Browser Login'),

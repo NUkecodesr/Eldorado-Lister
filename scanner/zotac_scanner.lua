@@ -561,7 +561,7 @@ local function runOnce(first)
         data.art.models = modelsOut
     end
     local json = HttpService:JSONEncode(data)
-    if first and setclipboard then pcall(setclipboard, json) end
+    if first and SHOW_GUI and setclipboard then pcall(setclipboard, json) end
     local ok, why = send(data)
     if ok then
         for k in pairs((data.art and data.art.models) or {}) do modelsSent[k] = true end
