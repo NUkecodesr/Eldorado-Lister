@@ -594,35 +594,7 @@ PAGES.delivery = async root => {
       h('button', { class: 'btn sm', title: 'Run a fake order through the buyer chat + real trade', onclick: () => openOrderSimulator() }, '🧪 Simulate order'),
       h('span', { class: 'mx-led ' + (cfg.enabled ? 'on' : '') }),
       sw(cfg.enabled, v => toggleAutoexec('delivery', v))));
-  const tabs = h('div', { class: 'mx-tabs' }, [['activity', 'Deliver Activity'], ['trades', 'Trade Log'], ['messages', 'Automatic Messages'], ['tutorial', 'Tutorial']].map(([k, l]) => h('button', { class: 'mx-tab' + (DV.tab === k ? ' on' : ''), onclick: () => { DV.tab = k; render(); } }, l)));
-
-  // ---------- trade log: every pet that left a stock account (permanent) ----------
-  if (DV.tab === 'trades' && !DV.trades) { DV.trades = []; M.call('trades:list').then(t => { DV.trades = t; if (S.page === 'delivery') render(); }); }
-  const tl = DV.tl || (DV.tl = { acct: '', kind: 'all', q: '' });
-  const petTxt = p => `${p.mutation && !/^(none|normal)$/i.test(p.mutation) ? p.mutation + ' ' : ''}${p.name} · ${formatGen(p.gen)}${(p.traits || []).length ? ' · ' + p.traits.join(', ') : ''}`;
-  const tAll = (DV.trades || []).slice().reverse();
-  const tAccts = [...new Set(tAll.flatMap(e => [e.from, e.kind === 'gather' ? e.to : null]).filter(Boolean))].sort();
-  const tShown = tAll.filter(e => (tl.kind === 'all' || e.kind === tl.kind) && (!tl.acct || e.from === tl.acct || (e.kind === 'gather' && e.to === tl.acct))
-    && (!tl.q || `${e.from} ${e.to} ${e.orderId} ${e.pets.map(petTxt).join(' ')}`.toLowerCase().includes(tl.q.toLowerCase())));
-  const kindPill = k => h('span', { class: 'pill ' + ({ delivered: 'good', gather: 'purple', gone: 'warn' }[k] || '') }, { delivered: 'traded to buyer', gather: 'moved to mother', gone: 'gone (not by Zotac)' }[k] || k);
-  const trades = h('div', null,
-    h('p', { class: 'muted' }, 'Every pet that left one of your accounts: traded to a buyer, moved onto a mother account for a gathered order, or gone from the base without a Zotac trade (seen on a full rescan). The pet comes off that account in Zotac at once; this list keeps it for good.'),
-    h('div', { class: 'row', style: { margin: '8px 0' } },
-      sel([['', 'All accounts'], ...tAccts.map(a => [a, '@' + a])], tl.acct, v => { tl.acct = v; render(); }),
-      sel([['all', 'Everything'], ['delivered', 'Traded to buyer'], ['gather', 'Moved to mother'], ['gone', 'Gone (not by Zotac)']], tl.kind, v => { tl.kind = v; render(); }),
-      h('input', { type: 'search', placeholder: 'Search pet, account, order…', value: tl.q, onchange: e => { tl.q = e.target.value; render(); } }),
-      h('div', { class: 'grow' }),
-      h('span', { class: 'muted' }, `${tShown.length} of ${tAll.length}`),
-      h('button', { class: 'btn sm', onclick: async () => { DV.trades = await M.call('trades:list'); render(); } }, 'Refresh')),
-    table(tShown.slice(0, 500), [
-      { label: 'When', render: e => h('span', { title: fmtDate(e.t) }, ago(e.t)) },
-      { label: 'What', render: e => h('div', null, kindPill(e.kind), e.sim ? h('span', { class: 'pill', style: { marginLeft: '6px' } }, 'test') : null) },
-      { label: 'Pets', render: e => h('div', null, e.pets.map(p => h('div', { class: 'pet-name' }, petTxt(p)))) },
-      { label: 'From', render: e => e.from ? '@' + e.from : '—' },
-      { label: 'To', render: e => e.to ? '@' + e.to : '—' },
-      { label: 'Order', render: e => e.orderId ? h('small', { class: 'mono' }, e.orderId) : h('small', { class: 'muted' }, e.note || '—') },
-      { label: 'Proof', render: e => (e.proofs || []).length ? h('div', { class: 'row', style: { flexWrap: 'nowrap' } }, e.proofs.map((pf, i) => h('button', { class: 'btn sm', title: pf, onclick: async () => M.call('open:path', (await M.call('proof:dir')) + '/' + pf) }, '▶ ' + (i + 1)))) : h('span', { class: 'muted' }, '—') }
-    ], { empty: 'Nothing traded away yet.', maxHeight: 'calc(100vh - 330px)' }));
+  const tabs = h('div', { class: 'mx-tabs' }, [['activity', 'Deliver Activity'], ['messages', 'Automatic Messages'], ['tutorial', 'Tutorial']].map(([k, l]) => h('button', { class: 'mx-tab' + (DV.tab === k ? ' on' : ''), onclick: () => { DV.tab = k; render(); } }, l)));
 
   // ---------- messages ----------
   const steps = { ...cfg.steps };
@@ -724,7 +696,7 @@ PAGES.delivery = async root => {
         h('button', { class: 'btn sm', onclick: () => { navigator.clipboard.writeText(S.settings.agentToken); toast('Agent token copied', 'good'); } }, 'Copy token'),
         h('button', { class: 'btn sm', onclick: async () => { if (!await confirmBox('Make a new agent token? Scripts already running in game are rejected until those games are reopened (autoexec gets the new token by itself).')) return; await M.call('settings:regenToken', 'agentToken'); S.settings = await M.call('settings:get'); render(); } }, 'Rotate token'))));
 
-  root.append(h('div', { class: 'mx-narrow wide' }, head, tabs, DV.tab === 'activity' ? activity : DV.tab === 'trades' ? trades : DV.tab === 'messages' ? messages : tut));
+  root.append(h('div', { class: 'mx-narrow wide' }, head, tabs, DV.tab === 'activity' ? activity : DV.tab === 'messages' ? messages : tut));
 };
 
 // ============================== AUTOEXEC SWITCHES ==========================
@@ -771,7 +743,7 @@ const VP = { list: null, rec: null, recOrder: null, started: 0, deliv: null, sel
 // (an order split over accounts that could not be gathered gets one per buyer trade). Every frame
 // goes through a canvas that stamps order, account, what is happening and the local time onto the
 // video, so a clip shows on its own when and what was traded. Each clip gets a .json sidecar and is
-// linked in the Trade Log.
+// linked to the order's entries in the trade ledger.
 const RECS = new Map();
 let recQueue = Promise.resolve();   // main points getDisplayMedia at one window per call: one at a time
 const STAMP = 36;

@@ -209,7 +209,6 @@ function wire() {
   M.on('orders', () => liveNow());
   M.on('delivery:update', () => { if (S.page === 'delivery') soft(); });
   M.on('delivery:job', () => { if (S.page === 'delivery') soft(); });
-  M.on('trade', e => { if (typeof DV !== 'undefined' && DV.trades && e) DV.trades.push(e); if (S.page === 'delivery') soft(); });
   M.on('talk:message', m => { S.talkLog.push(m); if (S.talkLog.length > 100) S.talkLog.shift(); if (S.page === 'chat') soft(); });
   M.on('proof', p => {
     if (S.page === 'proof') soft();

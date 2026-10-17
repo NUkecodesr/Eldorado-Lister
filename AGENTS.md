@@ -122,9 +122,9 @@ npx electron-builder --win nsis    # -> dist\Zotac Lister Setup <version>.exe
   account's own Roblox window (`proof:target` -> HWND of the process Zotac launched). Each frame is
   stamped (order, account, what is happening, clock). On save main writes the WebM duration
   (`src/main/webmfix.js`) and, when ffmpeg is installed, remuxes it for a seek index; `.json`
-  sidecar next to each clip; clips are linked in the Trade Log. The page keeps one `<video>`
+  sidecar next to each clip; clips are linked to their ledger entries. The page keeps one `<video>`
   element across live refreshes and skips refreshes while it plays.
-- **Trade Log** (Auto Delivery tab, `trades` in the store, `delivery.record`): permanent ledger of
+- **Trade ledger** (`trades` in the store, `delivery.record`; no page, the user removed the tab): permanent ledger of
   every pet that left an account: `delivered` (to a buyer, test trades too), `gather` (feeder ->
   mother), `gone` (a complete rescan no longer shows it and Zotac did not trade it). The pet comes
   off the account in Zotac at once (`delivered` + sold, or `accountId` = mother).
