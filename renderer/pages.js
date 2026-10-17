@@ -200,17 +200,21 @@ PAGES.autolist = async root => {
     if (!text) return;
     let json; try { json = JSON.parse(text); } catch (e) { return toast('Invalid JSON: ' + e.message, 'error'); }
     const target = await new Promise(res => {
-      const s2 = sel([['', 'Use account names from the JSON'], ...S.accounts.map(a => [a.id, a.username])], '', v => { s2._v = v; });
-      modal('Import pets', h('div', null, h('label', { class: 'f' }, 'Assign to account', s2), h('p', { class: 'muted' }, 'Accepts scanner exports (arrays of pets, {accounts:{name:[pets]}}) and Eldorado offer JSON.')), [
+      const s2 = sel([['', 'Match the account names in the JSON'], ...S.accounts.map(a => [a.id, '@' + a.username])], '', v => { s2._v = v; });
+      modal('Import pets', h('div', null, h('label', { class: 'f' }, 'Assign to account', s2), h('p', { class: 'muted' }, 'The pets are temporary Auto List pets (gone on restart unless listed), linked to a saved Roblox account so Zotac can deliver them, and not added to that account\'s inventory. Pets of accounts that are not saved in Roblox Accounts are skipped. Accepts scanner JSON and Eldorado offer JSON (pick the account for that).')), [
         { label: t('cancel'), fn: () => res(undefined) }, { label: t('import'), cls: 'primary', fn: () => res(s2._v || '') }]);
     });
     if (target === undefined) return;
     const r = await run(() => M.call('pets:import', json, target || null));
-    if (r) { toast(`Imported ${r.added} pets (until the app restarts)`, 'good'); AL.json = ''; await refreshData(); render(); }
+    if (r) {
+      const sk = (r.skipped || []).filter(Boolean);
+      toast(`Added ${r.added} temporary pets${sk.length ? ' — skipped (not a saved account): ' + sk.map(n => n.startsWith('(') ? n : '@' + n).join(', ') : ''}`, r.added ? 'good' : 'error', sk.length ? 9000 : 4200);
+      AL.json = ''; await refreshData(); render();
+    }
   };
 
   const addPet = () => {
-    const f = { name: '', mutation: 'None', gen: '', traits: '', accountId: AL.filter.account || (S.accounts[0] || {}).id || '', cost: '' };
+    const f = { name: '', mutation: 'None', gen: '', traits: '', accountId: AL.filter.account || '', cost: '' };
     const items = h('datalist', { id: 'dl-items' }, (S.items || []).map(i => h('option', { value: i.name })));
     modal('Add pet', h('div', { class: 'grid g2' },
       items,
@@ -263,7 +267,7 @@ PAGES.autolist = async root => {
   const scriptPanel = h('section', { class: 'x-panel' },
     h('div', { class: 'x-ptitle' }, h('span', { class: 'x-glyph' }, '</>'), 'PLOT SCANNER SCRIPT', h('div', { class: 'grow' }),
       h('small', { class: 'muted', style: { fontWeight: 400, letterSpacing: 0 } }, 'Auto Scanner'), sw((S.settings.scanner || {}).autoexec !== false, v => toggleAutoexec('scanner', v))),
-    h('p', { class: 'x-ptext' }, 'Zotac already puts the scanner in your executor\'s autoexec, so every account it opens scans ', h('b', null, 'its own base'), ' and keeps it synced every 30 s. Copy it only to run it by hand (this copy shows an in-game window and also puts the JSON on your clipboard, to paste below if Zotac was closed).'),
+    h('p', { class: 'x-ptext' }, 'Auto Scanner syncs inventory only to a matching account already saved in Roblox Accounts. A manual scan only copies JSON; parsing it adds temporary Auto List pets, linked to a matching saved account for delivery and hidden from account inventory.'),
     h('div', { class: 'x-code' }, scriptArea,
       h('div', { class: 'row x-code-btns' },
         h('button', { class: 'btn sm', onclick: () => { if (!scriptArea.value.trim()) return toast('Nothing to copy yet', 'error'); xCopy(scriptArea.value, 'Script copied'); } }, 'Copy'))),
@@ -288,11 +292,6 @@ PAGES.autolist = async root => {
     h('input', { type: 'checkbox', checked: allChecked, onchange: e => { pets.forEach(p => e.target.checked ? AL.selected.add(p.id) : AL.selected.delete(p.id)); render(); } }),
     h('span', null, `${AL.selected.size} selected of ${pets.length} pets`),
     h('div', { class: 'grow' }),
-    pets.some(p => p.status === 'available') ? h('button', { class: 'btn sm ghost danger', title: 'Delete every pet that is not listed or sold', onclick: async () => {
-      const ids = pets.filter(p => p.status === 'available').map(p => p.id);
-      if (!await confirmBox(`Clear the ${ids.length} unlisted pets shown here from the app? (listed and sold pets stay, Eldorado is not touched)`)) return;
-      await M.call('pets:delete', ids); AL.selected.clear(); await refreshData(); render();
-    } }, 'Clear unlisted') : null,
     AL.selected.size ? [
       h('button', { class: 'btn sm ghost', title: 'For listed pets whose Eldorado offer is gone', onclick: async () => {
         const ids = [...AL.selected].filter(id => { const p = S.pets.find(x => x.id === id); return p && p.status === 'listed'; });
@@ -1126,7 +1125,7 @@ PAGES.accounts = async root => {
   if (RA.open === null) RA.open = new Set();
   const [rLo, rHi] = f.range ? f.range.split('-').map(Number) : [0, 0];
   const minG = Math.max(parseGen(f.min), rLo || 0), maxG = f.max ? parseGen(f.max) : 0, hiG = rHi || 0;
-  const live = S.pets.filter(p => p.status !== 'sold');
+  const live = S.pets.filter(p => p.status !== 'sold' && !p.session);   // temporary pasted pets are not inventory
   const petOk = p => (!f.q || p.name.toLowerCase().includes(f.q.toLowerCase()))
     && (!f.mutation || String(p.mutation).toLowerCase() === f.mutation.toLowerCase())
     && (!minG || p.gen >= minG) && (!maxG || p.gen <= maxG) && (!hiG || p.gen < hiG);
@@ -1261,7 +1260,7 @@ PAGES.accounts = async root => {
         h('div', { class: 'x-tile x-red' }, h('div', { class: 'x-tile-b' }, h('div', { class: 'x-tile-k' }, 'EXPENSES'), h('div', { class: 'x-tile-v' }, money(expenses)), h('div', { class: 'x-tile-s' }, h('a', { href: '#', onclick: e => { e.preventDefault(); addExpense(); } }, '+ add expense')))),
         xTile('NET PROFIT', money(net), net >= 0 ? 'x-green' : 'x-red')),
       h('div', { class: 'x-agrid' }, S.accounts.map(a => {
-        const ap = S.pets.filter(p => p.accountId === a.id);
+        const ap = S.pets.filter(p => p.accountId === a.id && !p.session);
         return h('div', { class: 'x-panel' }, h('div', { class: 'user-card' }, a.avatar ? h('img', { src: a.avatar }) : h('div', { class: 'ph' }),
           h('div', { class: 'grow' }, h('b', null, a.username), h('small', null, a.note || (a.robloxUserId ? 'ID ' + a.robloxUserId : ''))),
           h('button', { class: 'btn sm ghost', onclick: () => editAcct(a) }, '✎')),

@@ -275,7 +275,7 @@ function wire() {
   ipcMain.on('bridge:event', (_e, { type, payload }) => { if (type === 'talk:message') delivery.onMessage(payload); });
 
   try { syncAutoexec(); } catch (e) { store.log('warn', '[Autoexec] ' + e.message); }
-  startLocalServer({ store, bridge, delivery, wantRescan: acc => autoScan.wants(acc), onServerScan: saveServerScan, onArt: a => { try { art.remember(a); } catch (e) { store.log('warn', '[Scanner] art: ' + e.message); } }, onAgentClosing: acc => launcher.closeGame(acc), importScan: data => { const r = importPets(data, null, { replace: true }); refreshAvatarsSoon(); autoScan.onImport(data && data.username, r, data && Array.isArray(data.pets) ? data.pets.length : null); send('pets:changed'); store.log('info', `[Scanner] ${data && data.username}: ${r.added} pets synced`); return r; }, onCookies: () => { send('auth:changed'); afterLogin(); } });
+  startLocalServer({ store, bridge, delivery, wantRescan: acc => autoScan.wants(acc), onServerScan: saveServerScan, onArt: a => { try { art.remember(a); } catch (e) { store.log('warn', '[Scanner] art: ' + e.message); } }, onAgentClosing: acc => launcher.closeGame(acc), importScan: data => { const r = importPets(data, null, { replace: true, onlySaved: true }); if (r.skipped === true) return r; refreshAvatarsSoon(); autoScan.onImport(data && data.username, r, data && Array.isArray(data.pets) ? data.pets.length : null); send('pets:changed'); store.log('info', `[Scanner] ${data && data.username}: ${r.added} pets synced`); return r; }, onCookies: () => { send('auth:changed'); afterLogin(); } });
 }
 
 async function afterLogin() {
@@ -292,7 +292,7 @@ async function afterLogin() {
 
 // Import pets from any supported JSON. replace=true (plot scanner sync) first drops the
 // account's still-available pets, so a rescan does not duplicate them.
-function importPets(json, accountId, { replace = false } = {}) {
+function importPets(json, accountId, { replace = false, onlySaved = false } = {}) {
   const raw = typeof json === 'string' ? JSON.parse(json) : json;
   // a scan taken before the base finished loading: pets missing, keep what we have
   if (replace && raw && Array.isArray(raw.pets) && !raw.pets.length && raw.expected > 0) {
@@ -308,6 +308,13 @@ function importPets(json, accountId, { replace = false } = {}) {
   }
   if (raw && raw.art) art.remember(raw.art);
   const accounts = store.get('accounts');
+  // the Auto Scanner only syncs a base into an account that is already saved in Roblox Accounts
+  if (replace && onlySaved && raw && raw.username && !accounts.some(a => a.username.toLowerCase() === String(raw.username).toLowerCase())) {
+    if (!importPets.warned) importPets.warned = new Set();
+    const k = String(raw.username).toLowerCase();
+    if (!importPets.warned.has(k)) { importPets.warned.add(k); store.log('warn', `[Scanner] @${raw.username} is not a saved account - its base is not synced (add it in Roblox Accounts)`); }
+    return { added: 0, removed: 0, skipped: true, notSaved: raw.username };
+  }
   const fixed = accounts.find(a => a.id === accountId);
   const items = sab.normalizePetImport(raw, fixed ? fixed.username : '');
   const added = [];
@@ -330,8 +337,9 @@ function importPets(json, accountId, { replace = false } = {}) {
         if ((!it.traits || !it.traits.length) && q && q.length) it.traits = q.shift();
       }
     }
-    dropped = store.get('pets').filter(p => ids.has(p.accountId) && p.status === 'available' && !inDelivery.has(p.id));
-    store.set('pets', store.get('pets').filter(p => !(ids.has(p.accountId) && p.status === 'available' && !inDelivery.has(p.id))));
+    // temporary pasted pets are not part of the synced inventory: a rescan leaves them alone
+    dropped = store.get('pets').filter(p => ids.has(p.accountId) && p.status === 'available' && !inDelivery.has(p.id) && !p.session);
+    store.set('pets', store.get('pets').filter(p => !(ids.has(p.accountId) && p.status === 'available' && !inDelivery.has(p.id) && !p.session)));
     removed = before - store.get('pets').length;
   }
   // Pets still physically in the base that Zotac already tracks: listed ones, sold ones not
@@ -339,13 +347,16 @@ function importPets(json, accountId, { replace = false } = {}) {
   // id would make the delivery lose it). A rescan must not re-add them as new available pets.
   const listedLeft = replace ? store.get('pets').filter(p => p.status === 'listed' || inDelivery.has(p.id)
     || (p.status === 'sold' && !p.delivered && Date.now() - (p.soldAt || 0) < 3 * 864e5)) : [];
+  const skippedNames = new Set();
   for (const it of items) {
     let acct = fixed;
     if (!acct && it.account) {
       acct = accounts.find(a => a.username.toLowerCase() === String(it.account).toLowerCase());
+      if (!acct && onlySaved) { skippedNames.add(String(it.account)); continue; }   // never makes new accounts
       if (!acct) { acct = { id: rid(6), username: String(it.account), note: '', createdAt: Date.now() }; accounts.push(acct); }
       if (raw && raw.userId && String(raw.username || '').toLowerCase() === acct.username.toLowerCase()) acct.robloxUserId = raw.userId;
     }
+    if (onlySaved && !acct) continue;
     if (replace && acct) {
       const i = listedLeft.findIndex(p => p.accountId === acct.id && sab.norm(p.name) === sab.norm(it.name) && sab.norm(p.mutation) === sab.norm(it.mutation || 'None'));
       if (i >= 0) { listedLeft.splice(i, 1); continue; }
@@ -377,8 +388,9 @@ function importPets(json, accountId, { replace = false } = {}) {
       delivery.record('gone', { from: uname(acc), pets: list, note: 'no longer in the base (not traded by Zotac)' });
     }
   }
+  if (onlySaved && !fixed) for (const it of items) if (!it.account) skippedNames.add('(no account in the JSON)');
   store.save(); send('pets:changed');
-  return { added: added.length, removed, kept: kept.length, accounts: accounts.length };
+  return { added: added.length, removed, kept: kept.length, accounts: accounts.length, skipped: [...skippedNames] };
 }
 
 function scannerScript(which = 'scanner') {
@@ -388,7 +400,7 @@ function scannerScript(which = 'scanner') {
     .replace('local ZOTAC_PORT  = 47321', `local ZOTAC_PORT  = ${s.localPort || 47321}`)
     .replace('local ZOTAC_TOKEN = "PASTE_AGENT_TOKEN"', `local ZOTAC_TOKEN = "${s.agentToken}"`);
   // the autoexec copy scans quietly (no window) on every account Zotac opens
-  if (which === 'scanner-auto') src = src.replace('local SHOW_GUI = true', 'local SHOW_GUI = false');
+  if (which === 'scanner-auto') src = src.replace('local SHOW_GUI = true', 'local SHOW_GUI = false').replace('local SYNC = false', 'local SYNC = true');
   return src;
 }
 
@@ -535,14 +547,13 @@ function ipc() {
   // pets
   handle('pets:list', () => store.get('pets'));
   handle('server:scans', () => Object.values(serverScans).sort((a, b) => b.receivedAt - a.receivedAt));
+  // Parsing pasted scanner JSON: temporary Auto List pets (gone on restart unless listed/sold),
+  // linked to the matching saved account (or the one picked) so they can be delivered, and kept out
+  // of that account's inventory. Bases of accounts Zotac doesn't have are skipped.
   handle('pets:import', (json, accountId) => {
     const before = new Set(store.get('pets').map(p => p.id));
-    const beforeAcc = new Set(store.get('accounts').map(a => a.id));
-    const r = importPets(json, accountId);
+    const r = importPets(json, accountId, { onlySaved: true });
     for (const p of store.get('pets')) if (!before.has(p.id)) p.session = true;
-    // accounts a paste created (often other players' bases) go away with their pets
-    for (const a of store.get('accounts')) if (!beforeAcc.has(a.id)) a.session = true;
-    refreshAvatarsSoon();
     store.save();
     return r;
   });

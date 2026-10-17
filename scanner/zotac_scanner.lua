@@ -4,9 +4,9 @@ if game.PlaceId ~= 109983668079237 then return end
 
 local ZOTAC_PORT  = 47321
 local ZOTAC_TOKEN = "PASTE_AGENT_TOKEN"
-local AUTO_SECONDS = 30
 local SCAN_SERVER = true
 local SHOW_GUI = true
+local SYNC = false   -- true only in the autoexec copy Zotac installs: sends the base to Zotac. The copy you run by hand only copies JSON.
 
 local Players     = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
@@ -559,10 +559,14 @@ local function runOnce(first)
     lastSig = sig
     local models = modelsOut
     local json = HttpService:JSONEncode(data)
-    if first and SHOW_GUI and setclipboard then pcall(setclipboard, json) end
+    if not SYNC then
+        if setclipboard then pcall(setclipboard, json); notify(#data.pets .. " pets copied - paste the JSON into Zotac Auto List")
+        else notify("This executor has no setclipboard") end
+        return
+    end
     local ok, why = send(data)
     if ok then
-        notify(#data.pets .. " pets sent to Zotac" .. ((first and SHOW_GUI) and " (also copied)" or ""))
+        notify(#data.pets .. " pets sent to Zotac")
     elseif first then
         notify(#data.pets .. " pets copied - paste into Zotac Auto List (" .. why .. ")")
         return
@@ -606,7 +610,7 @@ end
 
 local lastServerSig, lastServerAt = nil, 0
 local function runServer(force, data)
-    if not SCAN_SERVER then return end
+    if not SCAN_SERVER or not SYNC then return end
     data = data or scanServer(false)
     if not data then return end
     local kept = {}
@@ -798,7 +802,7 @@ end
 
 if not game:IsLoaded() then game.Loaded:Wait() end
 task.wait(1)
-task.spawn(heartbeat)
+if SYNC then task.spawn(heartbeat) end
 if SHOW_GUI then local okG, errG = pcall(buildGui); if not okG then notify("GUI failed: " .. tostring(errG)) end end
 
 local function petCount(plot)
@@ -839,16 +843,13 @@ local function rescanWanted()
     local okD, d = pcall(HttpService.JSONDecode, HttpService, res.Body)
     return okD and type(d) == "table" and d.rescan == true
 end
-task.spawn(function()
+if SYNC then task.spawn(function()
     local t = 0
     while running do
         task.wait(5)
         if not running then break end
         t += 5
-        if rescanWanted() then lastSig = nil; pcall(runOnce, false) end
-        if t % 30 == 0 then
-            heartbeat()
-            if AUTO_SECONDS > 0 then pcall(runOnce, false); pcall(runServer) end
-        end
+        if rescanWanted() then lastSig = nil; pcall(runOnce, false); pcall(runServer, true) end
+        if t % 30 == 0 then heartbeat() end
     end
-end)
+end) end
