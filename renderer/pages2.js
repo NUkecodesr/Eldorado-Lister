@@ -756,8 +756,8 @@ PAGES.delivery = async root => {
     h('details', { class: 'mx-jobs' }, h('summary', null, 'Agent jobs & API'),
       table(jobs, [
         { label: 'Job', render: j => h('span', { class: 'mono' }, j.id) },
-        { label: 'Kind', render: j => h('span', { class: 'pill' + (j.kind === 'steal' ? ' purple' : '') }, j.kind === 'steal' ? 'steal' : 'trade') },
-        { label: 'Account', k: 'account' }, { label: 'To', render: j => j.kind === 'steal' ? 'from @' + (j.fromUsername || '?') : (j.buyerUsername || '—') },
+        { label: 'Kind', render: j => h('span', { class: 'pill' + (j.kind === 'steal' ? ' purple' : '') }, j.kind === 'steal' ? 'steal' : j.kind === 'scan' ? 'scan' : 'trade') },
+        { label: 'Account', k: 'account' }, { label: 'To', render: j => j.kind === 'steal' ? 'from @' + (j.fromUsername || '?') : j.kind === 'scan' ? 'base of @' + (j.fromUsername || '?') : (j.buyerUsername || '—') },
         { label: 'Pets', render: j => j.pets.map(p => `${p.name}${p.mutation && p.mutation !== 'None' ? ' (' + p.mutation + ')' : ''}`).join(', ') },
         { label: 'Status', render: j => h('span', { class: 'pill ' + ({ done: 'good', failed: 'bad', running: 'gold', pending: 'info' }[j.status] || '') }, j.status) },
         { label: 'Reason', render: j => j.reason || '' }, { label: 'Created', render: j => ago(j.createdAt) }], { empty: 'No jobs.' }),

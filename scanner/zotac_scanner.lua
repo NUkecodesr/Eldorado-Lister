@@ -929,7 +929,36 @@ local function rescanWanted()
     })
     if not ok or not res or res.StatusCode ~= 200 then return false end
     local okD, d = pcall(HttpService.JSONDecode, HttpService, res.Body)
-    return okD and type(d) == "table" and d.rescan == true
+    return okD and type(d) == "table" and d.rescan == true, okD and type(d) == "table" and type(d.remote) == "table" and d.remote or nil
+end
+-- Auto Scan of an account in Legit mode: its base is read from here (this account's delivery
+-- script has walked to the front of it, so the name tags with gen/s are in range) and sent to Zotac
+-- under that account's name. Only reads what this client already has.
+local remoteDone = {}
+local function scanRemote(req)
+    local want = string.lower(tostring(req.username or ""))
+    if want == "" or remoteDone[want .. tostring(req.at)] then return end
+    remoteDone[want .. tostring(req.at)] = true
+    local plots = workspace:FindFirstChild("Plots")
+    local target, owner, display, uid
+    for _, plot in ipairs(plots and plots:GetChildren() or {}) do
+        local n, dn, id = ownerInfo(plot)
+        if n and (string.lower(n) == want or (req.userId and id == tonumber(req.userId))) then target, owner, display, uid = plot, n, dn, id break end
+    end
+    if not target then post("/scanner/remote", {by = LP.Name, username = req.username, error = "base not found in this server"}) return end
+    -- the name tags stream in as this account gets close: wait (max 20 s) until every pet has its gen/s
+    local t0, pets, animals, info = os.clock(), nil, nil, nil
+    repeat
+        pets, animals, info = readPlot(target, readOverheads(), {}, false)
+        local withGen = 0
+        for _, p in ipairs(pets) do if (p.gen or 0) > 0 then withGen += 1 end end
+        if #pets > 0 and withGen >= #pets then break end
+        task.wait(1)
+    until os.clock() - t0 > 20 or not running
+    local expected = nil
+    if animals then expected = 0; for _, a in pairs(animals) do if type(a) == "table" and type(a.Index) == "string" then expected += 1 end end end
+    local ok, why = post("/scanner/import", {expected = expected, username = owner, userId = uid, displayName = display, scannedAt = os.time(), pets = pets, traitsKnown = animals ~= nil, uuidInfo = info, remote = true, by = LP.Name})
+    if not ok then post("/scanner/remote", {by = LP.Name, username = req.username, error = "import failed: " .. tostring(why)}) end
 end
 if SYNC then task.spawn(function()
     local t = 0
@@ -937,7 +966,9 @@ if SYNC then task.spawn(function()
         task.wait(5)
         if not running then break end
         t += 5
-        if rescanWanted() then lastSig = nil; pcall(runOnce, false); pcall(runServer, true) end
+        local again, remote = rescanWanted()
+        if again then lastSig = nil; pcall(runOnce, false); pcall(runServer, true) end
+        if remote then pcall(scanRemote, remote) end
         if t % 30 == 0 then heartbeat() end
     end
 end) end
