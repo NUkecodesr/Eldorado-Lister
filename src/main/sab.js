@@ -180,4 +180,9 @@ function fillTemplate(tpl, pet, extra = {}) {
     .replace(/([ \t]*\|)+[ \t]*$/gm, '').replace(/^[ \t]*\|[ \t]*/gm, '').trim();
 }
 
-module.exports = { parseGen, formatGen, genBucket, mutationId, traitIds, buildItemIndex, findItem, normalizePetImport, fillTemplate, norm, slug };
+// the exact same brainrot (name, mutation, gen/s, traits): one offer, interchangeable in a sale
+function petKey(p) {
+  return [norm(p.name), norm(p.mutation || 'None'), Math.round(Number(p.gen) || 0), (p.traits || []).map(norm).sort().join(',')].join('|');
+}
+
+module.exports = { parseGen, formatGen, genBucket, mutationId, traitIds, buildItemIndex, findItem, normalizePetImport, fillTemplate, norm, slug, petKey };

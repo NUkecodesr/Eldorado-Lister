@@ -3,6 +3,18 @@ const EventEmitter = require('events');
 const { smartPrice } = require('./pricing');
 const { round2 } = require('./eldorado');
 const { rid } = require('./store');
+const sab = require('./sab');
+
+// n pets out of list, taken account by account (preferred account first, then the account with
+// the most), so a multi-quantity order needs as few trades as possible
+function pickFewestAccounts(list, n, prefer) {
+  const by = new Map();
+  for (const p of list) { const k = p.accountId || ''; if (!by.has(k)) by.set(k, []); by.get(k).push(p); }
+  const groups = [...by.entries()].sort((a, b) => (b[0] === prefer) - (a[0] === prefer) || b[1].length - a[1].length);
+  const out = [];
+  for (const [, g] of groups) for (const p of g) { if (out.length >= n) return out; out.push(p); }
+  return out;
+}
 
 // --- Discord ------------------------------------------------------------
 async function discord(store, { title, description, color = 0xf5b301, fields = [], ping = false, thumbnail, footer, username }) {
@@ -152,11 +164,22 @@ class Watcher extends EventEmitter {
     this.store.save();
   }
 
-  // Match a sale to listed pets (by offerId) and record it.
+  // Match a sale to listed pets (by offerId) and record it. A quantity-N order takes N of the
+  // offer's pets, from as few accounts as possible (fewer trades for the buyer); if the offer has
+  // fewer tracked pets than were bought, identical unlisted pets fill the gap. Still short ->
+  // delivery.onSale stops for the seller instead of delivering less than was paid for.
   async onNewSale(o) {
     const pets = this.store.get('pets');
-    const matched = pets.filter(p => p.offerId && p.offerId === o.offerId && p.status === 'listed').slice(0, o.quantity || 1);
-    for (const p of matched) Object.assign(p, { status: 'sold', soldPrice: o.price ? round2(o.price / (o.quantity || 1)) : p.price, soldAt: Date.now(), orderId: o.id });
+    const qty = Math.max(1, Number(o.quantity) || 1);
+    const listed = pets.filter(p => p.offerId && p.offerId === o.offerId && p.status === 'listed' && !p.delivered);
+    let matched = pickFewestAccounts(listed, qty);
+    if (matched.length && matched.length < qty) {
+      const key = sab.petKey(matched[0]);
+      const spare = pets.filter(p => !matched.includes(p) && p.status === 'available' && !p.delivered && sab.petKey(p) === key);
+      matched = matched.concat(pickFewestAccounts(spare, qty - matched.length, matched[0].accountId));
+    }
+    if (matched.length < qty) this.store.log('warn', `[Sale] ${o.title}: bought ×${qty}, only ${matched.length} matching pet(s) tracked`);
+    for (const p of matched) Object.assign(p, { status: 'sold', soldPrice: o.price ? round2(o.price / qty) : p.price, soldAt: Date.now(), orderId: o.id });
     const sale = { id: rid(6), orderId: o.id, title: o.title, price: o.price, buyer: o.buyer, date: o.date || new Date().toISOString(), petIds: matched.map(p => p.id), state: o.state, source: 'eldorado' };
     this.store.get('sales').unshift(sale);
     this.store.save();
@@ -200,4 +223,4 @@ class Watcher extends EventEmitter {
   }
 }
 
-module.exports = { discord, robloxUser, robloxAvatar, Repricer, Watcher };
+module.exports = { discord, robloxUser, robloxAvatar, Repricer, Watcher, pickFewestAccounts };

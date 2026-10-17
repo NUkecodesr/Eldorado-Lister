@@ -388,7 +388,8 @@ const STEP_META = [
     ['usernameNotFound', 'Username not found', 'no Roblox account with that name', '']]],
   ['STEP 3 - DELIVERY', 'Trade machine flow — sending the trade and handling retries', 'gold', [
     ['deliveryStarting', 'Delivery starting', 'username confirmed, launching delivery', '{username}'],
-    ['deliveryAccountStep', 'Account step', 'multi-account orders, before each account', '{step} {accounts} {account}'],
+    ['gathering', 'Gathering onto one account', 'quantity order spread over accounts: moving it to one account first', '{quantity} {accounts} {mother}'],
+    ['deliveryAccountStep', 'Account step', 'multi-account orders when gathering is off or failed, before each account', '{step} {accounts} {account}'],
     ['deliveryFailed', 'Delivery failed (retrying)', 'agent reported a failed trade', '{reason}'],
     ['deliverySuccess', 'Delivery success', 'all trades done', '{username}'],
     ['manualFallback', 'Manual fallback', 'after 3 failures when cancelling is off', ''],
@@ -424,14 +425,29 @@ async function openOrderSimulator() {
   const pre = avail.find(p => /rubrikiko/i.test(p.name));
   if (pre) petSel.value = pre.id;
   const buyerIn = h('input', { type: 'text', value: 'EldoradoBuyer', placeholder: 'Eldorado buyer name' });
+  // quantity: how many identical copies (same name, mutation, gen/s, traits) the buyer bought;
+  // copies on other accounts are gathered onto one account first, like a real order
+  const nk = x => String(x || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const sameKey = p => [nk(p.name), nk(p.mutation || 'None'), Math.round(Number(p.gen) || 0), (p.traits || []).map(nk).sort().join(',')].join('|');
+  const qtyIn = h('input', { type: 'number', min: 1, value: 1, style: { width: '80px' } });
+  const qtyHint = h('small', { class: 'muted' });
+  const showQty = () => {
+    const pet = avail.find(p => p.id === petSel.value);
+    const same = pet ? avail.filter(p => sameKey(p) === sameKey(pet)) : [];
+    const accts = [...new Set(same.map(p => (S.accounts.find(a => a.id === p.accountId) || {}).username || '?'))];
+    qtyIn.max = Math.max(1, same.length);
+    qtyHint.textContent = `${same.length} identical in stock${accts.length > 1 ? ' on ' + accts.map(a => '@' + a).join(', ') + ' (×2+ gathers onto one account)' : ''}`;
+  };
+  petSel.addEventListener('change', showQty); showQty();
   const start = await new Promise(res => modal('Simulate an order', h('div', { class: 'grid' },
     h('p', { class: 'muted' }, 'Runs the whole buyer chat inside Zotac. The in-game trade at the end is REAL.'),
     h('label', { class: 'f' }, 'Pet the buyer "bought"', petSel),
+    h('label', { class: 'f' }, 'Quantity', h('div', { class: 'row' }, qtyIn, qtyHint)),
     h('label', { class: 'f' }, 'Eldorado buyer name (chat label only)', buyerIn)),
-    [{ label: t('cancel'), fn: () => res(null) }, { label: 'Start chat', cls: 'primary', fn: () => res({ petId: petSel.value, buyer: buyerIn.value.trim() || 'Buyer' }) }]));
+    [{ label: t('cancel'), fn: () => res(null) }, { label: 'Start chat', cls: 'primary', fn: () => res({ petId: petSel.value, buyer: buyerIn.value.trim() || 'Buyer', quantity: Math.max(1, Number(qtyIn.value) || 1) }) }]));
   if (!start) return;
   let d;
-  try { d = await M.call('delivery:simulate', [start.petId], start.buyer); } catch (e) { return toast(e.message, 'error'); }
+  try { d = await M.call('delivery:simulate', [start.petId], start.buyer, start.quantity); } catch (e) { return toast(e.message, 'error'); }
   if (!d) return toast('Simulator could not start', 'error');
   const orderId = d.orderId;
 
@@ -460,7 +476,12 @@ async function openOrderSimulator() {
     try {
       const jobs = (await M.call('delivery:jobs')).filter(j => j.orderId === orderId);
       const j = jobs[jobs.length - 1];
-      if (j) job = ` · trade job ${j.status}${j.account ? ' (@' + j.account + ' → @' + j.buyerUsername + ')' : ''}${j.reason ? ' — ' + j.reason : ''}`;
+      // a gathered order runs several jobs at once: show each live one (receive, transfer, buyer trade)
+      const live = jobs.filter(x => ['pending', 'running'].includes(x.status));
+      const show = live.length ? live : (j ? [j] : []);
+      const one = x => `${x.kind === 'receive' ? 'receive' : x.kind === 'transfer' ? 'transfer' : 'trade'} ${x.status}` +
+        (x.kind === 'receive' ? ` (@${x.fromUsername} → @${x.account})` : x.account ? ` (@${x.account} → @${x.buyerUsername})` : '') + (x.reason ? ' — ' + x.reason : '');
+      if (show.length) job = ' · ' + show.map(one).join(' · ');
     } catch { /* jobs not loaded */ }
     status.textContent = `Order ${orderId} · ${cur.state}${cur.username ? ' · Roblox @' + cur.username : ''}${job}`;
   };
@@ -627,6 +648,7 @@ PAGES.delivery = async root => {
       h('div', { class: 'mx-rows' },
         setting('Mark order delivered', 'Calls Eldorado "deliver" after all trades succeed', sw(cfg.markDelivered, v => saveSettings({ delivery: { markDelivered: v } }))),
         setting('Cancel order if delivery fails', 'After 3 failed attempts: tell the buyer why and cancel the order on Eldorado (refund). Off = manual fallback', sw(cfg.cancelOnFail !== false, v => saveSettings({ delivery: { cancelOnFail: v } }))),
+        setting('Gather onto one account', 'Order spread over several accounts: the others trade their pets to the account holding the most (then close), and that account does ONE trade to the buyer. Off = one trade per account', sw(cfg.consolidate !== false, v => saveSettings({ delivery: { consolidate: v } }))),
         setting('Record video proof', 'Records the Roblox window during delivery (Video Proof page)', sw(cfg.recordProof, v => saveSettings({ delivery: { recordProof: v } }))),
         setting('Agent timeout', 'Seconds before a job counts as failed', num(cfg.agentTimeoutSec, v => saveSettings({ delivery: { agentTimeoutSec: v } }))))),
     mxCard(mxIco('user', 'purple'), 'Script Account', 'Stock account — runs the delivery script', h('span', { class: 'mx-badge ' + (online ? 'good' : 'bad') }, online ? 'CONNECTED' : 'OFFLINE'),
@@ -664,7 +686,9 @@ PAGES.delivery = async root => {
         : mxEmpty('clock', 'No history yet')),
     h('details', null, h('summary', null, 'Agent jobs & API'),
       table(jobs, [
-        { label: 'Job', render: j => h('span', { class: 'mono' }, j.id) }, { label: 'Account', k: 'account' }, { label: 'To', k: 'buyerUsername' },
+        { label: 'Job', render: j => h('span', { class: 'mono' }, j.id) },
+        { label: 'Kind', render: j => h('span', { class: 'pill' + (j.pair ? ' purple' : '') }, j.kind === 'receive' ? 'receive' : j.kind === 'transfer' ? 'transfer' : 'trade') },
+        { label: 'Account', k: 'account' }, { label: 'To', render: j => j.kind === 'receive' ? 'from @' + (j.fromUsername || '?') : (j.buyerUsername || '—') },
         { label: 'Pets', render: j => j.pets.map(p => `${p.name}${p.mutation && p.mutation !== 'None' ? ' (' + p.mutation + ')' : ''}`).join(', ') },
         { label: 'Status', render: j => h('span', { class: 'pill ' + ({ done: 'good', failed: 'bad', running: 'gold', pending: 'info' }[j.status] || '') }, j.status) },
         { label: 'Reason', render: j => j.reason || '' }, { label: 'Created', render: j => ago(j.createdAt) }], { empty: 'No jobs.' }),
@@ -680,6 +704,8 @@ const VP = { list: null, rec: null, recOrder: null, started: 0, deliv: null, sel
 async function startProof(orderId) {
   if (VP.rec) return;
   try {
+    // tell main which account's Roblox window to capture (the mother's, for a gathered order)
+    try { await M.call('proof:target', orderId || null); } catch { /* old main: first Roblox window */ }
     const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
     const chunks = [];
     const rec = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9', videoBitsPerSecond: 2_500_000 });

@@ -200,14 +200,20 @@ function wire() {
   M.on('delivery:update', () => { if (S.page === 'delivery') soft(); });
   M.on('delivery:job', () => { if (S.page === 'delivery') soft(); });
   M.on('talk:message', m => { S.talkLog.push(m); if (S.talkLog.length > 100) S.talkLog.shift(); if (S.page === 'chat') soft(); });
-  M.on('proof', () => { if (S.page === 'proof') soft(); });
+  M.on('proof', p => {
+    if (S.page === 'proof') soft();
+    // the delivery finished or gave up: end its recording (covers gathered orders too)
+    if (p && p.action === 'stop' && VP.rec && VP.recOrder === p.orderId) setTimeout(() => { if (VP.recOrder === p.orderId) stopProof(); }, 3000);
+  });
   // Video proof: record the Roblox window while the in-game trade runs. Starts when the agent
   // picks the job up (the stock account's game is open by then, so its window is captured),
-  // stops a few seconds after the job ends so the result is on the video.
+  // stops a few seconds after the job ends so the result is on the video. Gathered orders
+  // (feeder -> mother -> buyer) are one recording of the mother's window: the feeder hops
+  // (j.pair) don't stop it, the buyer trade or the delivery ending does.
   M.on('delivery:job', j => {
     if (!j || !S.settings.delivery || !S.settings.delivery.recordProof) return;
-    if (j.status === 'running' && !VP.rec) startProof(j.orderId);
-    else if (['done', 'failed', 'cancelled'].includes(j.status) && VP.rec && VP.recOrder === j.orderId) setTimeout(() => { if (VP.recOrder === j.orderId) stopProof(); }, 3000);
+    if (j.status === 'running' && !VP.rec && j.kind !== 'transfer') startProof(j.orderId);
+    else if (!j.pair && ['done', 'failed', 'cancelled'].includes(j.status) && VP.rec && VP.recOrder === j.orderId) setTimeout(() => { if (VP.recOrder === j.orderId) stopProof(); }, 3000);
   });
   M.on('update:available', u => { UP.info = u; toast(`Update ${u.latest} available (Settings)`, 'info', 9000); if (S.page === 'settings') soft(); });
   M.onCall({ renderImage: p => renderListingImage(p), renderModel: p => renderModel3D(p) });

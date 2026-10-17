@@ -213,6 +213,80 @@ local function addItem(item)
     return false
 end
 
+local function wanted(job)
+    local r = api("GET", "/jobs/" .. job.id)
+    return not (r and (r.status == "cancelled" or r.status == "gone"))
+end
+
+local function theirItems(root)
+    local other = root:FindFirstChild("Other")
+    local sf = other and other:FindFirstChild("ScrollingFrame")
+    local items = {}
+    for _, it in ipairs(sf and sf:GetChildren() or {}) do
+        if it:IsA("Frame") and it.Visible then
+            local sp = it:FindFirstChild("Spacer")
+            local t = sp and sp:FindFirstChild("Title")
+            if t then
+                local texts = {}
+                for _, d in ipairs(it:GetDescendants()) do
+                    if d:IsA("TextLabel") and d.Text ~= "" then table.insert(texts, (d.Text:gsub("<[^>]->", ""))) end
+                end
+                table.insert(items, {title = (t.Text:gsub("<[^>]->", "")), all = table.concat(texts, " ")})
+            end
+        end
+    end
+    return items
+end
+
+local function readyAndAccept(root, who, reReady)
+    task.wait(0.4)
+    local readyAt = os.clock()
+    local readied = false
+    while os.clock() - readyAt < 12 and tradeRoot() do
+        local yr = root:FindFirstChild("Your") and root.Your:FindFirstChild("Ready")
+        if yr and yr.Visible then readied = true break end
+        local b = buttonWithText(root, "READY")
+        if not b and buttonWithText(root, "ACCEPT", "CONFIRM") then readied = true break end
+        if b then fire(b.Activated, nil, 1) end
+        task.wait(1.2)
+    end
+    if not tradeRoot() then return false, who .. " closed the trade" end
+    if not readied then cancelTrade(); return false, "could not press READY" end
+    notify("Ready - waiting for " .. who .. " to accept")
+
+    -- once both sides are ready the game shows a short "Xs Left" countdown with ACCEPT greyed out
+    -- (presses are ignored), then ACCEPT works; pressing it shows "Confirmed!" on your offer
+    -- (proof video 2026-10-16). Press only after the countdown, until Confirmed!, never after.
+    local function textShown(under, pattern)
+        for _, d in ipairs(under and under:GetDescendants() or {}) do
+            if d:IsA("TextLabel") and shown(d) and string.find(d.Text:gsub("<[^>]->", ""), pattern) then return true end
+        end
+        return false
+    end
+    local acceptT0, presses, readies, lastPress, countdownSince = os.clock(), 0, 0, -99, nil
+    while tradeRoot() and os.clock() - acceptT0 < ACCEPT_TIMEOUT do
+        local confirmed = textShown(root:FindFirstChild("Your"), "^%s*Confirmed")
+            or (textShown(root, "^%s*Confirmed") and not textShown(root:FindFirstChild("Other"), "^%s*Confirmed"))
+        local counting = textShown(root, "%d+%s*s%s+Left")
+        if counting then countdownSince = countdownSince or os.clock() else countdownSince = nil end
+        local waitCount = counting and os.clock() - countdownSince < 15   -- a timer that never ends is ignored
+        local b = not confirmed and buttonWithText(root, "ACCEPT", "CONFIRM")
+        if b and not waitCount and presses < 30 and os.clock() - lastPress > 1.5 then
+            presses += 1; lastPress = os.clock()
+            fire(b.Activated, nil, 1)
+            task.wait(0.3)
+        elseif not confirmed and reReady and readies < 5 and buttonWithText(root, "READY") then
+            readies += 1
+            fire(buttonWithText(root, "READY").Activated, nil, 1)
+            task.wait(1.2)
+        else
+            task.wait(0.25)
+        end
+    end
+    if tradeRoot() then cancelTrade(); return false, who .. " did not accept in time" end
+    return true
+end
+
 local function isMe(owner)
     if owner == nil then return false end
     if typeof(owner) == "Instance" then return owner == LP end
@@ -306,9 +380,14 @@ local function deliver(job)
     end
 
     if tradeRoot() then cancelTrade(); task.wait(1.5) end
-    local t0, lastSend, root = os.clock(), -RESEND_EVERY, nil
-    while os.clock() - t0 < INVITE_TIMEOUT do
+    local inviteFor = tonumber(job.inviteTimeout) or INVITE_TIMEOUT
+    local t0, lastSend, root, lastWant = os.clock(), -RESEND_EVERY, nil, os.clock()
+    while os.clock() - t0 < inviteFor do
         if not running then return false, "agent stopped" end
+        if os.clock() - lastWant > 5 then
+            lastWant = os.clock()
+            if not wanted(job) then return false, "cancelled by Zotac" end
+        end
         root = tradeRoot()
         if root then
             local who = tradePartner(root)
@@ -331,33 +410,41 @@ local function deliver(job)
     if not root then return false, "buyer did not accept the trade request" end
     notify("Trade open with @" .. buyer .. " - adding " .. #job.pets .. " brainrot(s)")
 
+    local used = {}
     for k, w in pairs(want) do
+        local m = tostring(w.pet.mutation or "")
+        local label = ((m == "" or m == "None" or m == "Normal") and "" or (m .. " ")) .. w.pet.name
 
-        local cands, best, tSearch = {}, 0, os.clock()
+        local level, count, tSearch = 0, 0, os.clock()
         repeat
-            cands, best = {}, 0
+            level, count = 0, 0
             for _, it in ipairs(yourItems(root)) do
-                local sc = not isAdded(it) and matchScore(it, w.pet) or 0
-                if sc > best then cands, best = {it}, sc elseif sc > 0 and sc == best then table.insert(cands, it) end
+                local sc = matchScore(it, w.pet)
+                if sc > level then level, count = sc, 1 elseif sc > 0 and sc == level then count += 1 end
             end
-            if #cands >= w.n or not tradeRoot() then break end
+            if (level > 0 and count >= w.n) or not tradeRoot() then break end
             task.wait(0.5)
         until os.clock() - tSearch > 8
-        if #cands < w.n then
+        if level == 0 or count < w.n then
             local seen = {}
             for _, it in ipairs(yourItems(root)) do table.insert(seen, it.title) end
             log("warn", "trade window items: " .. table.concat(seen, ", "):sub(1, 400))
-        end
-        local target = w.gens[1] or 0
-        table.sort(cands, function(a, b) return math.abs((a.gen or 0) - target) < math.abs((b.gen or 0) - target) end)
-        if #cands < w.n then
             cancelTrade()
-            local m = tostring(w.pet.mutation or "")
-            return false, (((m == "" or m == "None" or m == "Normal") and "" or (m .. " ")) .. w.pet.name .. " not found in the trade window")
+            return false, label .. " not found in the trade window" .. (count > 0 and (" (only " .. count .. " of " .. w.n .. ")") or "")
         end
+
         for i = 1, w.n do
-            if not tradeRoot() then return false, "buyer closed the trade" end
-            if not addItem(cands[i]) then cancelTrade(); return false, "could not add " .. cands[i].title end
+            if not tradeRoot() then return false, (job.kind == "transfer" and ("@" .. buyer) or "buyer") .. " closed the trade" end
+            local target, pick, bestD = w.gens[i] or w.gens[1] or 0, nil, math.huge
+            for _, it in ipairs(yourItems(root)) do
+                if not used[it.frame] and not isAdded(it) and matchScore(it, w.pet) == level then
+                    local dd = math.abs((it.gen or 0) - target)
+                    if dd < bestD then pick, bestD = it, dd end
+                end
+            end
+            if not pick then cancelTrade(); return false, label .. " not found in the trade window (only " .. (i - 1) .. " of " .. w.n .. ")" end
+            if not addItem(pick) then cancelTrade(); return false, "could not add " .. pick.title end
+            used[pick.frame] = true
         end
     end
 
@@ -365,34 +452,8 @@ local function deliver(job)
     for _, it in ipairs(yourItems(root)) do if isAdded(it) then added += 1 end end
     if added ~= #job.pets then cancelTrade(); return false, ("offer has %d items, expected %d"):format(added, #job.pets) end
 
-    task.wait(0.4)
-    local readyAt = os.clock()
-    local readied = false
-    while os.clock() - readyAt < 12 and tradeRoot() do
-        local yr = root:FindFirstChild("Your") and root.Your:FindFirstChild("Ready")
-        if yr and yr.Visible then readied = true break end
-        local b = buttonWithText(root, "READY")
-        if not b and buttonWithText(root, "ACCEPT", "CONFIRM") then readied = true break end
-        if b then fire(b.Activated, nil, 1) end
-        task.wait(1.2)
-    end
-    if not tradeRoot() then return false, "buyer closed the trade" end
-    if not readied then cancelTrade(); return false, "could not press READY" end
-    notify("Ready - waiting for @" .. buyer .. " to accept")
-
-    local acceptT0, presses = os.clock(), 0
-    while tradeRoot() and os.clock() - acceptT0 < ACCEPT_TIMEOUT do
-
-        local b = buttonWithText(root, "ACCEPT", "CONFIRM")
-        if b and presses < 5 then
-            presses += 1
-            fire(b.Activated, nil, 1)
-            task.wait(1.5)
-        else
-            task.wait(0.25)
-        end
-    end
-    if tradeRoot() then cancelTrade(); return false, "buyer did not accept in time" end
+    local okRA, whyRA = readyAndAccept(root, job.kind == "transfer" and ("@" .. buyer) or "buyer")
+    if not okRA then return false, whyRA end
 
     local deadline = os.clock() + 12
     repeat
@@ -404,6 +465,145 @@ local function deliver(job)
         if allGone then return true end
     until os.clock() > deadline
     return false, "trade closed but the brainrots are still in your base (cancelled?)"
+end
+
+local function mentionsName(o, names)
+    for _, d in ipairs(o:GetDescendants()) do
+        if (d:IsA("TextLabel") or d:IsA("TextButton")) and d.Text ~= "" then
+            local t = norm(d.Text)
+            for _, n in ipairs(names) do if n ~= "" and string.find(t, n, 1, true) then return true end end
+        end
+    end
+    return false
+end
+local SKIP_GUI = {TradeLiveTrade = true, Chat = true, BubbleChat = true}
+local function incomingAccept(names)
+    for _, g in ipairs(PG:GetChildren()) do
+        if g:IsA("LayerCollector") and g.Enabled and not SKIP_GUI[g.Name] then
+            for _, b in ipairs(g:GetDescendants()) do
+                if b:IsA("GuiButton") and shown(b) then
+                    local lbl = b:FindFirstChildWhichIsA("TextLabel", true)
+                    local txt = string.upper((lbl and lbl.Text) or (b:IsA("TextButton") and b.Text) or "")
+                    if txt == "ACCEPT" or txt == "YES" then
+                        local p = b
+                        for _ = 1, 6 do
+                            p = p.Parent
+                            if not p or p == PG then break end
+                            if mentionsName(p, names) then return b, g end
+                            if p == g then break end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+local function describeRequestGuis(names)
+    local out = {}
+    for _, g in ipairs(PG:GetChildren()) do
+        if g:IsA("LayerCollector") and g.Enabled and not SKIP_GUI[g.Name] and mentionsName(g, names) then
+            local btns = {}
+            for _, b in ipairs(g:GetDescendants()) do
+                if b:IsA("GuiButton") and shown(b) then
+                    local lbl = b:FindFirstChildWhichIsA("TextLabel", true)
+                    table.insert(btns, b.Name .. "=" .. ((lbl and lbl.Text) or (b:IsA("TextButton") and b.Text) or ""))
+                end
+            end
+            table.insert(out, g.Name .. " [" .. table.concat(btns, ", "):sub(1, 200) .. "]")
+        end
+    end
+    return #out > 0 and table.concat(out, " | ") or "no gui names the sender"
+end
+
+local RECEIVE_WAIT = 300
+local function receive(job)
+    local from = tostring(job.fromUsername or "")
+    if from == "" then return false, "job has no sender" end
+    if #(job.pets or {}) == 0 then return false, "job has no pets" end
+    local names = {norm(from)}
+    local disp = norm(job.fromDisplayName)
+    if #disp >= 3 and disp ~= norm(LP.DisplayName) and disp ~= norm(LP.Name) then table.insert(names, disp) end
+
+    local want = {}
+    for _, p in ipairs(job.pets) do
+        local k = norm(p.name) .. "|" .. norm(p.mutation)
+        want[k] = want[k] or {pet = p, n = 0}
+        want[k].n += 1
+    end
+    local before = {}
+    for k, w in pairs(want) do before[k] = countInBase(w.pet) end
+
+    if tradeRoot() and string.lower(tostring(tradePartner(tradeRoot()))) ~= string.lower(from) then cancelTrade(); task.wait(1.5) end
+    notify("Waiting for @" .. from .. " to send " .. #job.pets .. " brainrot(s)")
+    local t0, lastWant, lastDiag, lastPress, root = os.clock(), os.clock(), os.clock(), -99, nil
+    while os.clock() - t0 < RECEIVE_WAIT do
+        if not running then return false, "agent stopped" end
+        root = tradeRoot()
+        if root then
+            local who = tradePartner(root)
+            if who and string.lower(who) == string.lower(from) then break end
+            log("warn", "trade window opened with @" .. tostring(who) .. ", not @" .. from .. " - cancelling")
+            cancelTrade(); root = nil; task.wait(2)
+        end
+        if os.clock() - lastPress > 3 then
+            local b, g = incomingAccept(names)
+            if b then
+                lastPress = os.clock()
+                log("info", "accepting trade request from @" .. from .. " (" .. g.Name .. ")")
+                fire(b.Activated, nil, 1)
+            end
+        end
+        if os.clock() - lastDiag > 30 then lastDiag = os.clock(); log("info", "waiting for @" .. from .. ": " .. describeRequestGuis(names)) end
+        if os.clock() - lastWant > 5 then
+            lastWant = os.clock()
+            if not wanted(job) then return false, "cancelled by Zotac" end
+        end
+        task.wait(0.5)
+    end
+    if not root then return false, "no trade request from @" .. from .. " arrived" end
+    notify("Trade open with @" .. from .. " - waiting for their offer")
+
+    local tOffer, stableSince, lastSig = os.clock(), nil, nil
+    while tradeRoot() and os.clock() - tOffer < 90 do
+        local items, complete = theirItems(root), true
+        for _, w in pairs(want) do
+            local n = 0
+            for _, it in ipairs(items) do if matchScore(it, w.pet) >= 2 then n += 1 end end
+            if n < w.n then complete = false end
+        end
+        local sig = #items
+        if complete and sig == lastSig then
+            stableSince = stableSince or os.clock()
+            if os.clock() - stableSince > 2 then break end
+        else
+            stableSince = nil
+        end
+        lastSig = sig
+        task.wait(0.5)
+    end
+    if not tradeRoot() then return false, "@" .. from .. " closed the trade" end
+    if not stableSince then
+        local seen = {}
+        for _, it in ipairs(theirItems(root)) do table.insert(seen, it.title) end
+        log("warn", "@" .. from .. " offered: " .. table.concat(seen, ", "):sub(1, 400))
+        cancelTrade()
+        return false, "@" .. from .. "'s offer is missing brainrots"
+    end
+
+    local okRA, whyRA = readyAndAccept(root, "@" .. from, true)
+    if not okRA then return false, whyRA end
+
+    local deadline = os.clock() + 15
+    repeat
+        task.wait(1)
+        local allIn = true
+        for k, w in pairs(want) do
+            if countInBase(w.pet) < before[k] + w.n then allIn = false end
+        end
+        if allIn then return true end
+    until os.clock() > deadline
+    return false, "trade closed but the brainrots did not arrive in the base"
 end
 
 if not game:IsLoaded() then game.Loaded:Wait() end
@@ -430,11 +630,15 @@ while running do
     local job = r and r.job
     if job then
         closeAt = nil
-        log("info", ("job %s: %d brainrot(s) -> @%s"):format(job.id, #(job.pets or {}), tostring(job.buyerUsername)))
-        local ok, okDone, why = pcall(deliver, job)
+        if job.kind == "receive" then
+            log("info", ("job %s: receive %d brainrot(s) from @%s"):format(job.id, #(job.pets or {}), tostring(job.fromUsername)))
+        else
+            log("info", ("job %s: %d brainrot(s) -> @%s"):format(job.id, #(job.pets or {}), tostring(job.buyerUsername)))
+        end
+        local ok, okDone, why = pcall(job.kind == "receive" and receive or deliver, job)
         if not ok then okDone, why = false, "script error: " .. tostring(okDone) end
         api("POST", "/jobs/" .. job.id, {status = okDone and "done" or "failed", reason = why})
-        notify(okDone and ("Delivered to @" .. tostring(job.buyerUsername)) or ("Delivery failed: " .. tostring(why)))
+        notify(okDone and (job.kind == "receive" and ("Received from @" .. tostring(job.fromUsername)) or ("Delivered to @" .. tostring(job.buyerUsername))) or ("Delivery failed: " .. tostring(why)))
         log(okDone and "info" or "warn", ("job %s %s%s"):format(job.id, okDone and "done" or "failed", why and (" - " .. why) or ""))
         if job.closeWhenIdle then closeAt = os.clock() + 15 end
     else

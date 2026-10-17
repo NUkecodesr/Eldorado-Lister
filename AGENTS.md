@@ -132,6 +132,33 @@ npx electron-builder --win nsis    # -> dist\Zotac Lister Setup <version>.exe
    order is cancelled on Eldorado with the reason (or manual fallback if that is switched off).
 
 Tested live on 2026-10-16 (BloxBeast35594 -> Kawafiu, Cacto Hipopotamo): every step above worked.
+
+### Quantity orders and the mother account (gather)
+
+- A sale of quantity N (`purchaseQuantity`) takes N of the offer's listed pets, from as few accounts
+  as possible (`pickFewestAccounts` in `services.js`); identical unlisted pets (`sab.petKey`) fill a
+  gap. Still short -> `delivery.onSale` stops for the seller (`manual`), it never trades fewer.
+- Pets of one order on several accounts (Settings "Gather onto one account", `delivery.consolidate`,
+  default on): `startGather` picks the **mother** = account holding most of the order's pets (tie:
+  game already open, then has a cookie). Each other account (feeder) gets a pair of jobs:
+  `receive` on the mother (accept the incoming request, wait until the feeder's offer holds the
+  pets, READY, ACCEPT, check they arrived) and `transfer` on the feeder (normal send with the mother
+  as "buyer", `inviteTimeout` 240 s, `closeWhenIdle` = feeder's game closes afterwards). A transfer
+  is only handed out once its receive job is running. Either side seeing the pets move counts;
+  moved pets get `accountId = mother` (`gatheredFrom` = old). Then ONE `deliver` job from the mother
+  to the buyer. 3 failed hops -> `gatherFallback` = one trade per account (old flow).
+- A failed side asks the other to stop (`cancelRequested`, agent polls `GET /agent/jobs/<id>` and
+  only obeys before a trade window opens); retry waits until both sides reported.
+- Incoming trade request on the mother's screen = PlayerGui `DuelsMachinePrompt` (ACCEPT button,
+  names the sender). After both READY the game shows "Xs Left" with ACCEPT greyed out (presses
+  ignored), then ACCEPT works and your side shows "Confirmed!"; the agent presses only after the
+  countdown and stops once Confirmed! (proof video 2026-10-16).
+- Recording (Video Proof) of a gathered order = the mother's window (`proof:target` finds the HWND
+  of the process Zotac launched for it), from the receive job to the end of the buyer trade.
+- Launcher maps each launched Roblox process by the launch's `browsertrackerid` in its command line
+  (two accounts launched together used to get the same pid).
+- Rescans (`importPets`) never re-add or drop pets of a running delivery or sold-not-delivered pets;
+  a pet id missing mid-delivery stops the order for the seller (`needsYou`), never "delivered".
 Failure reasons the agent reports are listed in its `deliver()` returns; the app adds "the
 delivery script never connected from @account" when nobody picked a job up.
 

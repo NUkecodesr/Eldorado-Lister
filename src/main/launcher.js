@@ -88,6 +88,16 @@ function robloxPids() {
   }));
 }
 
+// pid -> command line of running Roblox players (the launch URI carries our browsertrackerid)
+function robloxCmdlines() {
+  return new Promise(res => execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+    "Get-CimInstance Win32_Process -Filter \"Name='RobloxPlayerBeta.exe'\" | ForEach-Object { [string]$_.ProcessId + '|' + $_.CommandLine }"],
+  { windowsHide: true, timeout: 10000 }, (err, out) => {
+    if (err) return res([]);
+    res(String(out).split(/\r?\n/).map(l => { const i = l.indexOf('|'); return i > 0 ? { pid: Number(l.slice(0, i)), cmd: l.slice(i + 1) } : null; }).filter(x => x && x.pid));
+  }));
+}
+
 class Launcher extends EventEmitter {
   constructor({ store, delivery }) {
     super();
@@ -231,12 +241,18 @@ class Launcher extends EventEmitter {
     if (this.cfg.exePath) spawn(this.cfg.exePath, [uri], { detached: true, stdio: 'ignore' }).unref();
     else await shell.openExternal(uri);
     this.lastLaunch[id] = Date.now();
-    // remember which Roblox process is this account's: the new one that appears after launching
+    // remember which Roblox process is this account's: the one whose command line carries this
+    // launch's browsertrackerid (two accounts launched together otherwise both took the newest
+    // process, and closing one could kill the other). Fallback: a new process no account has yet.
+    const bt = (uri.match(/browsertrackerid:(\d+)/) || [])[1];
     (async () => {
       for (let i = 0; i < 20; i++) {
         await new Promise(r => setTimeout(r, 1500));
-        const fresh = (await robloxPids()).filter(p => !before.has(p));
-        if (fresh.length) { this.pids[id] = fresh[fresh.length - 1]; this.log('info', `${a.username}: Roblox process ${this.pids[id]}`); return; }
+        const procs = await robloxCmdlines();
+        const mine = bt && procs.find(p => p.cmd.includes('browsertrackerid:' + bt) || p.cmd.includes('browserTrackerId=' + bt) || p.cmd.includes('-b ' + bt));
+        const taken = new Set(Object.entries(this.pids).filter(([k]) => k !== id).map(([, v]) => v));
+        const pid = mine ? mine.pid : (i >= 6 ? (procs.map(p => p.pid).filter(p => !before.has(p) && !taken.has(p)).pop() || null) : null);
+        if (pid) { this.pids[id] = pid; this.log('info', `${a.username}: Roblox process ${pid}${mine ? '' : ' (guessed)'}`); return; }
       }
     })();
     this.log('info', `Launched ${a.username} into the private server`);

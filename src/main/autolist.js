@@ -38,9 +38,7 @@ class AutoLister extends EventEmitter {
   }
 
   // pets that are the exact same brainrot (name, mutation, gen/s, traits) become one offer
-  static sameKey(p) {
-    return [sab.norm(p.name), sab.norm(p.mutation || 'None'), Math.round(Number(p.gen) || 0), (p.traits || []).map(sab.norm).sort().join(',')].join('|');
-  }
+  static sameKey(p) { return sab.petKey(p); }
 
   async start(petIds, opts = {}) {
     if (this.running) throw new Error('Auto List already running');

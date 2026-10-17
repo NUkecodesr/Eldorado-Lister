@@ -33,7 +33,8 @@ function normalizeOrder(o) {
     robloxUsername: robloxOf(o),
     lastMessage: (o.conversationDetails && o.conversationDetails.message) || '',
     offerId: o.offerId || offer.offerId || offer.id || null,
-    buyer: o.buyerUsername || (o.buyer && (o.buyer.username || o.buyer.name)) || o.buyerName || o.counterpartyUsername || '',
+    // seller order lists carry the buyer as buyerInfo.user (eldorado.gg's sold-orders template reads it there)
+    buyer: (o.buyerInfo && o.buyerInfo.user && o.buyerInfo.user.username) || o.buyerUsername || (o.buyer && (o.buyer.username || o.buyer.name)) || o.buyerName || o.counterpartyUsername || '',
     buyerId: o.buyerId || (o.buyer && o.buyer.id) || null,
     quantity: o.purchaseQuantity || o.quantity || o.orderedQuantity || (offer.orderPricing && offer.orderPricing.quantity) || 1,
     price: amountOf(o.totalPrice) ?? amountOf(o.price) ?? amountOf(o.sellerEarnings) ?? amountOf(o.orderPrice) ?? amountOf(o.amount),

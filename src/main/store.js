@@ -15,6 +15,7 @@ const DEFAULT_DELIVERY_STEPS = {
   usernameNotFound: "We couldn't find a Roblox account with that username. Please double-check and send it again.",
   deliveryStarting: 'Confirmation received.\nYour order will be delivered in the next few seconds via trade machine. Please remain online.',
   deliveryAccountStep: 'Sending part {step}/{accounts} from account {account}. Please accept the trade.',
+  gathering: 'Your {quantity} brainrots are on {accounts} of our accounts. We are moving them onto one account so you get everything in a single trade. This takes about a minute, please stay online.',
   deliverySuccess: 'Delivered! Please check your inventory and mark the order as received. Thanks for buying!',
   deliveryFailed: "The trade didn't go through ({reason}). We'll retry shortly — please stay online.",
   manualFallback: 'Automatic delivery is unavailable right now. A seller will contact you shortly to deliver manually.',
@@ -71,7 +72,7 @@ const DEFAULTS = {
     // deliveryTimes: competitor offers must use one of these (empty = fall back to maxDeliveryTime)
     rules: { maxDeliveryTime: 'Hour1', deliveryTimes: ['Instant', 'Minute20', 'Hour1'], minFeedback: 95, minRatings: 5, ignoreOwn: true, ignoreTitleWords: '' },
     repricer: { enabled: false, intervalMin: 20, undercut: 0.01, floorPct: 70, onlyIfBeaten: true, scope: 'all', offerIds: [] },
-    delivery: { enabled: false, markDelivered: true, recordProof: false, cancelOnFail: true, agentTimeoutSec: 240, steps: DEFAULT_DELIVERY_STEPS },
+    delivery: { enabled: false, markDelivered: true, recordProof: false, cancelOnFail: true, consolidate: true, agentTimeoutSec: 240, steps: DEFAULT_DELIVERY_STEPS },
     launcher: { autoLaunch: true, privateServer: '', exePath: '', multiInstance: true, cooldownSec: 120, closeAfterDelivery: true },
     extensionToken: rid(8),
     agentToken: rid(8),

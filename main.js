@@ -196,11 +196,19 @@ function createWindow() {
   win.on('closed', () => { win = null; });
 }
 
-// Screen recording for Video Proof: prefer a Roblox window, else primary screen.
+// Screen recording for Video Proof: the Roblox window of the account doing the trade (set by
+// proof:target from the process Zotac launched for it), else the first Roblox window, else the screen.
+let captureHwnd = null;
+function windowOfPid(pid) {
+  return new Promise(res => require('child_process').execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${Number(pid)}).MainWindowHandle`],
+    { windowsHide: true, timeout: 8000 }, (err, out) => { const h = Number(String(out || '').trim()); res(err || !h ? null : h); }));
+}
 function setupCapture() {
   session.defaultSession.setDisplayMediaRequestHandler(async (_req, cb) => {
     const sources = await desktopCapturer.getSources({ types: ['window', 'screen'] });
-    const pick = sources.find(s => /roblox/i.test(s.name)) || sources.find(s => s.id.startsWith('screen')) || sources[0];
+    const mine = captureHwnd ? sources.find(s => s.id.startsWith('window:' + captureHwnd + ':')) : null;
+    captureHwnd = null;
+    const pick = mine || sources.find(s => /roblox/i.test(s.name)) || sources.find(s => s.id.startsWith('screen')) || sources[0];
     cb({ video: pick });
   });
 }
@@ -293,6 +301,9 @@ function importPets(json, accountId, { replace = false } = {}) {
   const items = sab.normalizePetImport(raw, fixed ? fixed.username : '');
   const added = [];
   let removed = 0;
+  // pets of deliveries still running or waiting for the seller
+  const inDelivery = new Set();
+  for (const d of Object.values(store.get('deliveries') || {})) if (d && !['done', 'cancelled'].includes(d.state)) for (const id of d.petIds || []) inDelivery.add(id);
   if (replace) {
     const names = new Set(items.map(it => String(it.account || (fixed && fixed.username) || '').toLowerCase()).filter(Boolean));
     if (!items.length && raw && raw.username) names.add(String(raw.username).toLowerCase());
@@ -307,11 +318,14 @@ function importPets(json, accountId, { replace = false } = {}) {
         if ((!it.traits || !it.traits.length) && q && q.length) it.traits = q.shift();
       }
     }
-    store.set('pets', store.get('pets').filter(p => !(ids.has(p.accountId) && p.status === 'available')));
+    store.set('pets', store.get('pets').filter(p => !(ids.has(p.accountId) && p.status === 'available' && !inDelivery.has(p.id))));
     removed = before - store.get('pets').length;
   }
-  // Pets of this account that are already listed: a rescan must not re-add them.
-  const listedLeft = replace ? store.get('pets').filter(p => p.status === 'listed') : [];
+  // Pets still physically in the base that Zotac already tracks: listed ones, sold ones not
+  // delivered yet (recent), and any pet of a running delivery (its job holds the pet id; a fresh
+  // id would make the delivery lose it). A rescan must not re-add them as new available pets.
+  const listedLeft = replace ? store.get('pets').filter(p => p.status === 'listed' || inDelivery.has(p.id)
+    || (p.status === 'sold' && !p.delivered && Date.now() - (p.soldAt || 0) < 3 * 864e5)) : [];
   for (const it of items) {
     let acct = fixed;
     if (!acct && it.account) {
@@ -621,7 +635,7 @@ function ipc() {
   handle('delivery:list', () => ({ deliveries: Object.values(store.get('deliveries')).sort((a, b) => b.createdAt - a.createdAt), jobs: store.get('jobs').slice(-100).reverse() }));
   handle('delivery:manual', (orderId, action, arg) => delivery.manual(orderId, action, arg));
   handle('delivery:testJob', (petId, buyer) => delivery.testJob(petId, buyer));
-  handle('delivery:simulate', (petIds, buyer) => delivery.simulate(petIds, buyer));
+  handle('delivery:simulate', (petIds, buyer, quantity) => delivery.simulate(petIds, buyer, quantity));
   handle('delivery:simSay', (orderId, text) => delivery.simSay(orderId, text));
   handle('delivery:simState', orderId => delivery.simState(orderId));
   handle('delivery:cancelJob', id => delivery.cancelJob(id));
@@ -691,6 +705,15 @@ function ipc() {
   handle('update:install', info => installUpdate(info, updateHooks));
 
   // video proof
+  handle('proof:target', async orderId => {
+    captureHwnd = null;
+    const d = orderId && store.get('deliveries')[orderId];
+    const job = store.get('jobs').filter(j => j.orderId === orderId && j.status === 'running' && j.kind !== 'transfer').pop();
+    const acctId = (d && d.mother && !d.noGather) ? d.mother : job ? job.accountId : null;
+    const pid = acctId && launcher.pids[acctId];
+    if (pid) captureHwnd = await windowOfPid(pid);
+    return { account: acctId, hwnd: captureHwnd };
+  });
   handle('proof:save', (orderId, b64) => {
     const f = path.join(proofDir(), `${String(orderId || 'manual').replace(/[^\w-]/g, '')}-${Date.now()}.webm`);
     fs.writeFileSync(f, Buffer.from(b64, 'base64'));
