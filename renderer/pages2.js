@@ -12,6 +12,8 @@ const pickNum = (obj, keys) => {
 };
 const pickNumShallow = (o, keys) => { for (const k of keys) { const v = o[k]; if (typeof v === 'number') return v; if (v && typeof v.amount === 'number') return v.amount; } return null; };
 const avatarUrl = me => {
+  if (me && me === S.me && S.mePic) return S.mePic;
+  const any = eldPicture(me); if (any) return any;
   const p = me && (me.picture || me.profilePicture);
   const f = p && (p.mediumPicture || p.smallPicture || p.largePicture);
   return f ? (/^https?:/.test(f) ? f : `https://assetsdelivery.eldorado.gg/v7/_profiles-v2_/${f}?w=80`) : null;
@@ -596,6 +598,7 @@ PAGES.delivery = async root => {
 
   // ---------- activity ----------
   const account = S.accounts.find(a => jobs.some(j => j.account && a.username && j.account.toLowerCase() === a.username.toLowerCase())) || S.accounts[0];
+  if (DV.autoexec === undefined) { DV.autoexec = null; M.call('agent:autoexecStatus').then(r => { DV.autoexec = r || []; if (S.page === 'delivery') soft(); }).catch(() => { DV.autoexec = []; }); }
   const scriptKey = 'zotac.deliveryScript';
   // Default = the bundled delivery agent (does the trade) with this install's port + token.
   const scriptBox = h('textarea', { class: 'mx-code', spellcheck: 'false', value: lsGet(scriptKey, '') || '-- loading delivery script…', onchange: e => lsSet(scriptKey, e.target.value) });
@@ -630,6 +633,17 @@ PAGES.delivery = async root => {
         h('div', null, h('b', null, account.username), h('div', { class: 'row', style: { marginTop: '6px', gap: '6px' } }, h('span', { class: 'mx-badge gold' }, 'SCRIPT MODE'),
           h('button', { class: 'mx-badge bad btn-like', title: 'Rotates the agent token; the script must be updated afterwards', onclick: async () => { if (await confirmBox('Disconnect the script? This rotates the agent token, so the running script is rejected until you copy the new script.')) { await M.call('settings:regenToken', 'agentToken'); S.settings = await M.call('settings:get'); lsSet(scriptKey, ''); render(); } } }, 'Disconnect'))))
         : h('div', { class: 'mx-empty' }, 'Add a Roblox account on the Roblox Accounts page.')),
+    mxCard(mxIco('code'), 'Autoexec', 'The delivery script must run by itself when Roblox opens', h('span', { class: 'mx-badge ' + ((DV.autoexec || []).length ? 'good' : 'bad') }, (DV.autoexec || []).length ? 'INSTALLED' : 'NOT INSTALLED'),
+      h('p', { class: 'ink2', style: { marginTop: 0 } }, 'Zotac copies zotac_delivery.lua into your executor\'s autoexec folder. Synapse Z and executors in AppData are found by themselves; for any other executor add its autoexec folder here. Without it Roblox opens but nothing trades.'),
+      (DV.autoexec || []).length ? h('div', { class: 'mx-rows' }, DV.autoexec.map(f => h('div', { class: 'muted mono', style: { fontSize: '11px' } }, '✓ ' + f))) : h('div', { class: 'mx-empty' }, 'No executor autoexec folder found yet.'),
+      h('div', { class: 'row', style: { marginTop: '8px' } },
+        ...((cfg.autoexecDirs || []).map(dir => h('span', { class: 'mx-badge' }, dir.split(/[\\/]/).slice(-2).join('/'), h('a', { href: '#', style: { marginLeft: '6px' }, onclick: async e => { e.preventDefault(); await saveSettings({ delivery: { autoexecDirs: (cfg.autoexecDirs || []).filter(x => x !== dir) } }); DV.autoexec = await M.call('agent:syncAutoexec'); render(); } }, '✕')))),
+        h('button', { class: 'btn sm', onclick: async () => {
+          const dir = await run(() => M.call('dialog:folder')); if (!dir) return;
+          if (!/autoexec/i.test(dir) && !await confirmBox(`"${dir}" is not called autoexec. Use it anyway?`)) return;
+          await saveSettings({ delivery: { autoexecDirs: [...new Set([...(cfg.autoexecDirs || []), dir])] } });
+          DV.autoexec = await run(() => M.call('agent:syncAutoexec')); render(); toast('Delivery script installed', 'good');
+        } }, '+ Add autoexec folder'))),
     mxCard(mxIco('code'), 'Script', 'Execute in your executor on the script account', null,
       h('div', { class: 'mx-script' }, scriptBox, h('div', { class: 'col' }, h('button', { class: 'btn sm', onclick: () => { navigator.clipboard.writeText(scriptBox.value); toast('Script copied', 'good'); } }, 'Copy')))),
     mxCard(mxIco('clip', 'blue'), 'Delivery Queue', 'Pending trades awaiting execution',

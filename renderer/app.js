@@ -21,8 +21,28 @@ async function refreshData() {
   if (info.lister && !S.listerProgress) S.listerProgress = info.lister;
 }
 
+// Eldorado profile picture of any user object: a URL, a file name on Eldorado's CDN, or an object
+// of sizes ({ smallPicture / mediumPicture / largePicture } or { smallImage ... }); searched two levels deep
+function eldPicture(o, depth = 0) {
+  if (!o || typeof o !== 'object' || depth > 2) return null;
+  const toUrl = v => {
+    if (!v) return null;
+    if (typeof v === 'string') return /^https?:/.test(v) ? v : /\.(png|jpe?g|webp|gif)$/i.test(v) ? `https://assetsdelivery.eldorado.gg/v7/_profiles-v2_/${v}?w=96` : null;
+    if (typeof v === 'object') return toUrl(v.mediumPicture || v.smallPicture || v.largePicture || v.largeImage || v.smallImage || v.originalSizeImage || v.url || v.fullPath);
+    return null;
+  };
+  for (const k of ['profilePicture', 'profilePictureUrl', 'picture', 'avatar', 'avatarUrl', 'profileImage', 'image']) { const u = toUrl(o[k]); if (u) return u; }
+  for (const v of Object.values(o)) if (v && typeof v === 'object' && !Array.isArray(v)) { const u = eldPicture(v, depth + 1); if (u) return u; }
+  return null;
+}
+
 async function refreshMe() {
   try { S.me = await M.call('auth:me'); } catch { S.me = null; }
+  // users/me does not always carry the picture: the public profile does
+  S.mePic = eldPicture(S.me);
+  if (S.me && !S.mePic && (S.me.username || S.me.userName)) {
+    try { S.mePic = eldPicture(await M.call('eld:profile', S.me.username || S.me.userName)); } catch { /* initials */ }
+  }
   if (S.me) {
     try { const [items, lib] = await Promise.all([M.call('eld:items'), M.call('eld:attrs')]); S.items = items; S.attrs = lib.attrs || []; } catch { /* library loads lazily */ }
   }
@@ -47,7 +67,7 @@ function renderFooter() {
   const on = S.bridge === 'connected';
   const me = S.me || {};
   const name = me.username || me.userName || '';
-  const pic = me.profilePicture || me.avatar || me.avatarUrl;
+  const pic = S.mePic || eldPicture(me);
   const rate = S.info.successRate !== undefined ? Number(S.info.successRate) : (on ? 100 : 0);
   f.append(
     h('div', { class: 'sf-user', onclick: () => go('account') },

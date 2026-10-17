@@ -267,13 +267,21 @@ function scannerScript(which = 'scanner') {
 // executor attaches to (Zotac launches + closes stock accounts per order). Synapse Z always gets
 // it; Volt / Real only keep an existing copy current. Rewritten on every start and token change,
 // so autoexec never runs a stale version or an old token.
+let lastAutoexec = [];
 function syncAutoexec() {
   const base = process.env.LOCALAPPDATA || '';
+  const roam = process.env.APPDATA || '';
   const targets = [
     { dir: path.join(base, 'Synapse Z', 'autoexec'), always: true },
     { dir: path.join(base, 'Volt', 'autoexec'), always: false },
-    { dir: path.join(base, 'Real', 'autoexec'), always: false }
-  ];
+    { dir: path.join(base, 'Real', 'autoexec'), always: false },
+    // other executors that keep autoexec in AppData: installed into when the folder exists
+    ...['Wave', 'Solara', 'Xeno', 'Seliware', 'Velocity', 'Swift', 'Potassium', 'Volcano', 'Zenith', 'AWP', 'Codex', 'Delta', 'Krnl']
+      .flatMap(n => [path.join(base, n, 'autoexec'), path.join(roam, n, 'autoexec'), path.join(base, n, 'workspace', '..', 'autoexec')])
+      .map(dir => ({ dir: path.normalize(dir), always: true })),
+    // folders picked on the Auto Delivery page (any executor, wherever it is installed)
+    ...((store.get('settings').delivery || {}).autoexecDirs || []).map(dir => ({ dir, always: true }))
+  ].filter((t, i, all) => all.findIndex(x => x.dir.toLowerCase() === t.dir.toLowerCase()) === i);
   const script = scannerScript('delivery');
   const done = [];
   for (const t of targets) {
@@ -287,6 +295,7 @@ function syncAutoexec() {
     } catch (e) { store.log('warn', `[Autoexec] ${f}: ${e.message}`); }
   }
   if (done.length) store.log('info', '[Autoexec] delivery agent installed: ' + done.join(', '));
+  lastAutoexec = done;
   return done;
 }
 
@@ -538,6 +547,7 @@ function ipc() {
   handle('delivery:simState', orderId => delivery.simState(orderId));
   handle('delivery:cancelJob', id => delivery.cancelJob(id));
   handle('agent:syncAutoexec', () => syncAutoexec());
+  handle('agent:autoexecStatus', () => lastAutoexec);
   // diagnostics: raw Eldorado answers for the image upload (no listing is created)
   handle('eld:testUpload', async b64 => bridge.request('POST', 'files/me/Offer', { form: { image: { base64: b64, filename: 'test.png', type: 'image/png' } } }));
   handle('delivery:jobs', () => store.get('jobs').slice(-20));

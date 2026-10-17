@@ -412,7 +412,9 @@ class Delivery extends EventEmitter {
     const runLimit = Math.max(limit, 420000);   // agent waits up to 150s for the invite + 90s for accept
     for (const j of this.store.get('jobs')) {
       if ((j.status === 'pending' && Date.now() - j.createdAt > limit) || (j.status === 'running' && Date.now() - (j.startedAt || j.createdAt) > runLimit)) {
-        this.jobResult(j.id, false, j.status === 'pending' ? 'no delivery agent online' : 'timeout');
+        this.jobResult(j.id, false, j.status === 'pending'
+          ? `the delivery script never connected from @${j.account || 'the stock account'}: Roblox may have opened, but zotac_delivery.lua did not run (add your executor's autoexec folder on the Auto Delivery page, or execute the script)`
+          : 'timeout');
       }
     }
     const jobs = this.store.get('jobs');
