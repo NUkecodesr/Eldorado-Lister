@@ -175,6 +175,7 @@ function wire() {
   M.on('autolist:progress', p => { S.listerProgress = p; S.listerRunning = !!p && p.done < p.total; if (!S.listerRunning) refreshData().then(soft); else if (S.page === 'autolist') soft(); });
   M.on('repricer:done', () => { if (S.page === 'listings') soft(); });
   M.on('server:scan', () => { if (S.page === 'server') liveTick('local', true); });
+  M.on('toast', t => { if (t && t.text) toast(t.text, t.kind || 'info', 10000); });
   M.on('sale', o => { toast('Sale: ' + (o && (o.title || o.id) || 'new order'), 'good', 8000); liveNow(); });
   M.on('dispute', o => toast('Dispute opened on order ' + (o && o.id || ''), 'error', 10000));
   M.on('notification', () => { S.unread++; renderNav(); liveNow(); });

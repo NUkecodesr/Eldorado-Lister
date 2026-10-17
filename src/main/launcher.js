@@ -51,6 +51,8 @@ async function authTicket(cookie) {
 }
 
 // Accepts a classic ?privateServerLinkCode= link, a share link (?code=..&type=Server) or a bare share code.
+const NO_PS = 'No private server link set: Zotac never launches an account into a public server. Add your private server link in Roblox Accounts > Account Settings.';
+
 async function resolvePrivateServer(link, cookie) {
   const s = String(link || '').trim();
   if (!s) return null;
@@ -209,6 +211,8 @@ class Launcher extends EventEmitter {
     if (!a) throw new Error('Account not found');
     const cookie = decryptCookie(a.cookieEnc);
     if (!cookie) throw new Error(`No cookie saved for ${a.username} (Roblox Accounts > edit > Cookie)`);
+    // never into a public server: other players could steal or trade-snipe the stock
+    if (!String(this.cfg.privateServer || '').trim()) { const e = new Error(NO_PS); e.code = 'NO_PS'; throw e; }
     if (!force && this.isOnline(a)) return { skipped: 'already online' };
     const cool = (this.cfg.cooldownSec || 120) * 1000;
     // cooldown only while the game Zotac launched is still running (loading); if it already closed, launch again now
@@ -220,6 +224,7 @@ class Launcher extends EventEmitter {
 
     this.ensureMultiInstance();
     const ps = await resolvePrivateServer(this.cfg.privateServer, cookie);
+    if (!ps) { const e = new Error(NO_PS); e.code = 'NO_PS'; throw e; }
     const ticket = await authTicket(cookie);
     const uri = launchUri(ticket, ps ? ps.placeId : SAB_PLACE_ID, ps && ps.linkCode);
     const before = new Set(await robloxPids());
@@ -234,7 +239,7 @@ class Launcher extends EventEmitter {
         if (fresh.length) { this.pids[id] = fresh[fresh.length - 1]; this.log('info', `${a.username}: Roblox process ${this.pids[id]}`); return; }
       }
     })();
-    this.log('info', `Launched ${a.username}${ps ? ' into private server' : ' (public server — set a private server link)'}`);
+    this.log('info', `Launched ${a.username} into the private server`);
     this.emit('launched', { id, username: a.username });
     return { launched: true, privateServer: !!ps };
   }
@@ -247,7 +252,10 @@ class Launcher extends EventEmitter {
     try {
       const r = await this.launch(a.id);
       if (r.launched) this.log('info', `Auto-launched ${a.username} for order ${job.orderId}`);
-    } catch (e) { this.log('error', `Auto-launch ${a.username}: ${e.message}`); }
+    } catch (e) {
+      this.log('error', `Auto-launch ${a.username}: ${e.message}`);
+      if (e.code === 'NO_PS') this.emit('launchBlocked', { job, reason: e.message });
+    }
   }
 }
 

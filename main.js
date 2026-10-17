@@ -173,6 +173,9 @@ function wire() {
   launcher = new Launcher({ store, delivery });
   launcher.on('launched', () => send('launcher:changed'));
   delivery.on('job', j => launcher.onJob(j));
+  // no private server link: nothing is launched; the job waits (you can still join and run the
+  // script yourself) and the app tells you why
+  launcher.on('launchBlocked', ({ reason }) => send('toast', { text: reason, kind: 'error' }));
 
   bridge.on('state', s => send('bridge:state', s));
   for (const em of [lister, repricer, delivery, launcher]) em.on('log', e => send('log', e));

@@ -1202,6 +1202,8 @@ PAGES.accounts = async root => {
     const launcherCard = h('div', { class: 'x-panel', style: { marginBottom: '12px' } },
       h('div', { class: 'x-ptitle' }, h('span', { class: 'x-glyph' }, '▶'), 'ACCOUNT LAUNCHER'),
       h('p', { class: 'x-ptext' }, 'Start opens Roblox on that account from its saved cookie. With auto-launch on, a delivery job for an account whose script is offline launches it automatically. Put the delivery script in your executor\'s autoexec so it runs on join.'),
+      !String(L.privateServer || '').trim() ? h('div', { class: 'card', style: { borderColor: 'rgba(240, 82, 82, .5)', color: 'var(--bad)', margin: '8px 0' } },
+        '⚠ No private server link: Zotac will not launch any account (it never sends a stock account into a public server). Paste your private server link below.') : null,
       h('div', { class: 'grid g2' },
         h('label', { class: 'f' }, 'Private server link (share link or ?privateServerLinkCode= link)', h('input', { type: 'password', value: L.privateServer || '', placeholder: 'https://www.roblox.com/share?code=…&type=Server', onchange: e => setL({ privateServer: e.target.value.trim() }) })),
         h('label', { class: 'f' }, 'Roblox executable (empty = default Roblox / Bloxstrap handler)', txt(L.exePath, v => setL({ exePath: v.trim() }), { placeholder: 'C:\\…\\RobloxPlayerBeta.exe' }))),
