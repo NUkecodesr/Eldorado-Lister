@@ -456,13 +456,13 @@ PAGES.autolist = async root => {
     sel([['available', 'Available'], ['listed', 'Listed'], ['sold', 'Sold'], ['all', 'All'], ['removed', `Removed (${S.pets.filter(p => p.alHidden).length})`]], AL.filter.status, v => { AL.filter.status = v; AL.selected.clear(); render(); }),
     h('input', { type: 'search', class: 'x-psearch', placeholder: '⌕  Search pet...', value: AL.filter.q, oninput: e => { AL.filter.q = e.target.value; clearTimeout(AL.qt); AL.qt = setTimeout(render, 250); } }));
 
-  const priceCell = p => {
+  const priceCell = (p, ids = [p.id]) => {
     const el = h('span', { class: 'x-alprice' + (p.priceLocked ? ' lock' : ''), title: (p.priceBasis ? p.priceBasis + ' · ' : '') + 'click to edit', onclick: () => {
       const inp = h('input', { type: 'number', step: '0.01', min: '0', value: p.price ?? '', class: 'x-alpin' });
       let esc = false;
       inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { esc = true; inp.blur(); } });
       inp.addEventListener('blur', async () => {
-        if (!esc && String(inp.value) !== String(p.price ?? '')) { await M.call('pets:update', [p.id], { price: inp.value === '' ? null : Number(inp.value), priceLocked: inp.value !== '' }); await refreshData(); }
+        if (!esc && String(inp.value) !== String(p.price ?? '')) { await M.call('pets:update', ids, { price: inp.value === '' ? null : Number(inp.value), priceLocked: inp.value !== '' }); await refreshData(); }
         render();
       });
       el.replaceWith(inp); inp.focus(); inp.select();
@@ -470,12 +470,22 @@ PAGES.autolist = async root => {
     if (!p.price && p.priceBasis === 'unknown item') el.classList.add('x-noeld');
     return el;
   };
-  const row = (p, rev) => {
+  // one row per identical brainrot (same name, mutation, gen/s, traits, state, offer): the copies
+  // show as ×N after the traits; selecting, pricing or removing the row acts on every copy
+  const nk = x => String(x || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const sameKey = p => [nk(p.name), nk(p.mutation || 'None'), Math.round(Number(p.gen) || 0), (p.traits || []).map(nk).sort().join(','), p.status, p.offerId || ''].join('|');
+  const groupPets = list => { const m = new Map(); for (const p of list) { const k = sameKey(p); if (!m.has(k)) m.set(k, []); m.get(k).push(p); } return [...m.values()]; };
+  const row = (grp, rev) => {
+    const p = grp[0];
+    const ids = grp.map(x => x.id);
+    const n = grp.length;
+    const allSel = ids.every(id => AL.selected.has(id));
     const tEl = h('span', { class: 'x-alt' }, p.title || xFill(al.titleTemplate, p));
     if (!p.title) titleEls.push([tEl, p]);
     const traits = p.traits || [];
-    return h('div', { class: 'x-alrow' + (rev ? ' rev' : '') + (AL.selected.has(p.id) ? ' sel' : '') },
-      h('input', { type: 'checkbox', checked: AL.selected.has(p.id), onchange: e => { e.target.checked ? AL.selected.add(p.id) : AL.selected.delete(p.id); render(); } }),
+    const owners = [...new Set(grp.map(x => acctName(x.accountId)))];
+    return h('div', { class: 'x-alrow' + (rev ? ' rev' : '') + (allSel ? ' sel' : '') },
+      h('input', { type: 'checkbox', checked: allSel, title: n > 1 ? `All ${n} copies` : '', onchange: e => { ids.forEach(id => e.target.checked ? AL.selected.add(id) : AL.selected.delete(id)); render(); } }),
       p.imagePath ? xCardThumb(p, () => previewImage(p)) : xPetThumb(p, () => previewImage(p)),
       h('div', { class: 'x-alname', title: p.title ? 'Fixed title (Quick Fill)' : 'Title from the template' }, tEl,
         p.status !== 'available' ? statusPill(p.status) : null,
@@ -488,20 +498,22 @@ PAGES.autolist = async root => {
       rev ? h('span', { class: 'x-review' }, 'REVIEW') : null,
       xMutBlock(p.mutation),
       traits.length ? h('span', { class: 'x-trp' }, traits.slice(0, 8).map(tr => ART_THUMBS.traits[tr] ? h('img', { src: ART_THUMBS.traits[tr], title: tr, alt: tr }) : h('em', { title: tr }, String(tr).slice(0, 3)))) : null,
-      h('span', { class: 'x-alown', title: 'Owner account' }, acctName(p.accountId)),
+      n > 1 ? h('span', { class: 'x-alqty', title: `${n} identical copies (same name, mutation, gen/s and traits): listed as one offer with quantity ${n}` }, '×' + n) : null,
+      h('span', { class: 'x-alown', title: 'Owner account' + (owners.length > 1 ? 's' : '') }, owners.join(', ')),
       h('button', { class: 'x-srch', onclick: () => searchEldorado(p) }, 'Search on Eldorado'),
-      priceCell(p),
-      removedView ? h('button', { class: 'x-aldel', title: 'Put back in Auto List', onclick: () => putBack([p.id]) }, '↩')
-        : h('button', { class: 'x-aldel', title: p.session ? 'Remove from Auto List (pasted pet)' : 'Remove from Auto List (stays in the account inventory)', onclick: () => delPet(p) }, '✕'));
+      priceCell(p, ids),
+      removedView ? h('button', { class: 'x-aldel', title: n > 1 ? `Put all ${n} back in Auto List` : 'Put back in Auto List', onclick: () => putBack(ids) }, '↩')
+        : h('button', { class: 'x-aldel', title: (p.session ? 'Remove from Auto List (pasted pet)' : 'Remove from Auto List (stays in the account inventory)') + (n > 1 ? ` - all ${n} copies` : ''), onclick: () => removeFromList(ids) }, '✕'));
   };
+  const readyG = groupPets(ready), reviewG = groupPets(review);
   const lim = AL.limit;
   const list = pets.length ? h('div', { class: 'x-allist' },
     review.length ? [
       h('div', { class: 'x-sec rev' }, h('b', null, '★ MANUAL REVIEW'), h('small', null, `(${review.length})`), h('div', { class: 'grow' }), h('small', { class: 'x-sec-r' }, 'priced manually · skipped by Auto Price')),
-      h('div', { class: 'x-secbody rev' }, review.slice(0, lim).map(p => row(p, true)))] : null,
+      h('div', { class: 'x-secbody rev' }, reviewG.slice(0, lim).map(g => row(g, true)))] : null,
     h('div', { class: 'x-sec' }, h('b', null, 'READY TO LIST'), h('small', null, `(${ready.length})`)),
-    h('div', { class: 'x-secbody' }, ready.slice(0, lim).map(p => row(p, false))),
-    review.length > lim || ready.length > lim ? h('div', { style: { textAlign: 'center', margin: '10px' } }, h('button', { class: 'btn sm', onclick: () => { AL.limit += 200; render(); } }, 'Show more')) : null)
+    h('div', { class: 'x-secbody' }, readyG.slice(0, lim).map(g => row(g, false))),
+    reviewG.length > lim || readyG.length > lim ? h('div', { style: { textAlign: 'center', margin: '10px' } }, h('button', { class: 'btn sm', onclick: () => { AL.limit += 200; render(); } }, 'Show more')) : null)
     : h('div', { class: 'x-empty' }, h('div', { class: 'x-empty-ic' }, '▤'), h('div', null, S.pets.length ? 'No pets match the filter.' : 'Paste a JSON and click import'));
 
   const startBtn = S.listerRunning
