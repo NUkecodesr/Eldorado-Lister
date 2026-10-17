@@ -8,7 +8,6 @@ local ZOTAC_TOKEN = "PASTE_AGENT_TOKEN"
 local Players     = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local RunService  = game:GetService("RunService")
-local StarterGui  = game:GetService("StarterGui")
 while not Players.LocalPlayer do task.wait(0.1) end
 local LP = Players.LocalPlayer
 local PG = LP:WaitForChild("PlayerGui")
@@ -21,8 +20,8 @@ local INVITE_TIMEOUT = 150
 local RESEND_EVERY   = 25
 local ACCEPT_TIMEOUT = 90
 
+-- status lines go to the executor console only (no in-game notifications on screen)
 local function notify(text)
-    pcall(StarterGui.SetCore, StarterGui, "SendNotification", {Title = "Zotac Delivery", Text = text, Duration = 6})
     print("[ZotacDelivery] " .. text)
 end
 

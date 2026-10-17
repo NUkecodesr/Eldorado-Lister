@@ -809,13 +809,11 @@ async function toggleAutoexec(kind, on) {
 // ============================== VIDEO PROOF ===============================
 const VP = { list: null, rec: null, recOrder: null, started: 0, deliv: null, sel: null, q: '', status: 'all', play: false, dir: '' };
 // Recorder per Roblox window (key = order|account): normally one clip, the trade to the buyer
-// (an order split over accounts that could not be gathered gets one per buyer trade). Every frame
-// goes through a canvas that stamps order, account, what is happening and the local time onto the
-// video, so a clip shows on its own when and what was traded. Each clip gets a .json sidecar and is
-// linked to the order's entries in the trade ledger.
+// (an order split over accounts that could not be gathered gets one per buyer trade). Frames go
+// through a canvas as they are (no banner on the video: the user removed it); order, account, steps
+// and times are in the clip's .json sidecar, and the clip is linked to the order's ledger entries.
 const RECS = new Map();
 let recQueue = Promise.resolve();   // main points getDisplayMedia at one window per call: one at a time
-const STAMP = 36;
 function startProof(orderId, account, label) {
   const key = (orderId || 'manual') + '|' + (account || '');
   const cur = RECS.get(key);
@@ -835,21 +833,10 @@ async function openRec(key) {
     await v.play();
     const vw = v.videoWidth || 1280, vh = v.videoHeight || 720;
     const W = Math.min(1280, vw) & ~1, H = Math.round(W * vh / vw) & ~1;
-    const c = document.createElement('canvas'); c.width = W; c.height = H + STAMP;
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
     const g = c.getContext('2d');
     const started = Date.now();
-    const draw = () => {
-      g.fillStyle = '#000'; g.fillRect(0, 0, W, STAMP);
-      try { g.drawImage(v, 0, STAMP, W, H); } catch { /* frame not ready */ }
-      const secs = Math.round((Date.now() - started) / 1000);
-      g.fillStyle = '#a594ff'; g.font = '700 15px Segoe UI'; g.textBaseline = 'middle';
-      g.fillText('ZOTAC PROOF', 10, STAMP / 2);
-      g.fillStyle = '#fff'; g.font = '13px Segoe UI';
-      const who = r.account ? '@' + r.account : 'screen';
-      g.fillText(`${r.orderId}  ·  ${who}  ·  ${r.label || ''}`.slice(0, 140), 120, STAMP / 2);
-      const clock = new Date().toLocaleString() + '  +' + Math.floor(secs / 60) + ':' + String(secs % 60).padStart(2, '0');
-      g.textAlign = 'right'; g.fillText(clock, W - 10, STAMP / 2); g.textAlign = 'left';
-    };
+    const draw = () => { try { g.drawImage(v, 0, 0, W, H); } catch { /* frame not ready */ } };
     draw();
     const tick = setInterval(draw, 1000 / 30);
     const rec = new MediaRecorder(c.captureStream(30), { mimeType: 'video/webm;codecs=vp9', videoBitsPerSecond: 2_000_000 });
