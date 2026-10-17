@@ -393,7 +393,8 @@ const STEP_META = [
     ['deliveryFailed', 'Delivery failed (retrying)', 'agent reported a failed trade', '{reason}'],
     ['deliverySuccess', 'Delivery success', 'all trades done', '{username}'],
     ['manualFallback', 'Manual fallback', 'when Zotac needs you: 3 failures with cancelling off, or pets it can not match', ''],
-    ['orderCancelled', 'Order cancelled', 'after 3 failures: the order is cancelled and refunded', '{reason} {attempts}']]]
+    ['orderCancelled', 'Order cancelled', 'after 3 failures: the order is cancelled and refunded', '{reason} {attempts}'],
+    ['outOfStock', 'Out of stock (cancelled)', 'the brainrot is not there (not tracked, gone from the base, or missing in game twice): cancelled and refunded', '{item} {reason}']]]
 ];
 const TUTORIAL = {
   setup: [
@@ -632,7 +633,14 @@ PAGES.delivery = async root => {
     h('button', { class: 'btn sm', onclick: async () => { const m = await promptBox('Message buyer', 'Message', '', true); if (m) run(() => M.call('delivery:manual', d.orderId, 'say', m), 'Sent'); } }, 'Msg'),
     !['done', 'cancelled'].includes(d.state) ? h('button', { class: 'btn sm', title: 'You delivered it yourself', onclick: async () => { if (await confirmBox('Mark this order delivered? The buyer is told "Delivered!"' + (d.sim ? '' : ', the Eldorado order is marked delivered') + ' and its pets come off your accounts.')) run(() => M.call('delivery:manual', d.orderId, 'done'), 'Marked done'); } }, 'Done') : null,
     !['done', 'cancelled'].includes(d.state) ? h('button', { class: 'btn sm danger', title: 'Stop (local only)', onclick: async () => { if (await confirmBox('Stop Zotac working on this order? Only Zotac stops: the Eldorado order is NOT cancelled and the buyer is not messaged. Its pets go back in stock.')) run(() => M.call('delivery:manual', d.orderId, 'cancel'), 'Stopped'); } }, '✕') : null,
-    h('button', { class: 'btn sm ghost', onclick: () => modal('Conversation', h('div', { class: 'log', style: { maxHeight: '60vh' } }, d.log.map(l => h('div', { class: l.err ? 'l-error' : 'l-info' }, `${new Date(l.t).toLocaleTimeString()} ${l.in ? '◀ ' + l.in : l.out ? '▶ ' + l.out : '✕ ' + l.err}`))), [{ label: t('close') }]) }, 'Log'));
+    h('button', { class: 'btn sm ghost', onclick: () => convModal(d) }, 'Log'));
+  // the order's chat log, and for an order that was not delivered what Zotac knew (debug report)
+  const convModal = d => modal(d.debug ? 'Conversation · debug' : 'Conversation', h('div', null,
+    d.debug ? h('div', { class: 'mx-debug' },
+      h('div', { class: 'row' }, h('b', null, 'Why it was not delivered'), h('div', { class: 'grow' }),
+        h('button', { class: 'btn sm', onclick: () => { navigator.clipboard.writeText([d.orderId, ...d.debug.lines].join('\n')); toast('Debug report copied', 'good'); } }, 'Copy')),
+      d.debug.lines.map(l => h('div', { class: 'mono' }, l))) : null,
+    h('div', { class: 'log', style: { maxHeight: '50vh' } }, d.log.map(l => h('div', { class: l.err ? 'l-error' : 'l-info' }, `${new Date(l.t).toLocaleTimeString()} ${l.in ? '◀ ' + l.in : l.out ? '▶ ' + l.out : '✕ ' + l.err}`)))), [{ label: t('close') }]);
   const thumb = d => h('div', { class: 'mx-dthumb' }, String(d.title || d.orderId || '?').trim()[0] || '?');
   // Single / Security: a popup says what the mode does and what it needs; orders already
   // delivering keep the mode they started with
@@ -673,6 +681,8 @@ PAGES.delivery = async root => {
       h('div', { class: 'mx-rows' },
         setting('Mark order delivered', 'Calls Eldorado "deliver" after all trades succeed', sw(cfg.markDelivered, v => saveSettings({ delivery: { markDelivered: v } }))),
         setting('Cancel order if delivery fails', 'After 3 failed attempts: tell the buyer why and cancel the order on Eldorado (refund). Off = manual fallback', sw(cfg.cancelOnFail !== false, v => saveSettings({ delivery: { cancelOnFail: v } }))),
+        setting('Cancel when brainrots are unavailable', 'The ordered brainrot is not tracked, left the base in a rescan, or the game showed it missing twice: tell the buyer it is out of stock and cancel (refund). Never after a pet already reached the buyer. Off = manual fallback', sw(cfg.cancelOnUnavailable !== false, v => saveSettings({ delivery: { cancelOnUnavailable: v } }))),
+        setting('Close games when a delivery fails', 'Closes every Roblox window Zotac opened for that order (the script account and the stock account) once it stops, unless another order needs it', sw(cfg.closeOnFail !== false, v => saveSettings({ delivery: { closeOnFail: v } }))),
         setting('Record video proof', 'Records the Roblox window during delivery (Video Proof page)', sw(cfg.recordProof, v => saveSettings({ delivery: { recordProof: v } }))),
         setting('Script connect timeout', 'Seconds a queued trade waits for the account\'s delivery script to connect (a running trade gets 7–10 min)', num(cfg.agentTimeoutSec, v => saveSettings({ delivery: { agentTimeoutSec: v } })))));
   const modeCard = mxCard(mxIco('layers', 'green'), 'Delivery Mode', 'How orders are delivered in-game', null,
@@ -715,9 +725,10 @@ PAGES.delivery = async root => {
       h('div', { class: 'log mx-log' }, logs.length ? logs.map(l => h('div', { class: 'l-' + l.level }, `[${mxTime(l.t)}] ${l.msg.replace(/^\[(Delivery|Proof|Agent)\]\s*/, '')}`)) : h('span', { class: 'muted' }, 'No events yet.')));
   const histCard = mxCard(mxIco('clock', 'purple'), 'Delivery History', 'Completed and failed deliveries',
       h('div', { class: 'mx-pills sm' }, [['all', 'All'], ['ok', '✓'], ['bad', '✗']].map(([k, l]) => h('button', { class: 'mx-pill' + (DV.hist === k ? ' on' : ''), onclick: () => { DV.hist = k; render(); } }, l))),
-      hist.length ? h('div', { class: 'mx-dlist scroll' }, hist.map(d => h('div', { class: 'mx-drow', onclick: () => modal('Conversation', h('div', { class: 'log', style: { maxHeight: '60vh' } }, d.log.map(l => h('div', { class: l.err ? 'l-error' : 'l-info' }, `${new Date(l.t).toLocaleTimeString()} ${l.in ? '◀ ' + l.in : l.out ? '▶ ' + l.out : '✕ ' + l.err}`))), [{ label: t('close') }]) }, thumb(d),
+      hist.length ? h('div', { class: 'mx-dlist scroll' }, hist.map(d => h('div', { class: 'mx-drow', onclick: () => convModal(d) }, thumb(d),
         h('div', { class: 'grow' }, h('div', null, h('b', null, d.title || d.orderId), ' ', h('small', { class: 'muted' }, (d.username || '') + '  ' + fmtDate(d.finishedAt || d.createdAt))),
-          h('div', { class: d.state === 'done' ? 'mx-ok' : d.state === 'cancelled' ? 'muted' : 'mx-fail' }, d.state === 'done' ? '✓ Delivered' : d.state === 'cancelled' ? (d.failReason ? 'Cancelled — ' + d.failReason : 'Cancelled') : '✗ Needs you — ' + (d.failReason || 'manual'))))))
+          h('div', { class: d.state === 'done' ? 'mx-ok' : d.state === 'cancelled' ? 'muted' : 'mx-fail' }, d.state === 'done' ? '✓ Delivered' : d.state === 'cancelled' ? (d.failReason ? 'Cancelled — ' + d.failReason : 'Cancelled') : '✗ Needs you — ' + (d.failReason || 'manual')),
+          d.debug ? h('small', { class: 'muted' }, 'Click for the debug report') : null))))
         : mxEmpty('clock', 'No history yet'));
   const activity = h('div', { class: 'mx-stack' },
     tiles,

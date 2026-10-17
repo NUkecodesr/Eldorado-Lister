@@ -107,7 +107,7 @@ function startLocalServer({ onClientError, store, bridge, delivery, importScan, 
         const ev = url.pathname.match(/^\/agent\/jobs\/(\w+)\/event$/);
         if (ev && req.method === 'POST') return send(200, { ok: await delivery.jobEvent(ev[1], body) });
         if (m && req.method === 'POST') {
-          const ok = await delivery.jobResult(m[1], body.status === 'done' || body.ok === true, body.reason || body.message, { moved: body.moved });
+          const ok = await delivery.jobResult(m[1], body.status === 'done' || body.ok === true, body.reason || body.message, { moved: body.moved, debug: body.debug });
           return send(ok ? 200 : 404, { ok });
         }
         if (url.pathname === '/agent/log' && req.method === 'POST') {

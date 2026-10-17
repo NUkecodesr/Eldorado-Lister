@@ -297,7 +297,15 @@ function wire() {
     // only a game Zotac opened with real Roblox (its process is known, also after a restart)
     close: async id => {
       const a = store.get('accounts').find(x => x.id === id);
-      if (a && launcher.mode[id] === 'legit') await launcher.closeGame(a.username);
+      if (a && launcher.mode[id] === 'legit' && launcher.pids[id]) await launcher.closeGame(a.username);
+    }
+  };
+  // a delivery that failed closes the games Zotac opened for it (script and stock account); a game
+  // Zotac did not launch has no known process and is left alone
+  delivery.games = {
+    close: async id => {
+      const a = store.get('accounts').find(x => x.id === id);
+      return !!(a && launcher.pids[id]) && launcher.closeGame(a.username);
     }
   };
   // no private server link: nothing is launched; the job waits (you can still join and run the

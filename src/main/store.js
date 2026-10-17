@@ -21,7 +21,8 @@ const DEFAULT_DELIVERY_STEPS = {
   buyerCancelled: 'It looks like the trade was cancelled. Sending it again now, please accept it in Steal a Brainrot.',
   buyerOffline: 'Your trade is ready, but @{username} is offline in Steal a Brainrot. Please join the game now: we send the trade as soon as you are online.',
   manualFallback: 'Automatic delivery is unavailable right now. A seller will contact you shortly to deliver manually.',
-  orderCancelled: 'Your order has been cancelled after {attempts} delivery attempts were unsuccessful ({reason}). Eldorado will refund you. Please contact support if you believe this is a mistake.'
+  orderCancelled: 'Your order has been cancelled after {attempts} delivery attempts were unsuccessful ({reason}). Eldorado will refund you. Please contact support if you believe this is a mistake.',
+  outOfStock: "Sorry! {item} is no longer in stock, so we can't deliver it. Your order has been cancelled and Eldorado will refund you. Sorry for the trouble!"
 };
 
 const DEFAULT_TITLE = '{mutation} {name} | {gen}';
@@ -75,7 +76,7 @@ const DEFAULTS = {
     rules: { maxDeliveryTime: 'Hour1', deliveryTimes: ['Instant', 'Minute20', 'Hour1'], minFeedback: 95, minRatings: 5, ignoreOwn: true, ignoreTitleWords: '' },
     repricer: { enabled: false, intervalMin: 20, undercut: 0.01, floorPct: 70, onlyIfBeaten: true, scope: 'all', offerIds: [] },
     scanner: { autoexec: true },   // Auto Scanner: zotac_scanner.lua in autoexec (Roblox Accounts switch)
-    delivery: { enabled: false, markDelivered: true, recordProof: false, cancelOnFail: true, mode: 'single', agentTimeoutSec: 240, steps: DEFAULT_DELIVERY_STEPS },
+    delivery: { enabled: false, markDelivered: true, recordProof: false, cancelOnFail: true, cancelOnUnavailable: true, closeOnFail: true, mode: 'single', agentTimeoutSec: 240, steps: DEFAULT_DELIVERY_STEPS },
     launcher: { autoLaunch: true, privateServer: '', exePath: '', multiInstance: true, cooldownSec: 120, closeAfterDelivery: true },
     extensionToken: rid(8),
     agentToken: rid(8),

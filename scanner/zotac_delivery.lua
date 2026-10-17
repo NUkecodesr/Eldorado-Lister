@@ -340,7 +340,21 @@ local function countInBase(pet)
     return n, plot ~= nil
 end
 
+local lastDebug = nil
+local function baseSummary(plot, pet)
+    if not plot then return "base not found" end
+    local all, same = 0, {}
+    for _, c in ipairs(plot:GetChildren()) do
+        if c:IsA("Model") and c:GetAttribute("__AssetDescendantCount") ~= nil then
+            all += 1
+            if norm(c.Name) == norm(pet.name) then table.insert(same, tostring(c:GetAttribute("Mutation") or "None")) end
+        end
+    end
+    return ("%s: %d brainrot(s) in base, %s there: %s"):format(plot.Name, all, tostring(pet.name), #same > 0 and table.concat(same, ", ") or "none")
+end
+
 local function deliverOnce(job)
+    lastDebug = nil
     local buyer, uid = job.buyerUsername, tonumber(job.buyerUserId)
     if not buyer or buyer == "" then return false, "job has no buyer username" end
     if #(job.pets or {}) == 0 then return false, "job has no pets" end
@@ -365,6 +379,8 @@ local function deliverOnce(job)
         if before[k] < w.n then
             local m = tostring(w.pet.mutation or "")
             local label = (m == "" or m == "None" or m == "Normal") and w.pet.name or (m .. " " .. w.pet.name)
+            lastDebug = baseSummary(findMyPlot(), w.pet)
+            log("warn", "brainrot missing - " .. lastDebug)
             return false, ("only %d %s in base"):format(before[k], label)
         end
     end
@@ -419,6 +435,7 @@ local function deliverOnce(job)
             local seen = {}
             for _, it in ipairs(yourItems(root)) do table.insert(seen, it.title) end
             log("warn", "trade window items: " .. table.concat(seen, ", "):sub(1, 400))
+            lastDebug = "trade window items: " .. table.concat(seen, ", "):sub(1, 400) .. " | " .. baseSummary(findMyPlot(), w.pet)
             cancelTrade()
             return false, label .. " not found in the trade window" .. (count > 0 and (" (only " .. count .. " of " .. w.n .. ")") or "")
         end
@@ -930,7 +947,11 @@ local function stealPets(job, took)
             target = best
             if not target then task.wait(1) end
         until target or os.clock() - tFind > 30
-        if not target then return false, pet.name .. " not found in @" .. from .. "'s base" end
+        if not target then
+            lastDebug = "@" .. from .. "'s " .. baseSummary(plot, pet)
+            log("warn", "brainrot missing - " .. lastDebug)
+            return false, pet.name .. " not found in @" .. from .. "'s base"
+        end
         local prompt, podium = stealPromptFor(plot, target)
         if not prompt then return false, "no steal prompt at " .. pet.name end
         local char0 = LP.Character
@@ -1030,9 +1051,10 @@ while running do
         else
             log("info", ("job %s: %d brainrot(s) -> @%s"):format(job.id, #(job.pets or {}), tostring(job.buyerUsername)))
         end
+        lastDebug = nil
         local ok, okDone, why, moved = pcall(job.kind == "steal" and steal or deliver, job)
         if not ok then okDone, why = false, "script error: " .. tostring(okDone) end
-        api("POST", "/jobs/" .. job.id, {status = okDone and "done" or "failed", reason = why, moved = moved})
+        api("POST", "/jobs/" .. job.id, {status = okDone and "done" or "failed", reason = why, moved = moved, debug = (not okDone) and lastDebug or nil})
         notify(okDone and (job.kind == "steal" and ("Took the pets from @" .. tostring(job.fromUsername)) or ("Delivered to @" .. tostring(job.buyerUsername))) or ("Delivery failed: " .. tostring(why)))
         log(okDone and "info" or "warn", ("job %s %s%s"):format(job.id, okDone and "done" or "failed", why and (" - " .. why) or ""))
         -- close only after it worked: a failed job is tried again in a moment, in this same game

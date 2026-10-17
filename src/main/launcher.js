@@ -309,7 +309,7 @@ class Launcher extends EventEmitter {
     if (!(await robloxPids()).includes(pid)) { delete this.pids[a.id]; return false; }
     await new Promise(res => execFile('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true }, () => res()));
     delete this.pids[a.id];
-    this.log('info', `${username}: Roblox closed after delivery (process ${pid})`);
+    this.log('info', `${username}: Roblox closed by Zotac (process ${pid})`);
     return true;
   }
 

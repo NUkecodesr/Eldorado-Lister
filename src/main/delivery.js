@@ -6,6 +6,9 @@ const { robloxUser, robloxAvatar, discord, pickFewestAccounts } = require('./ser
 const sab = require('./sab');
 
 const TALK_APP_ID = '49mLECOW';
+// the agent saw the ordered brainrot missing: not in its own base, not in the trade window, or not in
+// the stock account's base (Security steal). Twice for one order = it is not there: no third try
+const UNAVAILABLE_RE = /^only \d+ .+ in base$| not found in the trade window| not found in @\S+'s base$/;
 const GUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/ig;
 
 // Injected into the eldorado.gg bridge page.
@@ -181,19 +184,22 @@ class Delivery extends EventEmitter {
       sim: !!order.sim
     };
     // Bought more than Zotac can match to pets (offer quantity raised outside Zotac, pets removed,
-    // offer not listed by Zotac): never trade fewer than were paid for and never let the empty
-    // job fail into an automatic cancel. The seller gets pinged and finishes it by hand.
+    // offer not listed by Zotac): never trade fewer than were paid for. The brainrots are not
+    // available: the order is cancelled with the buyer told why (or left to the seller when
+    // "Cancel when brainrots are unavailable" is off).
     if (pets.length < quantity) {
       const reason = pets.length
         ? `buyer bought ×${quantity} but only ${pets.length} matching pet(s) are tracked for this offer`
         : `no tracked pets match this offer (bought ×${quantity})`;
-      d.state = 'manual'; d.failReason = reason; d.finishedAt = Date.now();
-      this.log('warn', `Order ${order.id}: ${reason} — needs you`);
       this.store.save();
-      if (!d.sim) d.conversationId = await this.conversationOf(order.id, order.conversationId);
-      await this.say(d, 'manualFallback');
-      this.report(d, 'manual', reason);
-      this.emit('update', d);
+      d.conversationId = d.sim ? order.id : await this.conversationOf(order.id, order.conversationId);
+      // an offer Zotac never had brainrots on (listed by hand outside Zotac) is the seller's: never
+      // cancelled, only reported. Zotac's offer = a pet (or a ledger entry of one) carries its id.
+      const oid = order.offerId;
+      const ours = pets.length > 0 || (!!oid && (this.store.get('pets').some(p => p.offerId === oid)
+        || (this.store.get('trades') || []).some(t => (t.pets || []).some(x => x.offerId === oid))));
+      if (!ours) { await this.needsYou(d, `${reason}; Zotac never had brainrots on this offer (listed outside Zotac?), so it is not cancelled — deliver by hand`); return d; }
+      await this.unavailable(d, reason);
       return d;
     }
     if (d.sim) {   // simulated buyer chat: everything stays inside Zotac
@@ -392,7 +398,7 @@ class Delivery extends EventEmitter {
     if (!pets.length) {
       // nothing left on that account: fine only if its pets really moved (or were delivered)
       const missing = d.petIds.filter(id => !this.store.get('pets').some(p => p.id === id));
-      if (missing.length) return this.needsYou(d, `${missing.length} pet(s) of this order are no longer in Zotac's pet list (removed by a rescan or by hand) — deliver by hand`);
+      if (missing.length) return this.unavailable(d, `${missing.length} pet(s) of this order are no longer in Zotac's pet list (gone from the base in a rescan, or removed by hand)`);
       g.done = true; this.releaseHosts(); return this.nextSteal(d);
     }
     g.tries++;
@@ -473,6 +479,7 @@ class Delivery extends EventEmitter {
     if (!current) return;   // an old try or an ended order: booked above, nothing more
     if (ok) { this.store.save(); return this.nextSteal(d); }
     this.log('warn', `Order ${d.orderId}: steal from @${j.fromUsername} failed (${reason}), try ${g.tries}`);
+    if (UNAVAILABLE_RE.test(reason || '') && (g.unavailable = (g.unavailable || 0) + 1) >= 2) return this.unavailable(d, reason, j);
     if (g.tries >= 3) return this.needsYou(d, `the mother @${j.account} could not take the pets from @${j.fromUsername} (3 tries, last: ${reason || 'unknown'}) — deliver by hand`);
     this.store.save();
     // the stock account's game stays open for the next try
@@ -514,6 +521,7 @@ class Delivery extends EventEmitter {
       this.stopJobs(d, 'order cancelled on Eldorado');
       d.state = 'cancelled'; d.finishedAt = Date.now(); d.failReason = d.failReason || 'cancelled on Eldorado';
       if (this.cfg.recordProof) this.emit('proof', { action: 'stop', orderId });
+      this.closeOrderGames(d);
       this.emit('update', d);
     }
     return this.releasePets(orderId);
@@ -524,12 +532,101 @@ class Delivery extends EventEmitter {
   async needsYou(d, reason) {
     if (['done', 'cancelled', 'manual'].includes(d.state)) return;
     d.state = 'manual'; d.failReason = reason; d.finishedAt = Date.now();
+    if (!d.debug) d.debug = this.debugReport(d, reason);
     this.stopJobs(d, 'needs the seller');
     this.log('warn', `Order ${d.orderId}: ${reason}`);
     await this.say(d, 'manualFallback');
     if (this.cfg.recordProof) this.emit('proof', { action: 'stop', orderId: d.orderId });
     this.report(d, 'manual', reason);
+    this.closeOrderGames(d);
     this.store.save(); this.emit('update', d);
+  }
+
+  // The ordered brainrot is not there (not tracked, gone in a rescan, or the game showed it missing
+  // twice): every detail is logged, then the order is cancelled with the buyer told it is out of
+  // stock and Eldorado refunding. Never when a pet of the order already reached the buyer, and not
+  // when "Cancel when brainrots are unavailable" is off: then the seller finishes it.
+  async unavailable(d, reason, job = null) {
+    if (['done', 'cancelled', 'manual'].includes(d.state)) return;
+    d.debug = this.debugReport(d, reason, job);
+    this.log('warn', `Order ${d.orderId}: brainrot not available — ${reason}`);
+    for (const l of d.debug.lines.slice(1)) this.log('warn', `Order ${d.orderId} · ${l}`);
+    const traded = this.store.get('pets').filter(p => d.petIds.includes(p.id) && p.delivered && p.tradedTo).length;
+    if (traded) return this.needsYou(d, `brainrot not available (${reason}); ${traded} pet(s) of this order already reached the buyer, so it is not cancelled — deliver the rest by hand`);
+    if (this.cfg.cancelOnUnavailable === false) return this.needsYou(d, `brainrot not available: ${reason} — deliver by hand or cancel the order`);
+    return this.cancelOrder(d, `Out of stock: ${reason}`, 'outOfStock', { item: d.title || 'your brainrot' });
+  }
+
+  // what Zotac knew when an order could not be delivered: the order, each of its pets (where it is,
+  // its state, or when it left Zotac's list) and what the game showed. Kept on the order (Auto
+  // Delivery → history → Debug), written to the Activity Log and the Discord card.
+  debugReport(d, reason, job = null) {
+    const pets = this.store.get('pets'), accts = this.store.get('accounts'), trades = this.store.get('trades') || [];
+    const uname = id => '@' + ((accts.find(a => a.id === id) || {}).username || '?');
+    const fmtGen = n => { n = Number(n) || 0; for (const [v, u] of [[1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'K']]) if (n >= v) return +(n / v).toFixed(2) + u + '/s'; return n ? n + '/s' : ''; };
+    const label = p => [p.mutation && !/^(none|normal)$/i.test(p.mutation) ? p.mutation : '', p.name, fmtGen(p.gen)].filter(Boolean).join(' ');
+    const when = t => new Date(t).toLocaleString('en-GB', { hour12: false });
+    const lines = [`reason: ${reason}`,
+      `order: ${d.title || '?'} ×${d.quantity || d.petIds.length || 1} · ${d.petIds.length} pet(s) matched · mode ${d.mode || this.cfg.mode || 'single'}${d.securityFallback ? ' (Security fallback)' : ''} · buyer ${d.username ? '@' + d.username : 'not confirmed yet'}`];
+    for (const id of d.petIds) {
+      const p = pets.find(x => x.id === id);
+      if (p) {
+        lines.push(`pet ${label(p)} · ${p.accountId ? 'on ' + uname(p.accountId) : 'no account'} · ${p.delivered ? 'already traded' + (p.tradedTo ? ' to @' + p.tradedTo : '') : p.status}${p.gatheredFrom ? ' · taken from ' + uname(p.gatheredFrom) : ''}${p.uuid ? ' · uuid ' + String(p.uuid).slice(0, 8) : ''}`);
+        continue;
+      }
+      const e = [...trades].reverse().find(t => (t.pets || []).some(x => x.id === id));
+      const ep = e && e.pets.find(x => x.id === id);
+      lines.push(e ? `pet ${label(ep)} · not in Zotac any more: ${e.kind}${e.from ? ' from @' + e.from : ''} ${when(e.t)}${e.note ? ' (' + e.note + ')' : ''}` : `pet ${id} · not in Zotac any more (removed by hand, no ledger entry)`);
+    }
+    if (job) lines.push(`job ${job.id} · ${job.kind === 'steal' ? 'steal by @' + job.account + ' from @' + job.fromUsername : 'trade from @' + job.account + ' to @' + (job.buyerUsername || '?')} · ${job.status}${job.reason ? ' (' + job.reason + ')' : ''}`);
+    if (job && job.debug) lines.push(`game saw: ${job.debug}`);
+    const tries = this.store.get('jobs').filter(j => j.orderId === d.orderId && j.status === 'failed' && j !== job);
+    for (const j of tries.slice(-4)) lines.push(`earlier try ${j.id} on @${j.account}: ${j.reason || 'failed'}${j.debug ? ' · game saw: ' + j.debug : ''}`);
+    return { at: Date.now(), reason, lines };
+  }
+
+  // cancel on Eldorado (refund) with the buyer told why; undelivered pets go back in stock. A cancel
+  // Eldorado refuses leaves the order to the seller.
+  async cancelOrder(d, reason, msgKey, vars = {}, eldReason = reason) {
+    d.finishedAt = Date.now(); d.failReason = reason;
+    this.stopJobs(d, 'order cancelled');
+    d.state = 'cancelled';
+    this.releasePets(d.orderId);
+    await this.say(d, msgKey, { reason, ...vars });
+    let how = 'cancelled';
+    if (!d.sim) {
+      try { await this.eld.cancelOrder(d.orderId, eldReason); this.log('info', `Order ${d.orderId} cancelled on Eldorado`); }
+      catch (e) { how = 'manual'; d.state = 'manual'; this.log('error', `Cancel order ${d.orderId} failed: ${e.message}`); reason = `${reason} — and the Eldorado cancel failed: ${e.message}`; d.failReason = reason; }
+    }
+    if (this.cfg.recordProof) this.emit('proof', { action: 'stop', orderId: d.orderId });
+    this.report(d, how, reason);
+    this.closeOrderGames(d);
+    this.store.save(); this.emit('update', d);
+  }
+
+  // A delivery that ended without success closes every game Zotac opened for it: the account that
+  // trades / steals and the stock account it takes from. Waits (max 2 min) for a job of the order
+  // still running in that game to stop by itself; a game another order needs stays open. Only games
+  // Zotac launched (hook set by main; none in tests). Off: Delivery Settings → close games on failure.
+  closeOrderGames(d) {
+    if (!this.games || this.cfg.closeOnFail === false) return;
+    let ids = [...new Set([d.mother, ...(d.accounts || []), ...(d.origAccounts || []), ...(d.feeders || [])].filter(Boolean))];
+    if (!ids.length) return;
+    const t0 = Date.now();
+    const uname = id => '@' + ((this.store.get('accounts').find(a => a.id === id) || {}).username || '?');
+    const tick = async () => {
+      const jobs = this.store.get('jobs'), wait = [];
+      for (const id of ids) {
+        const on = j => j.accountId === id || (j.kind === 'steal' && j.fromAccountId === id);
+        if (Date.now() - t0 < 120000 && jobs.some(j => j.orderId === d.orderId && j.status === 'running' && on(j))) { wait.push(id); continue; }
+        if (jobs.some(j => j.orderId !== d.orderId && ['pending', 'running'].includes(j.status) && on(j))) { this.log('info', `Order ${d.orderId}: ${uname(id)} stays open, another order needs it`); continue; }
+        try { if (await this.games.close(id)) this.log('info', `Order ${d.orderId}: closed ${uname(id)}'s game (delivery did not succeed)`); }
+        catch (e) { this.log('warn', `Order ${d.orderId}: closing ${uname(id)}'s game: ${e.message}`); }
+      }
+      ids = wait;
+      if (ids.length) setTimeout(tick, 5000);
+    };
+    setTimeout(tick, 1500);
   }
 
   // in-game event from a running job. buyer_cancelled: the agent sends the trade again by itself;
@@ -562,7 +659,7 @@ class Delivery extends EventEmitter {
   record(kind, { orderId = null, from = null, to = null, toUserId = null, pets = [], jobId = null, sim = false, note = null } = {}) {
     const list = this.store.get('trades') || this.store.set('trades', []);
     const e = { id: rid(6), t: Date.now(), kind, orderId, sim: !!sim, from, to, toUserId, jobId, note, proofs: [],
-      pets: pets.map(p => ({ id: p.id, name: p.name, mutation: p.mutation || 'None', gen: Number(p.gen) || 0, traits: p.traits || [] })) };
+      pets: pets.map(p => ({ id: p.id, name: p.name, mutation: p.mutation || 'None', gen: Number(p.gen) || 0, traits: p.traits || [], offerId: p.offerId || null })) };
     list.push(e);
     if (list.length > 5000) list.splice(0, list.length - 5000);
     this.store.save(); this.emit('trade', e);
@@ -622,7 +719,7 @@ class Delivery extends EventEmitter {
     // a pet of this order that no longer exists in Zotac was NOT delivered: stop for the seller
     // (this used to count as "already delivered" and finish the order without a trade)
     const missing = d.petIds.filter(id => !this.store.get('pets').some(p => p.id === id));
-    if (missing.length) return this.needsYou(d, `${missing.length} pet(s) of this order are no longer in Zotac's pet list (removed by a rescan or by hand) — deliver by hand`);
+    if (missing.length) return this.unavailable(d, `${missing.length} pet(s) of this order are no longer in Zotac's pet list (gone from the base in a rescan, or removed by hand)`);
     if (!pets.length && d.petIds.length) {
       // nothing on this account: fine only when the order's other pets are delivered or wait on a
       // later account; a pet with no account is never "already delivered"
@@ -673,6 +770,8 @@ class Delivery extends EventEmitter {
       return false;
     }
     j.status = ok ? 'done' : 'failed'; j.finishedAt = Date.now(); j.reason = reason || null;
+    // what the game showed when it failed (agent's base / trade window summary), for the debug report
+    if (!ok && extra && extra.debug) { j.debug = String(extra.debug).slice(0, 800); this.log('warn', `Job ${id}: game saw ${j.debug}`); }
     this.store.save(); this.emit('job', j);
     if (j.kind === 'steal') { await this.stealResult(j, ok, reason, moved); return true; }   // stock -> mother, not a delivery
     const d = this.map[j.orderId];
@@ -700,7 +799,8 @@ class Delivery extends EventEmitter {
     } else {
       d.attempts++;
       this.log('warn', `Job ${id} failed (${reason}) attempt ${d.attempts}`);
-      if (d.attempts >= 3) return this.fail(d, reason);
+      if (UNAVAILABLE_RE.test(reason || '') && (d.unavailable = (d.unavailable || 0) + 1) >= 2) return this.unavailable(d, reason, j);
+      if (d.attempts >= 3) return this.fail(d, reason, j);
       await this.say(d, 'deliveryFailed', { reason: reason || 'trade failed' });
       setTimeout(() => this.queueNext(d), 15000);
     }
@@ -737,6 +837,7 @@ class Delivery extends EventEmitter {
       `🟡 **$${Number(price || 0).toFixed(2)}**　📦 **×${qty}**　⏱️ **${dur}**`
     ];
     if (reason && outcome !== 'done') lines.push('', `⚠️ **Reason** — ${String(reason).slice(0, 400)}`);
+    if (d.debug && outcome !== 'done') lines.push('```\n' + d.debug.lines.slice(1).join('\n').replace(/`/g, "'").slice(0, 1200) + '\n```');
     const who = [d.buyer ? '👤 ' + d.buyer : null, d.username ? (d.robloxId ? `🎮 [@${d.username}](https://www.roblox.com/users/${d.robloxId}/profile)` : '🎮 @' + d.username) : null,
       accounts.length ? '📤 ' + accounts.map(a => '@' + a).join(', ') + (gatheredFrom.length ? ' (taken from ' + gatheredFrom.map(a => '@' + a).join(', ') + ')' : '') : null, (d.attempts || 0) > (outcome === 'done' ? 0 : 1) ? `🔁 ${(d.attempts || 0) + (outcome === 'done' ? 1 : 0)} tries` : null].filter(Boolean);
     lines.push('', '-# ' + [...who, '`' + d.orderId + '`'].join(' · '));
@@ -775,26 +876,18 @@ class Delivery extends EventEmitter {
 
   // final failure: cancel the order (buyer told why, Eldorado refunds) unless switched off,
   // then the old manual fallback
-  async fail(d, reason) {
-    d.finishedAt = Date.now(); d.failReason = reason || 'unknown';
+  async fail(d, reason, job = null) {
+    reason = reason || 'unknown';
+    d.debug = this.debugReport(d, reason, job);
+    for (const l of d.debug.lines.slice(1)) this.log('warn', `Order ${d.orderId} · ${l}`);
+    if (this.cfg.cancelOnFail !== false) return this.cancelOrder(d, reason, 'orderCancelled', { attempts: d.attempts || 3 }, `Delivery failed: ${reason}`);
+    d.finishedAt = Date.now(); d.failReason = reason;
     this.stopJobs(d, 'order failed');
-    if (this.cfg.cancelOnFail !== false) {
-      d.state = 'cancelled';
-      this.releasePets(d.orderId);
-      await this.say(d, 'orderCancelled', { reason: reason || 'unknown', attempts: d.attempts || 3 });
-      let how = 'cancelled';
-      if (!d.sim) {
-        try { await this.eld.cancelOrder(d.orderId, `Delivery failed: ${reason || 'unknown'}`); this.log('info', `Order ${d.orderId} cancelled on Eldorado`); }
-        catch (e) { how = 'manual'; d.state = 'manual'; this.log('error', `Cancel order ${d.orderId} failed: ${e.message}`); reason = `${reason} — and the Eldorado cancel failed: ${e.message}`; }
-      }
-      if (this.cfg.recordProof) this.emit('proof', { action: 'stop', orderId: d.orderId });
-      this.report(d, how, reason);
-    } else {
-      d.state = 'manual';
-      await this.say(d, 'manualFallback');
-      if (this.cfg.recordProof) this.emit('proof', { action: 'stop', orderId: d.orderId });
-      this.report(d, 'manual', reason);
-    }
+    d.state = 'manual';
+    await this.say(d, 'manualFallback');
+    if (this.cfg.recordProof) this.emit('proof', { action: 'stop', orderId: d.orderId });
+    this.report(d, 'manual', reason);
+    this.closeOrderGames(d);
     this.store.save(); this.emit('update', d);
   }
 
@@ -888,7 +981,7 @@ class Delivery extends EventEmitter {
       for (const p of pets) Object.assign(p, { status: 'sold', soldAt: Date.now(), orderId: o.id });
       this.store.save(); this.emit('petsChanged');
     }
-    const d = await this.onSale({ id: o.id, buyer: o.buyer, title: o.title, price: o.price, quantity: qty, conversationId: o.conversationId }, pets.slice(0, qty));
+    const d = await this.onSale({ id: o.id, buyer: o.buyer, title: o.title, price: o.price, quantity: qty, conversationId: o.conversationId, offerId: o.offerId }, pets.slice(0, qty));
     return { started: !!d || !!this.map[o.id], pets: Math.min(pets.length, qty), quantity: qty };
   }
 
