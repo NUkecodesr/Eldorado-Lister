@@ -134,15 +134,25 @@ class Repricer extends EventEmitter {
 // expired, deleted there) would leave them listed for ever. Compares with Active + Paused offers.
 // Careful by design: needs both lists, ignores pets listed in the last 10 min (not indexed yet)
 // and does nothing when Eldorado returns no offers at all while pets are listed.
+// Listed pets whose offer is gone from Eldorado (deleted / closed there or in the app) go back to
+// available. A failed request throws, so an empty answer really means "no offers": that used to be
+// skipped, so deleting every listing left all pets "Listed". An empty answer is read twice.
 async function reconcileListed(eld, store) {
-  const [active, paused] = await Promise.all([eld.myOffersAll('Active'), eld.myOffersAll('Paused')]);
-  if (!Array.isArray(active) || !Array.isArray(paused)) return 0;
-  const live = new Set([...active, ...paused].map(o => o.id));
+  const listed0 = store.get('pets').filter(p => p.status === 'listed' && p.offerId);
+  if (!listed0.length) return 0;
+  const fetchLive = async () => {
+    const [active, paused] = await Promise.all([eld.myOffersAll('Active'), eld.myOffersAll('Paused')]);
+    if (!Array.isArray(active) || !Array.isArray(paused)) return null;
+    return new Set([...active, ...paused].map(o => o.id));
+  };
+  let live = await fetchLive();
+  if (live && !live.size) { await new Promise(r => setTimeout(r, 4000)); live = await fetchLive(); }
+  if (!live) return 0;
   const listed = store.get('pets').filter(p => p.status === 'listed' && p.offerId);
-  if (!live.size && listed.length) return 0;
   let n = 0;
   for (const p of listed) {
-    if (live.has(p.offerId) || Date.now() - (p.listedAt || 0) < 600000) continue;
+    // an offer made in the last 2 min may not show in the search yet
+    if (live.has(p.offerId) || Date.now() - (p.listedAt || 0) < 120000) continue;
     p.status = 'available'; p.offerId = null; p.offerGoneAt = Date.now(); n++;
   }
   if (n) { store.log('info', `[Listings] ${n} pet(s) back to available: their offer is no longer on Eldorado`); store.save(); }

@@ -209,6 +209,8 @@ document.addEventListener('mousedown', e => {
 });
 
 PAGES.autolist = async root => {
+  // pets shown "Listed" whose offer was deleted on Eldorado go back to Ready (checked at most every 30 s)
+  if (S.me && Date.now() - (AL.reconAt || 0) > 30000) { AL.reconAt = Date.now(); M.call('listings:reconcile').then(n => { if (n) refreshData().then(() => { if (S.page === 'autolist') render(); }); }).catch(() => {}); }
   const s = S.settings; const al = s.autolist; const rules = s.rules;
   const q = AL.filter.q.toLowerCase();
   // pets taken off Auto List stay in their account's inventory (Roblox Accounts), hidden here
@@ -661,6 +663,7 @@ PAGES.listings = async root => {
     LS.loading = true; render();
     const states = ['Active', 'Paused', 'Closed'];
     const res = await Promise.allSettled(states.map(st => M.call('eld:myOffers', st)));
+    M.call('listings:reconcile').then(n => { if (n) refreshData(); }).catch(() => {});
     if (seq !== LS.seq) return;   // a newer Refresh took over
     const d = {}, errs = [];
     states.forEach((st, i) => {

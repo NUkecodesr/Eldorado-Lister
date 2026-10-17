@@ -448,14 +448,23 @@ function wire() {
   startLocalServer({ store, bridge, delivery, wantRescan: acc => autoScan.wants(acc), wantServer: acc => autoScan.wantsServer(acc), onServerScan: d => { saveServerScan(d); autoScan.onServerScan(d); }, onArt: a => { try { art.remember(a); } catch (e) { store.log('warn', '[Scanner] art: ' + e.message); } }, onAgentClosing: acc => { launcher.markClosing(acc); setTimeout(() => launcher.closeGame(acc).catch(() => {}), 2500); }, onClientError: (acc, msg) => launcher.clientError(acc, msg), importScan: data => { const r = importPets(data, null, { replace: true, onlySaved: true }); if (r.skipped === true) return r; refreshAvatarsSoon(); const noGen = data && data.remote && Array.isArray(data.pets) ? data.pets.filter(p => !(Number(p.gen) > 0)).length : 0; autoScan.onImport(data && data.username, r, data && Array.isArray(data.pets) ? data.pets.length : null, noGen); send('pets:changed'); store.log('info', `[Scanner] ${data && data.username}: ${r.added} pets synced`); return r; }, onCookies: () => { send('auth:changed'); afterLogin(); } });
 }
 
+// one offer check at a time; the Auto List / Listings pages ask for one when they open
+let reconRunning = null;
+function reconListed() {
+  if (reconRunning) return reconRunning;
+  reconRunning = reconcileListed(eld, store).then(n => { if (n) send('pets:changed'); return n; })
+    .catch(e => { store.log('warn', '[Listings] offer check: ' + e.message); return 0; })
+    .finally(() => { reconRunning = null; });
+  return reconRunning;
+}
+
 async function afterLogin() {
   try {
     await eld.me(true);
     send('auth:changed');
     watcher.start();
     repricer.schedule();
-    const recon = () => reconcileListed(eld, store).then(n => { if (n) send('pets:changed'); }).catch(e => store.log('warn', '[Listings] offer check: ' + e.message));
-    clearInterval(afterLogin.recon); afterLogin.recon = setInterval(recon, 15 * 60000); setTimeout(recon, 20000);
+    clearInterval(afterLogin.recon); afterLogin.recon = setInterval(reconListed, 3 * 60000); setTimeout(reconListed, 20000);
     if (store.get('settings').delivery.enabled) delivery.ensureTalk();
   } catch { /* not logged in yet */ }
 }
@@ -758,6 +767,7 @@ function ipc() {
     if (action === 'price') return eld.setPrice(id, arg);
     throw new Error('bad action');
   });
+  handle('listings:reconcile', () => reconListed());
   handle('eld:items', () => eld.itemList());
   handle('eld:attrs', async () => { await eld.library(); return { attrs: eld.cache.attrs, game: store.get('settings').game }; });
   handle('eld:reloadLibrary', () => eld.library(true).then(() => eld.itemList()));
