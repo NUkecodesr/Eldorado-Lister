@@ -393,7 +393,7 @@ class Delivery extends EventEmitter {
       // nothing left on that account: fine only if its pets really moved (or were delivered)
       const missing = d.petIds.filter(id => !this.store.get('pets').some(p => p.id === id));
       if (missing.length) return this.needsYou(d, `${missing.length} pet(s) of this order are no longer in Zotac's pet list (removed by a rescan or by hand) — deliver by hand`);
-      g.done = true; return this.nextSteal(d);
+      g.done = true; this.releaseHosts(); return this.nextSteal(d);
     }
     g.tries++;
     const job = {
@@ -419,16 +419,31 @@ class Delivery extends EventEmitter {
   openHost(j) {
     if (!this.hosts) return;
     j.hostAt = Date.now();
+    // remembered (also across a restart) until no steal needs that account any more
+    const held = this.store.get('hostAccounts') || this.store.set('hostAccounts', []);
+    if (j.fromAccountId && !held.includes(j.fromAccountId)) { held.push(j.fromAccountId); this.store.save(); }
     Promise.resolve().then(() => this.hosts.open(j.fromAccountId, j)).catch(e => {
       this.log('warn', `Job ${j.id}: could not open @${j.fromUsername} with real Roblox: ${e.message}`);
       if (['pending', 'running'].includes(j.status)) this.jobResult(j.id, false, `could not open @${j.fromUsername} with real Roblox: ${e.message}`);
     });
   }
-  async closeHost(accountId) {
-    if (!this.hosts || !accountId) return;
-    // another steal still waits for that account: left open
-    if (this.store.get('jobs').some(x => x.kind === 'steal' && x.fromAccountId === accountId && ['pending', 'running'].includes(x.status))) return;
-    try { await this.hosts.close(accountId); } catch (e) { this.log('warn', `closing the stock account's game: ${e.message}`); }
+  async closeHost() { return this.releaseHosts(); }
+  // a stock account's game stays open while a steal job needs it or an order still has to take pets
+  // from it (a retry is coming); then it is closed. Checked after every steal / order change and
+  // every 10 s, so no path leaves one running.
+  async releaseHosts() {
+    if (!this.hosts) return;
+    const held = this.store.get('hostAccounts') || [];
+    if (!held.length) return;
+    const jobs = this.store.get('jobs');
+    const needed = id => jobs.some(x => x.kind === 'steal' && x.fromAccountId === id && ['pending', 'running'].includes(x.status))
+      || Object.values(this.map).some(d => d && d.state === 'delivering' && (d.feeders || []).includes(id) && !(d.steal && d.steal[id] && d.steal[id].done));
+    for (const id of [...held]) {
+      if (needed(id)) continue;
+      held.splice(held.indexOf(id), 1);
+      this.store.save();
+      try { await this.hosts.close(id); } catch (e) { this.log('warn', `closing the stock account's game: ${e.message}`); }
+    }
   }
 
   // result of a steal. Done = the mother's agent saw the pets land in its own base: they are the
@@ -452,9 +467,11 @@ class Delivery extends EventEmitter {
     if (moved.length) this.bookSteal(j, moved);
     const g = d && d.steal && d.steal[j.fromAccountId];
     const current = !!(g && g.jobId === j.id && d.state === 'delivering');
-    if (ok || !current || g.tries >= 3) await this.closeHost(j.fromAccountId);
+    if (ok && current) g.done = true;
+    // the stock account's game closes once nothing needs it (kept open for a retry of this steal)
+    if (ok || !current || g.tries >= 3) await this.releaseHosts();
     if (!current) return;   // an old try or an ended order: booked above, nothing more
-    if (ok) { g.done = true; this.store.save(); return this.nextSteal(d); }
+    if (ok) { this.store.save(); return this.nextSteal(d); }
     this.log('warn', `Order ${d.orderId}: steal from @${j.fromUsername} failed (${reason}), try ${g.tries}`);
     if (g.tries >= 3) return this.needsYou(d, `the mother @${j.account} could not take the pets from @${j.fromUsername} (3 tries, last: ${reason || 'unknown'}) — deliver by hand`);
     this.store.save();
@@ -471,6 +488,8 @@ class Delivery extends EventEmitter {
       else if (j.status === 'running') j.cancelRequested = true;
     }
     this.store.save();
+    // after the caller has set the order's end state (it does that right after this)
+    Promise.resolve().then(() => this.releaseHosts()).catch(() => {});
   }
 
   // the order ended without delivering some pets (cancelled here or on Eldorado): they are stock
@@ -780,6 +799,7 @@ class Delivery extends EventEmitter {
   }
 
   checkTimeouts() {
+    this.releaseHosts().catch(() => {});
     const limit = (this.cfg.agentTimeoutSec || 240) * 1000;
     const runLimit = Math.max(limit, 420000);   // agent waits up to 150s for the invite + 90s for accept
     // a steal: up to 240s for the stock account to join + 60s for its base, then per pet the walk

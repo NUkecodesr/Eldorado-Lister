@@ -123,6 +123,7 @@ class Launcher extends EventEmitter {
       this.checkLegitClean().catch(() => {});
     }, 20000);
     this.attachWarned = {};  // accountId -> launch time already warned about
+    setTimeout(() => this.adopt().catch(e => this.log('warn', 'finding open games: ' + e.message)), 2000);
     this.closing = {};       // accountId -> ts: closed on purpose (by Zotac or by its agent)
     // a game Zotac opened that crashed, was closed, froze or sits on Roblox's error screen while a
     // delivery job needs it: ended and opened again (checked every 5 s)
@@ -219,6 +220,28 @@ class Launcher extends EventEmitter {
     this.ensureMultiInstance();
     return true;
   }
+  // after a Zotac restart: the games Zotac opened before (found by their launch's tracker id in the
+  // command line) are known again, so they are still closed after their job and crash-watched
+  async adopt() {
+    const L = this.store.get('launches') || {};
+    const ids = Object.keys(L).filter(id => L[id] && L[id].bt && Date.now() - (L[id].at || 0) < 12 * 3600e3);
+    if (!ids.length) return;
+    const procs = await robloxCmdlines();
+    let found = 0;
+    for (const id of ids) {
+      const bt = L[id].bt;
+      const p = procs.find(x => x.cmd.includes('browsertrackerid:' + bt) || x.cmd.includes('browserTrackerId=' + bt) || x.cmd.includes('-b ' + bt));
+      if (!p) { delete L[id]; continue; }
+      if (this.pids[id]) continue;
+      this.pids[id] = p.pid; this.mode[id] = L[id].legit ? 'legit' : 'script'; this.lastLaunch[id] = L[id].at;
+      found++;
+      const a = this.acct(id);
+      this.log('info', `${a ? a.username : id}: Roblox process ${p.pid} from before the restart (${this.mode[id]})`);
+    }
+    this.store.save();
+    if (found) this.delivery.releaseHosts && this.delivery.releaseHosts();
+  }
+
   // closed on purpose from here on (no crash relaunch for it)
   markClosing(username) {
     const a = this.store.get('accounts').find(x => String(x.username).toLowerCase() === String(username).toLowerCase());
@@ -360,6 +383,9 @@ class Launcher extends EventEmitter {
     // launch's browsertrackerid (two accounts launched together otherwise both took the newest
     // process, and closing one could kill the other). Fallback: a new process no account has yet.
     const bt = (uri.match(/browsertrackerid:(\d+)/) || [])[1];
+    const L = this.store.get('launches') || this.store.set('launches', {});
+    L[id] = { bt, legit: !!legit, at: Date.now() };
+    this.store.save();
     (async () => {
       for (let i = 0; i < 20; i++) {
         await new Promise(r => setTimeout(r, 1500));

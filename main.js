@@ -259,19 +259,17 @@ function wire() {
   // the recorded way into a base for the steal walk (userData/base-route.json wins over the bundled one)
   const route = baseroute.load(app.getPath('userData'));
   delivery.baseRoute = () => route;
-  const hostOpened = new Set();
   delivery.hosts = {
     open: async id => {
       const a = store.get('accounts').find(x => x.id === id);
       if (!a) throw new Error('account not found');
       if (!(store.get('settings').launcher || {}).autoLaunch) { send('toast', { text: `Security mode: open @${a.username} with ▶ Start (Legit) now, Auto-launch is off`, kind: 'error' }); return; }
-      const r = await launcher.launch(id, { legit: true });
-      if (r.launched) hostOpened.add(id);
+      await launcher.launch(id, { legit: true });
     },
+    // only a game Zotac opened with real Roblox (its process is known, also after a restart)
     close: async id => {
-      if (!hostOpened.delete(id)) return;
       const a = store.get('accounts').find(x => x.id === id);
-      if (a) await launcher.closeGame(a.username);
+      if (a && launcher.mode[id] === 'legit') await launcher.closeGame(a.username);
     }
   };
   // no private server link: nothing is launched; the job waits (you can still join and run the
