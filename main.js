@@ -49,6 +49,32 @@ function saveServerScan(d) {
   for (const old of ids.slice(5)) delete serverScans[old];
   send('server:scan', { jobId: id });
 }
+// Roblox profile pictures for every account: user ids from usernames, then headshots, both in
+// batches (one request each for up to 100 accounts). Refreshed daily; new accounts right away.
+let avatarTimer = null;
+function refreshAvatarsSoon(ms = 1500) { clearTimeout(avatarTimer); avatarTimer = setTimeout(() => refreshAvatars().catch(e => store.log('warn', '[Avatars] ' + e.message)), ms); }
+async function refreshAvatars() {
+  const accts = store.get('accounts');
+  const stale = accts.filter(a => a.username && (!a.avatar || Date.now() - (a.avatarAt || 0) > 24 * 3600e3));
+  if (!stale.length) return;
+  const needId = stale.filter(a => !a.robloxUserId).slice(0, 100);
+  if (needId.length) {
+    const r = await fetch('https://users.roblox.com/v1/usernames/users', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usernames: needId.map(a => a.username), excludeBannedUsers: false }), signal: AbortSignal.timeout(20000) });
+    if (r.ok) for (const u of (await r.json()).data || []) {
+      const a = needId.find(x => x.username.toLowerCase() === String(u.requestedUsername || u.name).toLowerCase());
+      if (a) { a.robloxUserId = u.id; a.displayName = a.displayName || u.displayName; }
+    }
+  }
+  const withId = stale.filter(a => a.robloxUserId).slice(0, 100);
+  if (!withId.length) return store.save();
+  const r = await fetch(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${withId.map(a => a.robloxUserId).join(',')}&size=150x150&format=Png&isCircular=false`, { signal: AbortSignal.timeout(20000) });
+  if (r.ok) for (const t of (await r.json()).data || []) {
+    const a = withId.find(x => String(x.robloxUserId) === String(t.targetId));
+    if (a && t.imageUrl && t.state === 'Completed') { a.avatar = t.imageUrl; a.avatarAt = Date.now(); }
+  }
+  store.save(); send('pets:changed');
+}
 const updateHooks = {
   log: msg => store.log('info', msg),
   onDone: sha => { if (sha) store.patchSettings({ autoUpdate: { installedSha: sha } }); }
@@ -169,7 +195,7 @@ function wire() {
   ipcMain.on('bridge:event', (_e, { type, payload }) => { if (type === 'talk:message') delivery.onMessage(payload); });
 
   try { syncAutoexec(); } catch (e) { store.log('warn', '[Autoexec] ' + e.message); }
-  startLocalServer({ store, bridge, delivery, onServerScan: saveServerScan, onAgentClosing: acc => launcher.closeGame(acc), importScan: data => { const r = importPets(data, null, { replace: true }); store.log('info', `[Scanner] ${data && data.username}: ${r.added} pets synced`); return r; }, onCookies: () => { send('auth:changed'); afterLogin(); } });
+  startLocalServer({ store, bridge, delivery, onServerScan: saveServerScan, onAgentClosing: acc => launcher.closeGame(acc), importScan: data => { const r = importPets(data, null, { replace: true }); refreshAvatarsSoon(); store.log('info', `[Scanner] ${data && data.username}: ${r.added} pets synced`); return r; }, onCookies: () => { send('auth:changed'); afterLogin(); } });
 }
 
 async function afterLogin() {
@@ -349,6 +375,7 @@ function ipc() {
     for (const p of store.get('pets')) if (!before.has(p.id)) p.session = true;
     // accounts a paste created (often other players' bases) go away with their pets
     for (const a of store.get('accounts')) if (!beforeAcc.has(a.id)) a.session = true;
+    refreshAvatarsSoon();
     store.save();
     return r;
   });
@@ -623,6 +650,8 @@ app.whenReady().then(async () => {
   bridge.start().then(afterLogin);
   if (SMOKE) return smoke();
   const s = store.get('settings');
+  refreshAvatarsSoon(5000);
+  setInterval(() => refreshAvatarsSoon(0), 6 * 3600e3);
   if (s.autoUpdate.enabled) {
     // "Update automatically": a newer version is installed right away and the app restarts
     setTimeout(async () => {

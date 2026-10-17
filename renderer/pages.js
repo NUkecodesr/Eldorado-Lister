@@ -1092,9 +1092,10 @@ PAGES.accounts = async root => {
 
   let accts = S.accounts.filter(a => !f.account || a.username.toLowerCase().includes(f.account.toLowerCase()));
   const countOf = a => live.filter(p => p.accountId === a.id).length;
-  const hasStock = a => S.pets.some(p => p.accountId === a.id && p.status !== 'sold');
-  const emptyCount = accts.filter(a => !hasStock(a)).length;
-  if (!RA.showEmpty && !f.account) accts = accts.filter(hasStock);
+  // shown: accounts logged in (saved cookie) that hold unsold pets; the rest behind "Show hidden"
+  const shownAcct = a => a.hasCookie && S.pets.some(p => p.accountId === a.id && p.status !== 'sold');
+  const emptyCount = accts.filter(a => !shownAcct(a)).length;
+  if (!RA.showEmpty && !f.account) accts = accts.filter(shownAcct);
   if (RA.org === 'pets') accts = [...accts].sort((a, b) => countOf(b) - countOf(a));
   else if (RA.org === 'free') accts = [...accts].sort((a, b) => countOf(a) - countOf(b));
   else accts = [...accts].sort((a, b) => a.username.localeCompare(b.username));
@@ -1238,10 +1239,10 @@ PAGES.accounts = async root => {
         h('button', { class: 'x-chip' + (RA.stock ? ' on' : ''), onclick: () => { RA.stock = !RA.stock; render(); } }, '◈ Stock'),
         h('button', { class: 'x-chip', onclick: () => { RA.open = new Set(); render(); } }, '⊟ Collapse'),
         h('button', { class: 'x-chip', onclick: () => { RA.open = new Set(S.accounts.map(a => a.id)); render(); } }, '⊞ Expand'),
-        emptyCount ? h('button', { class: 'x-chip' + (RA.showEmpty ? ' on' : ''), title: 'Accounts with no pets in stock', onclick: () => { RA.showEmpty = !RA.showEmpty; render(); } }, RA.showEmpty ? `Hide empty (${emptyCount})` : `Show empty (${emptyCount})`) : null] : null),
+        emptyCount ? h('button', { class: 'x-chip' + (RA.showEmpty ? ' on' : ''), title: 'Accounts that are not logged in (no saved cookie) or have no pets in stock', onclick: () => { RA.showEmpty = !RA.showEmpty; render(); } }, RA.showEmpty ? `Hide others (${emptyCount})` : `Show others (${emptyCount})`) : null] : null),
     RA.view === 'all'
       ? (petsFiltered.length ? grid(petsFiltered, 'all') : h('div', { class: 'x-empty' }, 'No pets match.'))
-      : (accts.length ? accts.filter(a => !petFilterOn || petsFiltered.some(p => p.accountId === a.id)).map(accountRow) : h('div', { class: 'x-empty' }, S.accounts.length ? 'No account has pets in stock. Run the scanner on your stock accounts, or Show empty.' : 'No accounts yet. Import a JSON or add one.')),
+      : (accts.length ? accts.filter(a => !petFilterOn || petsFiltered.some(p => p.accountId === a.id)).map(accountRow) : h('div', { class: 'x-empty' }, S.accounts.length ? 'No logged-in account has pets in stock. Log in an account (✎ → cookie or browser login) and run the scanner on it, or use Show others.' : 'No accounts yet. Import a JSON or add one.')),
     (RA.view === 'account' && petsFiltered.some(p => !p.accountId)) ? h('div', { class: 'x-arow' }, h('div', { class: 'x-ahead' }, h('b', null, 'Unassigned'), h('small', { class: 'muted' }, 'pets without an account')), grid(petsFiltered.filter(p => !p.accountId), 'un')) : null);
 
   root.append(
