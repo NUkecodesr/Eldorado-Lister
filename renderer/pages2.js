@@ -1041,7 +1041,7 @@ PAGES.settings = async root => {
           h('button', { class: 'btn', onclick: async () => { await saveSettings({ webhookUrl: urlIn.value.trim(), webhookPing: pingIn.value.trim() }); run(() => M.call('webhook:test'), 'Test sent'); } }, 'Test')),
         h('div', { class: 'row', style: { marginTop: '8px' } },
           h('span', { class: 'muted' }, 'Preview a card:'),
-          (() => { const pick = sel([['delivered', 'Delivery: delivered'], ['cancelled', 'Delivery: cancelled'], ['failed', 'Delivery: failed / needs you'], ['sale', 'New sale'], ['dispute', 'Dispute opened'], ['chat', 'Chat message'], ['autolist', 'Auto List finished'], ['plain', 'Plain test']], WH.kind, v => { WH.kind = v; }); return pick; })(),
+          (() => { const pick = sel([['delivered', 'Delivery: delivered'], ['cancelled', 'Delivery: cancelled'], ['failed', 'Delivery: failed / needs you'], ['sale', 'New sale'], ['dispute', 'Dispute opened'], ['chat', 'Chat message'], ['plain', 'Plain test']], WH.kind, v => { WH.kind = v; }); return pick; })(),
           h('button', { class: 'btn', onclick: async () => {
             await saveSettings({ webhookUrl: urlIn.value.trim(), webhookPing: pingIn.value.trim() });
             const ok = await run(() => M.call('webhook:testCard', WH.kind));

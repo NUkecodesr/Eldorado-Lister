@@ -425,7 +425,6 @@ function wire() {
   for (const em of [lister, repricer, delivery, launcher]) em.on('log', e => send('log', e));
   lister.on('progress', p => send('autolist:progress', p));
   lister.on('pets', () => send('pets:changed'));
-  lister.on('finished', p => discord(store, { title: '📦 Auto List finished', description: `${p.ok} listed, ${p.failed} failed` }));
   repricer.on('done', r => send('repricer:done', r));
   watcher.on('sale', ({ order, pets }) => { send('sale', order); send('pets:changed'); delivery.onSale(order, pets); });
   watcher.on('orderCancelled', o => { if (delivery.orderCancelledRemote(o.id)) send('pets:changed'); });
@@ -1048,7 +1047,6 @@ function ipc() {
       { name: 'Accounts', value: 'StockAlt1', inline: false }, { name: 'Order', value: d.orderId, inline: false }] });
     if (kind === 'dispute') return discord(store, { title: T + '⚠️ Dispute opened', color: 0xef4444, description: `**Rainbow Burguro And Fryuro | 1.5B/s**\nBuyer: EldoradoBuyer\nOrder: ${d.orderId}` });
     if (kind === 'chat') return discord(store, { title: T + '💬 New message', description: 'EldoradoBuyer: is my order coming?' });
-    if (kind === 'autolist') return discord(store, { title: T + '📦 Auto List finished', description: '5 listed, 1 failed' });
     return discord(store, { title: T + '🐾 Zotac Lister test', description: 'Webhook works!' });
   });
   handle('logs:get', () => store.get('logs').slice(-600));
