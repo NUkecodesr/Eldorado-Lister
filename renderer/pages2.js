@@ -681,8 +681,15 @@ PAGES.delivery = async root => {
   // Activity: count tiles; left column = how delivery works, right column = what it is doing now
   const tiles = h('div', { class: 'mx-tiles4' },
     [['IN QUEUE', stats.queue, 'cyan'], ['TRADING', stats.trading, 'gold'], ['COMPLETED', stats.done, 'good'], ['FAILED', stats.failed, 'bad']].map(([k, v, c]) => h('div', { class: 'mx-stat' }, h('div', { class: 'k' }, k), h('div', { class: 'v ' + c }, String(v)))));
-  const settingsCard = mxCard(mxIco('delivery', 'green'), 'Delivery Settings', 'How orders are delivered from your stock accounts', null,
-      h('div', { class: 'mx-rows' },
+  // collapsible (closed by default, remembered); closed it shows what is switched on in one line
+  const setOpen = lsGet('zotac.delivery.settingsOpen', '0') === '1';
+  const toggleSet = () => { lsSet('zotac.delivery.settingsOpen', setOpen ? '0' : '1'); render(); };
+  const onList = [cfg.markDelivered && 'Mark delivered', cfg.cancelOnFail !== false && 'Cancel on fail', cfg.cancelOnUnavailable !== false && 'Out-of-stock cancel',
+    cfg.giveUpOnBuyer !== false && `Give up on buyer (${cfg.buyerCancelLimit || 3} cancels · ${cfg.buyerNoShowMin || 8} min offline · ${cfg.usernameWaitMin || 30} min no username)`,
+    cfg.closeOnFail !== false && 'Close games on fail', cfg.recordProof && 'Record proof', `Script timeout ${cfg.agentTimeoutSec || 240} s`].filter(Boolean);
+  const settingsCard = mxCard(mxIco('delivery', 'green'), 'Delivery Settings', setOpen ? 'How orders are delivered from your stock accounts' : onList.join(' · '),
+    h('button', { class: 'btn sm ghost', title: setOpen ? 'Hide the settings' : 'Show the settings', onclick: e => { e.stopPropagation(); toggleSet(); } }, setOpen ? 'Hide ▴' : 'Show ▾'),
+    !setOpen ? null : h('div', { class: 'mx-rows' },
         setting('Mark order delivered', 'Calls Eldorado "deliver" after all trades succeed', sw(cfg.markDelivered, v => saveSettings({ delivery: { markDelivered: v } }))),
         setting('Cancel order if delivery fails', 'After 3 failed attempts: tell the buyer why and cancel the order on Eldorado (refund). Off = manual fallback', sw(cfg.cancelOnFail !== false, v => saveSettings({ delivery: { cancelOnFail: v } }))),
         setting('Cancel when brainrots are unavailable', 'The ordered brainrot is not tracked, left the base in a rescan, or the game showed it missing twice: tell the buyer it is out of stock and cancel (refund). Never after a pet already reached the buyer. Off = manual fallback', sw(cfg.cancelOnUnavailable !== false, v => saveSettings({ delivery: { cancelOnUnavailable: v } }))),
@@ -694,6 +701,7 @@ PAGES.delivery = async root => {
         setting('Close games when a delivery fails', 'Closes every Roblox window Zotac opened for that order (the script account and the stock account) once it stops, unless another order needs it', sw(cfg.closeOnFail !== false, v => saveSettings({ delivery: { closeOnFail: v } }))),
         setting('Record video proof', 'Records the Roblox window during delivery (Video Proof page)', sw(cfg.recordProof, v => saveSettings({ delivery: { recordProof: v } }))),
         setting('Script connect timeout', 'Seconds a queued trade waits for the account\'s delivery script to connect (a running trade gets 7–10 min)', num(cfg.agentTimeoutSec, v => saveSettings({ delivery: { agentTimeoutSec: v } })))));
+  { const hd = settingsCard.querySelector('.mx-card-h'); hd.classList.add('mx-fold-h'); hd.addEventListener('click', toggleSet); if (!setOpen) settingsCard.classList.add('folded'); }
   const modeCard = mxCard(mxIco('layers', 'green'), 'Delivery Mode', 'How orders are delivered in-game', null,
       h('div', { class: 'mx-modes' },
         h('button', { class: 'mx-modeopt' + (mode === 'security' ? ' on' : ''), onclick: () => pickMode('security') },
