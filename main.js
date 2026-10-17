@@ -86,6 +86,7 @@ const autoScan = {
   state() { return { running: this.running, total: this.total, done: this.done, failed: this.failed, current: this.current, log: this.log, batch: (store.get('settings').autoscan || {}).batch || 3, ids: (store.get('settings').autoscan || {}).ids || null }; },
   emit() { send('autoscan', this.state()); },
   onImport(username, r) {
+    if (r && r.incomplete) return;   // half-loaded base: keep waiting for the real scan
     const k = String(username || '').toLowerCase();
     const w = this.waiters[k];
     if (w) { delete this.waiters[k]; w({ ok: true, added: r && r.added }); }
@@ -268,6 +269,18 @@ async function afterLogin() {
 // account's still-available pets, so a rescan does not duplicate them.
 function importPets(json, accountId, { replace = false } = {}) {
   const raw = typeof json === 'string' ? JSON.parse(json) : json;
+  // a scan taken before the base finished loading: pets missing, keep what we have
+  if (replace && raw && Array.isArray(raw.pets) && raw.expected != null && raw.pets.length < raw.expected) {
+    store.log('warn', `[Scanner] ${raw.username}: base still loading (${raw.pets.length}/${raw.expected} pets) - not imported`);
+    return { added: 0, removed: 0, incomplete: true };
+  }
+  if (replace && raw && Array.isArray(raw.pets) && !raw.pets.length && raw.expected == null) {
+    const acct = store.get('accounts').find(a => a.username.toLowerCase() === String(raw.username || '').toLowerCase());
+    if (acct && store.get('pets').some(p => p.accountId === acct.id && p.status === 'available')) {
+      store.log('warn', `[Scanner] ${raw.username}: scan found 0 pets but the game did not confirm the base is empty - kept the old list`);
+      return { added: 0, removed: 0, incomplete: true };
+    }
+  }
   if (raw && raw.art) art.remember(raw.art);
   const accounts = store.get('accounts');
   const fixed = accounts.find(a => a.id === accountId);

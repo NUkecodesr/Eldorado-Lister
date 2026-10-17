@@ -511,7 +511,9 @@ local function scan()
     local overheads = readOverheads()
     modelsOut = nil
     local pets, animals = readPlot(plot, overheads, {}, true)
-    return {username = LP.Name, userId = LP.UserId, displayName = LP.DisplayName, scannedAt = os.time(), pets = pets, traitsKnown = animals ~= nil or #overheads > 0}
+    local expected = nil
+    if animals then expected = 0; for _, a in pairs(animals) do if type(a) == "table" and type(a.Index) == "string" then expected += 1 end end end
+    return {expected = expected, username = LP.Name, userId = LP.UserId, displayName = LP.DisplayName, scannedAt = os.time(), pets = pets, traitsKnown = animals ~= nil or #overheads > 0}
 end
 
 local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request
@@ -798,10 +800,32 @@ task.wait(1)
 task.spawn(heartbeat)
 if SHOW_GUI then local okG, errG = pcall(buildGui); if not okG then notify("GUI failed: " .. tostring(errG)) end end
 
-for _ = 1, 60 do
-    if findMyPlot() then break end
-    task.wait(0.5)
+local function petCount(plot)
+    local n = 0
+    for _, c in ipairs(plot:GetChildren()) do if isPet(c) then n += 1 end end
+    return n
 end
+-- the base and its pets stream in a few seconds after joining: wait until the pet models match
+-- the game's own count for the base (or, without it, stop changing for 4 s) - at most 40 s
+local function waitForPets()
+    local t0, last, stableSince = os.clock(), -1, os.clock()
+    while os.clock() - t0 < 40 do
+        local plot = findMyPlot()
+        if plot then
+            local n = petCount(plot)
+            if n ~= last then last, stableSince = n, os.clock() end
+            local list = plotAnimalList(plot.Name)
+            local expected = nil
+            if list then expected = 0; for _, a in pairs(list) do if type(a) == "table" and type(a.Index) == "string" then expected += 1 end end end
+            if expected and n >= expected and (expected > 0 or os.clock() - t0 > 8) then return true end
+            if not expected and n > 0 and os.clock() - stableSince > 4 then return true end
+            if not expected and n == 0 and os.clock() - stableSince > 15 then return true end
+        end
+        task.wait(0.5)
+    end
+    return false
+end
+waitForPets()
 runOnce(true)
 pcall(runServer)
 task.spawn(function()
