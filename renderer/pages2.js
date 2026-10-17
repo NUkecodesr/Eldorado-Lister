@@ -320,7 +320,7 @@ PAGES.reviews = async root => {
 };
 
 // ============================== NOTIFICATIONS =============================
-const WH = { kind: 'delivered' };
+const WH = { kind: 'delivered', dkind: 'delivered' };
 const NT = { list: null, orders: null, page: 1, more: false, unreadOnly: false, loading: false, shown: 15 };
 const ntKind = n => { const s = `${n.type} ${n.title} ${n.body}`; return /cancel|refund|reject|declin|dispute|fail/i.test(s) ? 'bad' : /complet|deliver|receiv|sold|paid|releas|success|new order/i.test(s) ? 'good' : 'info'; };
 const ntBuyer = n => {
@@ -1034,7 +1034,8 @@ PAGES.settings = async root => {
         h('div', { class: 'row', style: { margin: '12px 0' } },
           chk('Send new-sale card', s.notifySales, v => saveSettings({ notifySales: v })),
           chk('Send dispute card', s.notifyDisputes, v => saveSettings({ notifyDisputes: v })),
-          chk('Forward chat notifications', s.notifyMessages, v => saveSettings({ notifyMessages: v }))),
+          chk('Forward chat notifications', s.notifyMessages, v => saveSettings({ notifyMessages: v })),
+          chk('Send auto delivery cards', s.notifyDelivery !== false, v => saveSettings({ notifyDelivery: v }))),
         h('div', { class: 'row' },
           h('button', { class: 'btn primary', onclick: async () => { await run(() => saveSettings({ webhookUrl: urlIn.value.trim(), webhookPing: pingIn.value.trim() }), 'Saved'); } }, 'Save'),
           h('button', { class: 'btn', onclick: async () => { await saveSettings({ webhookUrl: urlIn.value.trim(), webhookPing: pingIn.value.trim() }); run(() => M.call('webhook:test'), 'Test sent'); } }, 'Test')),
@@ -1046,6 +1047,24 @@ PAGES.settings = async root => {
             const ok = await run(() => M.call('webhook:testCard', WH.kind));
             if (ok !== undefined) toast(ok === false ? 'Discord refused the webhook (check the URL)' : 'Sample card sent (marked TEST, no ping)', ok === false ? 'error' : 'good');
           } }, 'Send sample'))),
+      (() => {
+        // a second webhook that only gets the Auto Delivery cards (delivered / cancelled / failed)
+        const dUrl = txt(s.deliveryWebhookUrl, v => saveSettings({ deliveryWebhookUrl: v.trim() }), { placeholder: 'https://discord.com/api/webhooks/…', type: 'password' });
+        const dPing = txt(s.deliveryWebhookPing, v => saveSettings({ deliveryWebhookPing: v.trim() }), { placeholder: 'user ID, <@&role> or @everyone' });
+        const save = () => saveSettings({ deliveryWebhookUrl: dUrl.value.trim(), deliveryWebhookPing: dPing.value.trim() });
+        return mxCard('hook', 'Auto Delivery Webhook', 'Only the Auto Delivery cards: delivered, cancelled, failed / needs you. Nothing else.', null,
+          h('label', { class: 'f' }, 'Webhook URL', dUrl),
+          h('label', { class: 'f', style: { marginTop: '8px' } }, 'Ping (on cancelled / failed)', dPing),
+          h('div', { class: 'row', style: { marginTop: '12px' } },
+            h('button', { class: 'btn primary', onclick: () => run(save, 'Saved') }, 'Save'),
+            sel([['delivered', 'Delivered'], ['cancelled', 'Cancelled'], ['failed', 'Failed / needs you']], WH.dkind, v => { WH.dkind = v; }),
+            h('button', { class: 'btn', onclick: async () => {
+              await save();
+              const ok = await run(() => M.call('webhook:testCard', WH.dkind, 'delivery'));
+              if (ok !== undefined) toast(ok === false ? 'Discord refused the webhook (check the URL)' : 'Sample card sent (marked TEST, no ping)', ok === false ? 'error' : 'good');
+            } }, 'Send sample')),
+          h('small', { class: 'muted', style: { display: 'block', marginTop: '8px' } }, 'Uncheck "Send auto delivery cards" on the Discord Webhook card to keep them out of the main channel.'));
+      })(),
       mxCard('speaker', 'Sale Sound', 'Play a custom sound on this computer whenever a sale comes in.', null,
         chk('Enable sale sound', lsGet('zotac.sound.on', '1') === '1', v => lsSet('zotac.sound.on', v ? '1' : '0')),
         h('div', { class: 'row', style: { margin: '10px 0', flexWrap: 'nowrap' } }, h('span', { class: 'ink2' }, 'Audio file'),

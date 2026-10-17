@@ -42,6 +42,9 @@ const DEFAULTS = {
     notifySales: true,
     notifyDisputes: true,
     notifyMessages: false,
+    notifyDelivery: true,          // main webhook also gets the Auto Delivery cards
+    deliveryWebhookUrl: '',        // optional second webhook that only gets the Auto Delivery cards
+    deliveryWebhookPing: '',
     autoMessage: { enabled: false, text: 'Hi {buyer}! Thanks for buying {item}. Please send your Roblox username and stay online — delivery is coming right up.' },
     autoUpdate: { enabled: true, repo: 'NUkecodesr/Eldorado-Lister', installedSha: '' },
     pollSec: 45,
@@ -72,6 +75,8 @@ const DEFAULTS = {
       maxPrice: 5000,
       genTolerancePct: 15,
       fallbackPerMillion: 0.05,
+      noCompsMode: 'review',      // fewer than minComps similar listings: 'review' = Manual Review, 'estimate' = gen-scaled / $ per M/s guess
+      minComps: 1,
       generateImage: true,
       imageFolder: '',
       stockDetection: true

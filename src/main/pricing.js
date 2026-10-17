@@ -62,6 +62,13 @@ async function smartPrice(eld, pet, settings, myId) {
   const isNear = c => c.gen > 0 && pet.gen > 0 && (byMs ? Math.abs(c.gen - pet.gen) <= tolAbs + pet.gen * 0.001 : Math.abs(c.gen - pet.gen) / pet.gen <= tol + 0.001);
   const tolLabel = byMs ? (tolAbs ? `±${tolAbs / 1e6} M/s` : 'exact M/s') : `±${Math.round(tol * 100)}%`;
   const near = comps.filter(isNear);
+  // Too few listings like this pet (same item + mutation within the gen tolerance): any price would
+  // be a guess from other gens or the $/M/s fallback, usually far too low for a rare pet. Unless the
+  // seller chose the estimate, it goes to Manual Review and the seller sets the price.
+  const minComps = Math.max(1, Math.round(Number(al.minComps) || 1));
+  if (near.length < minComps && al.noCompsMode !== 'estimate') {
+    return { price: null, review: true, basis: `no similar listings (${near.length} within ${tolLabel} gen${minComps > 1 ? `, need ${minComps}` : ''}, ${comps.length} of this item) - set the price yourself`, comps: comps.slice(0, 15), item, totalMarket: res && res.recordCount };
+  }
   let price, basis;
   if (near.length) {
     const cheapest = Math.min(...near.map(c => c.price));

@@ -191,7 +191,8 @@ function xFill(tpl, p) {
 // pets Zotac can deliver: their account is logged in (saved cookie)
 const xDeliverable = p => { const a = S.accounts.find(x => x.id === p.accountId); return !!(a && a.hasCookie); };
 const xSpecial = () => new Set(((S.settings.autolist || {}).specialTraits || []).map(x => String(x).toLowerCase()));
-const xIsReview = (p, set) => (p.traits || []).some(t => set.has(String(t).toLowerCase()));
+const xTraitReview = (p, set) => (p.traits || []).some(t => set.has(String(t).toLowerCase()));
+const xIsReview = (p, set) => xTraitReview(p, set) || !!p.noComps;
 function xMutBlock(m) {
   const k = mutKey(m);
   const none = k === 'none' || k === 'normal';
@@ -271,13 +272,14 @@ PAGES.autolist = async root => {
   const showComps = async pet => {
     const r = await run(() => M.call('price:smart', pet.id)); if (!r) return;
     modal(`Smart price — ${pet.name} ${formatGen(pet.gen)}`, h('div', null,
-      h('p', null, h('b', { style: { fontSize: '20px', color: 'var(--gold)' } }, money(r.price)), '  ', h('span', { class: 'muted' }, r.basis)),
+      h('p', null, r.review ? h('b', { style: { fontSize: '16px', color: 'var(--gold)' } }, 'Manual review') : h('b', { style: { fontSize: '20px', color: 'var(--gold)' } }, money(r.price)), '  ', h('span', { class: 'muted' }, r.basis)),
       table(r.comps, [
         { label: 'Seller', render: c => c.seller + (c.verified ? ' ✓' : '') },
         { label: 'Gen', render: c => formatGen(c.gen) }, { label: 'Mut', render: c => c.mutation || '—' },
         { label: 'Delivery', render: c => dtLabel(c.delivery) }, { label: 'Feedback', num: true, render: c => c.feedback != null ? c.feedback.toFixed(1) + '%' : '—' },
         { label: 'Ratings', num: true, k: 'ratings' }, { label: 'Price', num: true, render: c => money(c.price) }], { empty: 'No competitor offers pass your Listing Rules.', maxHeight: '360px' })),
-      [{ label: 'Use this price', cls: 'primary', fn: async () => { await M.call('pets:update', [pet.id], { price: r.price, priceBasis: r.basis }); await refreshData(); render(); } }, { label: t('close') }]);
+      r.review ? [{ label: t('close'), cls: 'primary', fn: async () => { await M.call('pets:update', [pet.id], { noComps: true, priceBasis: r.basis }); await refreshData(); render(); } }]
+        : [{ label: 'Use this price', cls: 'primary', fn: async () => { await M.call('pets:update', [pet.id], { price: r.price, priceBasis: r.basis, noComps: false }); await refreshData(); render(); } }, { label: t('close') }]);
   };
 
   const markSold = async p => { const pr = await promptBox('Mark as sold (sold outside Zotac)', `Sale price $${p.offerId ? ' — the Eldorado offer stays live, delete it there if needed' : ''}`, p.price || ''); if (pr === null) return; await M.call('pets:markSold', [p.id], pr); AL.selected.delete(p.id); await refreshData(); render(); };
@@ -404,20 +406,21 @@ PAGES.autolist = async root => {
 
   // ---- BULK AUTO PRICE ----
   const priceRun = async list => {
-    const todo = list.filter(p => !xIsReview(p, special) && p.status !== 'sold');
+    const todo = list.filter(p => !xTraitReview(p, special) && !(p.noComps && p.priceLocked) && p.status !== 'sold');
     const skipped = list.length - todo.length;
     if (!todo.length) return toast(list.length ? 'Nothing to price (manual-review pets are skipped)' : 'Select pets first', 'error');
     toast(`Pricing ${todo.length} pets…`);
-    let ok = 0, fail = 0, firstErr = '';
+    let ok = 0, fail = 0, firstErr = '', noComps = 0;
     for (const p of todo) {
       try {
         const r = await M.call('price:smart', p.id);
-        if (r && r.price) { await M.call('pets:update', [p.id], { price: r.price, priceBasis: r.basis, priceLocked: false }); ok++; }
+        if (r && r.review) { noComps++; await M.call('pets:update', [p.id], { noComps: true, priceBasis: r.basis }); }
+        else if (r && r.price) { await M.call('pets:update', [p.id], { price: r.price, priceBasis: r.basis, priceLocked: false, noComps: false }); ok++; }
         else { fail++; firstErr = firstErr || (r && r.basis) || 'no price'; await M.call('pets:update', [p.id], { priceBasis: (r && r.basis) || 'no price' }); }   // reason stays on the row
       } catch (e) { fail++; firstErr = firstErr || e.message; }
     }
     await refreshData(); render();
-    toast(`Priced ${ok}` + (fail ? ` · ${fail} failed (${firstErr})` : '') + (skipped ? ` · ${skipped} skipped (manual review)` : ''), fail ? 'error' : 'good', 7000);
+    toast(`Priced ${ok}` + (noComps ? ` · ${noComps} with no similar listings moved to Manual Review` : '') + (fail ? ` · ${fail} failed (${firstErr})` : '') + (skipped ? ` · ${skipped} skipped (manual review)` : ''), fail ? 'error' : 'good', 7000);
   };
   const byMs = al.genTolMode === 'ms';
   const bulkPrice = alCard('price', '$', 'BULK AUTO PRICE',
@@ -459,7 +462,14 @@ PAGES.autolist = async root => {
         h('div', { class: 'x-lbl' }, '★ SPECIAL TRAITS — MANUAL REVIEW'),
         h('div', { class: 'row' },
           h('button', { class: 'btn sm', onclick: () => manageSpecial() }, `☆ Manage traits (${(al.specialTraits || []).length})`),
-          h('small', { class: 'muted' }, 'pets with a special trait go to a review section and are skipped by Auto Price')))));
+          h('small', { class: 'muted' }, 'pets with a special trait go to a review section and are skipped by Auto Price'))),
+      h('div', { class: 'x-rsec' },
+        h('div', { class: 'x-lbl' }, '★ NO SIMILAR LISTINGS'),
+        h('div', { class: 'row' },
+          sel([['review', 'Manual review (set the price yourself)'], ['estimate', 'Estimate from other listings']], al.noCompsMode === 'estimate' ? 'estimate' : 'review', v => saveSettings({ autolist: { noCompsMode: v } }).then(render)),
+          h('label', { class: 'x-fld', style: { flexDirection: 'row', alignItems: 'center', gap: '6px' } }, h('span', { class: 'x-lbl' }, 'NEED AT LEAST'),
+            num(al.minComps ?? 1, v => saveSettings({ autolist: { minComps: Math.max(1, Math.round(Number(v) || 1)) } }), { style: { width: '56px' } }), h('small', { class: 'muted' }, 'similar')),
+          h('small', { class: 'muted' }, `similar = same brainrot + mutation within the generation tolerance; fewer than that and Auto Price would only guess (often far too low)`)))));
 
   // ---- GENERATE IMAGES ----
   const genRun = async ids => {
@@ -527,7 +537,7 @@ PAGES.autolist = async root => {
         h('button', { title: 'Preview image', onclick: () => previewImage(p) }, 'Img'),
         p.offerId ? h('button', { title: 'Open offer', onclick: () => M.call('open:external', offerUrl({ id: p.offerId })) }, '↗') : null,
         p.status !== 'sold' ? h('button', { title: 'Mark as sold (sold outside Zotac)', onclick: () => markSold(p) }, '✓') : null),
-      rev ? h('span', { class: 'x-review' }, 'REVIEW') : null,
+      rev ? h('span', { class: 'x-review', title: xTraitReview(p, special) ? 'Special trait: priced by you' : (p.priceBasis || 'No similar listings on Eldorado: priced by you') }, xTraitReview(p, special) ? 'REVIEW' : 'NO COMPS') : null,
       xMutBlock(p.mutation),
       traits.length ? h('span', { class: 'x-trp' }, traits.slice(0, 8).map(tr => ART_THUMBS.traits[tr] ? h('img', { src: ART_THUMBS.traits[tr], title: tr, alt: tr }) : h('em', { title: tr }, String(tr).slice(0, 3)))) : null,
       n > 1 ? h('span', { class: 'x-alqty', title: `${n} identical copies (same name, mutation, gen/s and traits): listed as one offer with quantity ${n}` }, '×' + n) : null,
@@ -541,7 +551,7 @@ PAGES.autolist = async root => {
   const lim = AL.limit;
   const list = pets.length ? h('div', { class: 'x-allist' },
     review.length ? [
-      h('div', { class: 'x-sec rev' }, h('b', null, '★ MANUAL REVIEW'), h('small', null, `(${review.length})`), h('div', { class: 'grow' }), h('small', { class: 'x-sec-r' }, 'priced manually · skipped by Auto Price')),
+      h('div', { class: 'x-sec rev' }, h('b', null, '★ MANUAL REVIEW'), h('small', null, `(${review.length})`), h('div', { class: 'grow' }), h('small', { class: 'x-sec-r' }, 'special traits or no similar listings · set the price yourself · skipped by Auto Price')),
       h('div', { class: 'x-secbody rev' }, reviewG.slice(0, lim).map(g => row(g, true)))] : null,
     h('div', { class: 'x-sec' }, h('b', null, 'READY TO LIST'), h('small', null, `(${ready.length})`)),
     h('div', { class: 'x-secbody' }, readyG.slice(0, lim).map(g => row(g, false))),
@@ -1116,7 +1126,7 @@ function confirmAutoList(ids) {
         h('div', { class: 'x-cf-lh' }, h('span', null, `${rows.length} LISTINGS`), h('span', null, 'SUBTOTAL')),
         h('div', { class: 'x-cf-list' }, rows.map(g => {
           const mut = g.p.mutation && !/^(none|normal)$/i.test(g.p.mutation) ? g.p.mutation : null;
-          const review = special.length && (g.p.traits || []).some(t => special.includes(String(t).toLowerCase()));
+          const review = (special.length && (g.p.traits || []).some(t => special.includes(String(t).toLowerCase()))) || g.p.noComps;
           return h('div', { class: 'x-cf-row' + (g.price ? '' : ' nop') },
             h('b', { class: 'x-cf-name' }, g.p.name),
             mut ? (() => { const c = xMutColor(mut) || '#7c5cff'; return h('span', { class: 'x-cf-mut', style: { color: c, background: c + '2e', border: '1px solid ' + c + '66' } }, mut); })() : h('span'),
@@ -1139,7 +1149,12 @@ function confirmAutoList(ids) {
       else if (review) prices[p.id] = null;
       else if (al.priceMode === 'fixed') prices[p.id] = al.fixedPrice;
       else {
-        try { const r = await M.call('price:smart', p.id); prices[p.id] = r && r.price ? r.price : null; if (r && r.price) M.call('pets:update', [p.id], { price: r.price, priceBasis: r.basis }); }
+        try {
+          const r = await M.call('price:smart', p.id);
+          prices[p.id] = r && r.price ? r.price : null;
+          if (r && r.review) { p.noComps = true; M.call('pets:update', [p.id], { noComps: true, priceBasis: r.basis }); }
+          else if (r && r.price) M.call('pets:update', [p.id], { price: r.price, priceBasis: r.basis, noComps: false });
+        }
         catch { prices[p.id] = null; }
       }
       if (!bg || !bg.isConnected) return;   // cancelled while pricing

@@ -1018,15 +1018,18 @@ function ipc() {
   handle('settings:regenToken', which => { const s = store.get('settings'); s[which] = rid(8); store.save(); if (which === 'agentToken') syncAutoexec(); return s[which]; });
   handle('webhook:test', () => discord(store, { title: '🐾 Zotac Lister test', description: 'Webhook works!', ping: true }));
   // preview of each Discord card the app sends, filled with sample data (never pings)
-  handle('webhook:testCard', async kind => {
-    if (!store.get('settings').webhookUrl) throw new Error('Set a webhook URL first');
+  // target: 'main' (Discord Webhook card) or 'delivery' (Auto Delivery webhook card)
+  handle('webhook:testCard', async (kind, target = 'main') => {
+    const st = store.get('settings');
+    if (target === 'delivery' ? !st.deliveryWebhookUrl : !st.webhookUrl) throw new Error('Set a webhook URL first');
+    if (target === 'delivery' && !['delivered', 'cancelled', 'failed'].includes(kind)) kind = 'delivered';
     const pet = { name: 'Burguro And Fryuro', mutation: 'Rainbow', gen: 1.5e9, traits: ['Taco', 'Fire'] };
     const now = Date.now();
     const d = { orderId: 'TEST-' + rid(6), buyer: 'EldoradoBuyer', username: 'BuyerRoblox', robloxId: 1, price: 2.55, petIds: [], samplePets: [pet], sampleAccounts: ['StockAlt1'],
       createdAt: now - 106000, finishedAt: now, attempts: 0, sim: true };
-    if (kind === 'delivered') return delivery.reportCard({ ...d, state: 'done' }, 'done');
-    if (kind === 'cancelled') return delivery.reportCard({ ...d, state: 'cancelled', attempts: 3, price: 24.99 }, 'cancelled', 'Buyer did not accept the trade in time');
-    if (kind === 'failed') return delivery.reportCard({ ...d, state: 'manual', attempts: 3 }, 'manual', 'the delivery script never connected from @StockAlt1');
+    if (kind === 'delivered') return delivery.reportCard({ ...d, state: 'done' }, 'done', undefined, target);
+    if (kind === 'cancelled') return delivery.reportCard({ ...d, state: 'cancelled', attempts: 3, price: 24.99 }, 'cancelled', 'Buyer did not accept the trade in time', target);
+    if (kind === 'failed') return delivery.reportCard({ ...d, state: 'manual', attempts: 3 }, 'manual', 'the delivery script never connected from @StockAlt1', target);
     const T = '[TEST] ';
     if (kind === 'sale') return discord(store, { title: T + '💰 New sale!', color: 0x22c55e, description: '**Rainbow Burguro And Fryuro | 1.5B/s**', fields: [
       { name: 'Price', value: '$2.55', inline: true }, { name: 'Qty', value: '1', inline: true }, { name: 'Buyer', value: 'EldoradoBuyer', inline: true },

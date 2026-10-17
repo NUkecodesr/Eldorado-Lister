@@ -918,7 +918,7 @@ class Delivery extends EventEmitter {
   // the pet with its picture, price · quantity · time, the reason when it failed, and a
   // running total for today in the footer.
   report(d, outcome, reason) { this.reportCard(d, outcome, reason).catch(e => this.log('warn', 'Discord card: ' + e.message)); }
-  async reportCard(d, outcome, reason) {
+  async reportCard(d, outcome, reason, only) {
     const pets = d.samplePets || this.store.get('pets').filter(p => d.petIds.includes(p.id));
     const fmtGen = n => { n = Number(n) || 0; for (const [v, u] of [[1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'K']]) if (n >= v) return +(n / v).toFixed(2) + u + '/s'; return n + '/s'; };
     const MUT = { gold: '🟨', diamond: '💎', rainbow: '🌈', lava: '🌋', bloodrot: '🩸', celestial: '🌌', candy: '🍬', galaxy: '🌌', yinyang: '☯️', radioactive: '☢️', cursed: '😈', none: '🧊', normal: '🧊' };
@@ -961,7 +961,7 @@ class Delivery extends EventEmitter {
     let thumb = null;
     try { if (pets[0] && this.petImageUrl) thumb = await this.petImageUrl(pets[0].name); } catch { /* no picture */ }
     return discord(this.store, {
-      username: 'Zotac Auto Delivery', color: style[1], ping: outcome !== 'done' && !d.sim,
+      username: 'Zotac Auto Delivery', color: style[1], ping: outcome !== 'done' && !d.sim, channel: 'delivery', only,
       description: lines.join('\n').slice(0, 4000),
       thumbnail: thumb || d.avatar || undefined,
       footer: `Today: ${ok} ✅ · ${bad} ❌ · $${sum.toFixed(2)} · Zotac Lister`

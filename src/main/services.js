@@ -17,18 +17,27 @@ function pickFewestAccounts(list, n, prefer) {
 }
 
 // --- Discord ------------------------------------------------------------
-async function discord(store, { title, description, color = 0xf5b301, fields = [], ping = false, thumbnail, footer, username }) {
+// channel 'delivery' = Auto Delivery cards: they go to the Auto Delivery webhook (when set) and to
+// the main webhook unless "Send auto delivery cards" is off there; everything else only to the main one
+async function discord(store, { title, description, color = 0xf5b301, fields = [], ping = false, thumbnail, footer, username, channel, only }) {
   const s = store.get('settings');
-  if (!s.webhookUrl) return false;
-  const body = {
-    username: username || 'Zotac Lister',
-    content: ping && s.webhookPing ? (/^\d+$/.test(s.webhookPing) ? `<@${s.webhookPing}>` : s.webhookPing) : undefined,
-    embeds: [{ title, description, color, fields, thumbnail: thumbnail ? { url: thumbnail } : undefined, timestamp: new Date().toISOString(), footer: { text: footer || 'Zotac Lister' } }]
-  };
-  try {
-    const r = await fetch(s.webhookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    return r.ok;
-  } catch (e) { store.log('warn', 'Discord webhook failed: ' + e.message); return false; }
+  const targets = [];
+  if (s.webhookUrl && only !== 'delivery' && (channel !== 'delivery' || s.notifyDelivery !== false || only === 'main')) targets.push([s.webhookUrl, s.webhookPing]);
+  if (channel === 'delivery' && s.deliveryWebhookUrl && only !== 'main') targets.push([s.deliveryWebhookUrl, s.deliveryWebhookPing]);
+  if (!targets.length) return false;
+  let ok = false;
+  for (const [url, pingTo] of targets) {
+    const body = {
+      username: username || 'Zotac Lister',
+      content: ping && pingTo ? (/^\d+$/.test(pingTo) ? `<@${pingTo}>` : pingTo) : undefined,
+      embeds: [{ title, description, color, fields, thumbnail: thumbnail ? { url: thumbnail } : undefined, timestamp: new Date().toISOString(), footer: { text: footer || 'Zotac Lister' } }]
+    };
+    try {
+      const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      ok = ok || r.ok;
+    } catch (e) { store.log('warn', 'Discord webhook failed: ' + e.message); }
+  }
+  return ok;
 }
 
 // --- Roblox -------------------------------------------------------------

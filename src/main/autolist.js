@@ -106,6 +106,12 @@ class AutoLister extends EventEmitter {
           if (al.priceMode === 'fixed') { price = al.fixedPrice; basis = 'fixed'; }
           else {
             const sp = await smartPrice(this.eld, pet, this.store.get('settings'), me.id || me.userId);
+            if (sp.review) {
+              const ids = new Set(group.map(p => p.id));
+              for (const p of this.store.get('pets')) if (ids.has(p.id)) { p.noComps = true; p.priceBasis = sp.basis; }
+              this.store.save();
+              throw new Error('No similar listings on Eldorado: set a price first (Manual Review)');
+            }
             price = sp.price; basis = sp.basis;
           }
         }
