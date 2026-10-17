@@ -946,6 +946,18 @@ local function scanRemote(req)
         if n and (string.lower(n) == want or (req.userId and id == tonumber(req.userId))) then target, owner, display, uid = plot, n, dn, id break end
     end
     if not target then post("/scanner/remote", {by = LP.Name, username = req.username, error = "base not found in this server"}) return end
+    -- a player who just joined: the game's own data for that base (pet list with uuids) arrives a
+    -- little later than its models. Wait for it (max 30 s) so the pets come with their uuids
+    local tD = os.clock()
+    while running and os.clock() - tD < 30 do
+        local list = plotAnimalList(target.Name)
+        if list then
+            local n = 0
+            for _, a in pairs(list) do if type(a) == "table" and type(a.Index) == "string" then n += 1 end end
+            if petCount(target) >= n then break end
+        end
+        task.wait(1)
+    end
     -- the name tags stream in as this account gets close: wait (max 20 s) until every pet has its gen/s
     local t0, pets, animals, info = os.clock(), nil, nil, nil
     repeat
