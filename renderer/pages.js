@@ -1068,7 +1068,7 @@ async function loadThumbs(pets, { pictures = true } = {}) {
 }
 const XSLOT_CAP = 21;
 const XRANGES = [['', 'All ranges'], ['0-1e6', '< 1M/s'], ['1e6-1e7', '1M – 10M/s'], ['1e7-1e8', '10M – 100M/s'], ['1e8-1e9', '100M – 1B/s'], ['1e9-1e15', '1B+/s']];
-const RA = { filter: { account: '', q: '', mutation: '', min: '', max: '', range: '' }, view: 'account', tab: 'accounts', sort: 'desc', stock: false, org: 'name', open: null, limit: 60 };
+const RA = { filter: { account: '', q: '', mutation: '', min: '', max: '', range: '' }, view: 'account', tab: 'accounts', sort: 'desc', stock: false, org: 'name', open: null, limit: 60, showEmpty: false };
 PAGES.accounts = async root => {
   const f = RA.filter;
   const LST = {}; try { for (const x of await M.call('launcher:status')) LST[x.id] = x; } catch { /* old backend */ }
@@ -1092,6 +1092,9 @@ PAGES.accounts = async root => {
 
   let accts = S.accounts.filter(a => !f.account || a.username.toLowerCase().includes(f.account.toLowerCase()));
   const countOf = a => live.filter(p => p.accountId === a.id).length;
+  const hasStock = a => S.pets.some(p => p.accountId === a.id && p.status !== 'sold');
+  const emptyCount = accts.filter(a => !hasStock(a)).length;
+  if (!RA.showEmpty && !f.account) accts = accts.filter(hasStock);
   if (RA.org === 'pets') accts = [...accts].sort((a, b) => countOf(b) - countOf(a));
   else if (RA.org === 'free') accts = [...accts].sort((a, b) => countOf(a) - countOf(b));
   else accts = [...accts].sort((a, b) => a.username.localeCompare(b.username));
@@ -1234,10 +1237,11 @@ PAGES.accounts = async root => {
         h('button', { class: 'x-chip' + (RA.sort === 'desc' ? ' on' : ''), onclick: () => { RA.sort = 'desc'; render(); } }, '↓ Descending'),
         h('button', { class: 'x-chip' + (RA.stock ? ' on' : ''), onclick: () => { RA.stock = !RA.stock; render(); } }, '◈ Stock'),
         h('button', { class: 'x-chip', onclick: () => { RA.open = new Set(); render(); } }, '⊟ Collapse'),
-        h('button', { class: 'x-chip', onclick: () => { RA.open = new Set(S.accounts.map(a => a.id)); render(); } }, '⊞ Expand')] : null),
+        h('button', { class: 'x-chip', onclick: () => { RA.open = new Set(S.accounts.map(a => a.id)); render(); } }, '⊞ Expand'),
+        emptyCount ? h('button', { class: 'x-chip' + (RA.showEmpty ? ' on' : ''), title: 'Accounts with no pets in stock', onclick: () => { RA.showEmpty = !RA.showEmpty; render(); } }, RA.showEmpty ? `Hide empty (${emptyCount})` : `Show empty (${emptyCount})`) : null] : null),
     RA.view === 'all'
       ? (petsFiltered.length ? grid(petsFiltered, 'all') : h('div', { class: 'x-empty' }, 'No pets match.'))
-      : (accts.length ? accts.filter(a => !petFilterOn || petsFiltered.some(p => p.accountId === a.id)).map(accountRow) : h('div', { class: 'x-empty' }, 'No accounts yet. Import a JSON or add one.')),
+      : (accts.length ? accts.filter(a => !petFilterOn || petsFiltered.some(p => p.accountId === a.id)).map(accountRow) : h('div', { class: 'x-empty' }, S.accounts.length ? 'No account has pets in stock. Run the scanner on your stock accounts, or Show empty.' : 'No accounts yet. Import a JSON or add one.')),
     (RA.view === 'account' && petsFiltered.some(p => !p.accountId)) ? h('div', { class: 'x-arow' }, h('div', { class: 'x-ahead' }, h('b', null, 'Unassigned'), h('small', { class: 'muted' }, 'pets without an account')), grid(petsFiltered.filter(p => !p.accountId), 'un')) : null);
 
   root.append(

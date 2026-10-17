@@ -124,6 +124,10 @@ function wire() {
   // pets pasted as JSON on Auto List are for this session only: drop the ones still unlisted
   // (listed / sold ones stay, Auto Delivery needs them to match orders)
   { const before = store.get('pets').length; store.set('pets', store.get('pets').filter(p => !(p.status === 'available' && (p.session || (!p.accountId && !p.manual))))); if (store.get('pets').length !== before) store.save(); }
+  // and the accounts such a paste created, once nothing points at them (no pets, cookie or note)
+  { const used = new Set(store.get('pets').map(p => p.accountId)); const before = store.get('accounts').length;
+    store.set('accounts', store.get('accounts').filter(a => !(a.session && !used.has(a.id) && !a.cookieEnc && !a.note)));
+    if (store.get('accounts').length !== before) store.save(); }
   // backfill new step templates for older data files
   store.data.settings.delivery.steps = { ...DEFAULT_DELIVERY_STEPS, ...store.data.settings.delivery.steps };
   art = new Art({
@@ -340,8 +344,11 @@ function ipc() {
   handle('server:scans', () => Object.values(serverScans).sort((a, b) => b.receivedAt - a.receivedAt));
   handle('pets:import', (json, accountId) => {
     const before = new Set(store.get('pets').map(p => p.id));
+    const beforeAcc = new Set(store.get('accounts').map(a => a.id));
     const r = importPets(json, accountId);
     for (const p of store.get('pets')) if (!before.has(p.id)) p.session = true;
+    // accounts a paste created (often other players' bases) go away with their pets
+    for (const a of store.get('accounts')) if (!beforeAcc.has(a.id)) a.session = true;
     store.save();
     return r;
   });
