@@ -240,12 +240,19 @@ class Launcher extends EventEmitter {
     if (!ids.length || this.checking) return;
     this.checking = true;
     try {
-      const alive = new Set(await robloxPids());
+      let list = await robloxPids();
+      // tasklist can come back empty for a moment: an empty list while games are expected is asked again
+      if (!list.length) { await new Promise(r => setTimeout(r, 1500)); list = await robloxPids(); }
+      const alive = new Set(list);
+      this.missing = this.missing || {};
       for (const id of ids) {
         const pid = this.pids[id];
         const a = this.acct(id);
         if (!a || !pid) { delete this.pids[id]; continue; }
         if (this.closing[id] && Date.now() - this.closing[id] < 30000) { if (!alive.has(pid)) delete this.pids[id]; continue; }
+        // gone only when missing on two checks in a row (5 s apart), never on one odd process list
+        if (!alive.has(pid)) { this.missing[id] = (this.missing[id] || 0) + 1; if (this.missing[id] < 2) continue; }
+        else delete this.missing[id];
         const name = String(a.username || '').toLowerCase();
         const poll = Object.entries(this.delivery.lastAgentPoll || {}).find(([k]) => k.toLowerCase() === name);
         const heard = Math.max(poll ? poll[1] : 0, (this.delivery.lastSeen || {})[name] || 0);
@@ -263,7 +270,7 @@ class Launcher extends EventEmitter {
           continue;
         }
         if (alive.has(pid)) await new Promise(res => execFile('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true }, () => res()));
-        delete this.pids[id];
+        delete this.pids[id]; delete this.missing[id];
         this.log('warn', `${a.username}: Roblox ${why} - opening it again`);
         this.emit('crashed', { id, username: a.username, legit: this.mode[id] === 'legit', why });
       }
@@ -365,6 +372,7 @@ class Launcher extends EventEmitter {
     })();
     this.mode[id] = legit ? 'legit' : 'script';
     delete this.closing[id];
+    if (this.missing) delete this.missing[id];
     this.log('info', `Launched ${a.username} into the private server${legit ? ' (Legit: real Roblox, no executor)' : ''}`);
     this.emit('launched', { id, username: a.username });
     return { launched: true, privateServer: !!ps };

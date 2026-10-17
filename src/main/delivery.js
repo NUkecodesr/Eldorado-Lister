@@ -553,6 +553,13 @@ class Delivery extends EventEmitter {
     for (const k of Object.keys(this.lastAgentPoll)) if (k.toLowerCase() === n) delete this.lastAgentPoll[k];
     for (const j of this.store.get('jobs')) {
       if (!['pending', 'running'].includes(j.status)) continue;
+      // a job that was asked to stop, or whose order ended, is never brought back by a crash
+      const od = this.map[j.orderId];
+      if ((j.accountId === id || (j.kind === 'steal' && j.fromAccountId === id)) && (j.cancelRequested || (od && od.state !== 'delivering'))) {
+        j.status = 'cancelled'; j.reason = 'its game was gone after the order stopped'; j.finishedAt = Date.now();
+        this.store.save(); this.emit('job', j);
+        continue;
+      }
       if (j.accountId === id) {
         j.crashes = (j.crashes || 0) + 1;
         if (j.crashes > 3) { this.jobResult(j.id, false, `Roblox of @${username} ${why} - 3 times in this job`); continue; }
