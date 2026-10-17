@@ -888,6 +888,20 @@ function stopProofKey(key, delay = 0) {
 function stopProof(orderId, account, delay = 0) {
   for (const [k, r] of RECS) if ((!orderId || r.orderId === orderId) && (account === undefined || r.account === account)) stopProofKey(k, delay);
 }
+// Deleting a clip that is loaded in the player used to fail without a word: the <video> keeps the
+// file open and Windows refuses to delete it. The player lets go of it first; a clip that still
+// can't be deleted is reported (the others are deleted anyway). Returns how many were deleted.
+async function deleteClips(names) {
+  if (VP.player && names.some(n => decodeURI(VP.player.dataset.src || '').endsWith('/' + n))) {
+    VP.player.pause(); VP.player.removeAttribute('src'); VP.player.load(); VP.player = null;
+  }
+  let n = 0; const errs = [];
+  for (const name of names) {
+    try { await M.call('proof:delete', name); n++; } catch (e) { errs.push(String(e.message).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); }
+  }
+  if (errs.length) throw new Error(`${n} deleted, ${errs.length} failed: ${errs[0]}`);
+  return n;
+}
 PAGES.proof = async root => {
   if (!VP.list) { VP.list = []; M.call('proof:list').then(l => { VP.list = l; if (S.page === 'proof') render(); }); }
   if (!VP.deliv) { VP.deliv = {}; M.call('delivery:list').then(r => { VP.deliv = Object.fromEntries((r.deliveries || []).map(d => [d.orderId, d])); if (S.page === 'proof') render(); }); }
@@ -940,13 +954,26 @@ PAGES.proof = async root => {
       badN ? h('button', { class: 'btn danger', title: 'Clips of cancelled / failed deliveries', onclick: async () => {
         const bad = all.filter(x => x.st === 'failed');
         if (!await confirmBox(`Delete ${bad.length} clip(s) of deliveries that did not go through (${fmtBytes(bad.reduce((a, x) => a + x.f.size, 0))})? Successful clips stay.`)) return;
-        for (const x of bad) await M.call('proof:delete', x.f.name).catch(() => {});
+        const n = await run(() => deleteClips(bad.map(x => x.f.name)));
         if (bad.some(x => x.f.name === VP.sel)) VP.sel = null;
-        VP.list = null; render(); toast(`Deleted ${bad.length} clip(s)`, 'good');
+        VP.list = null; render();
+        if (n) toast(`Deleted ${n} clip(s)`, 'good');
       } }, `Delete failed (${badN})`) : null,
       h('button', { class: 'btn', onclick: () => M.call('open:path', dir) }, mxSvg('folder', 13), 'Folder'),
       h('button', { class: 'btn primary', onclick: () => { VP.list = null; VP.deliv = null; render(); } }, mxSvg('refresh', 13), 'Refresh')),
     h('div', { class: 'mx-folder' }, mxSvg('folder', 13), h('span', { class: 'muted' }, 'Saving to: '), h('span', { class: 'mono grow' }, dir, ' (default)'),
+      h('span', { class: 'muted', title: 'Clips older than this are deleted by themselves (checked every hour). 0 = keep forever' }, 'Delete after (days)'),
+      num((S.settings.delivery || {}).proofKeepDays || 0, async v => {
+        const days = Math.max(0, Math.round(Number(v) || 0));
+        await saveSettings({ delivery: { proofKeepDays: days } });
+        if (days) {
+          const old = (VP.list || []).filter(f => f.date < Date.now() - days * 86400000);
+          if (old.length && VP.player && old.some(f => decodeURI(VP.player.dataset.src || '').endsWith('/' + f.name))) { VP.player.pause(); VP.player.removeAttribute('src'); VP.player.load(); VP.player = null; VP.sel = null; }
+          const n = await run(() => M.call('proof:cleanup'));
+          toast(n ? `Deleted ${n} clip(s) older than ${days} day(s)` : `Clips older than ${days} day(s) are deleted automatically`, 'good');
+        } else toast('Clips are kept forever', 'info');
+        VP.list = null; render();
+      }, { style: { width: '64px' }, min: '0', title: '0 = keep forever' }),
       h('span', { class: 'muted', title: 'Off: a clip of a cancelled / failed delivery is not saved' }, 'Keep failed clips'), sw(!!(S.settings.delivery || {}).keepFailedProof, v => saveSettings({ delivery: { keepFailedProof: v } }).then(render)),
       h('span', { class: 'muted' }, 'Record buyer trades'), sw(!!(S.settings.delivery || {}).recordProof, v => saveSettings({ delivery: { recordProof: v } }).then(render))),
     h('div', { class: 'mx-vsplit' },
@@ -959,7 +986,12 @@ PAGES.proof = async root => {
           h('div', { class: 'mx-vplayer-h' },
             h('div', { class: 'grow' }, h('b', null, `${cur.buyer} - ${fmtDate(cur.f.date)}`), h('div', { class: 'row', style: { gap: '8px', marginTop: '3px' } }, h('span', { class: 'pill ' + cur.cls }, cur.label), h('small', { class: 'muted' }, fmtBytes(cur.f.size)), h('small', { class: 'mono muted' }, cur.f.name))),
             h('button', { class: 'btn sm', onclick: () => M.call('open:path', dir) }, 'Reveal'),
-            h('button', { class: 'btn sm danger', onclick: async () => { if (await confirmBox('Delete ' + cur.f.name + '?')) { await M.call('proof:delete', cur.f.name); VP.sel = null; VP.list = null; render(); } } }, 'Delete')),
+            h('button', { class: 'btn sm danger', onclick: async () => {
+              if (!await confirmBox('Delete ' + cur.f.name + '?')) return;
+              const ok = await run(() => deleteClips([cur.f.name]));
+              if (ok) { VP.sel = null; toast('Video deleted', 'good'); }
+              VP.list = null; render();
+            } }, 'Delete')),
           video] : mxEmpty('play', 'Select a video to play')))));
 };
 

@@ -997,7 +997,35 @@ function ipc() {
     const st = fs.statSync(path.join(proofDir(), f));
     return { name: f, path: path.join(proofDir(), f), size: st.size, date: st.mtimeMs };
   }).sort((a, b) => b.date - a.date));
-  handle('proof:delete', f => { const p = path.join(proofDir(), path.basename(f)); fs.unlinkSync(p); try { fs.unlinkSync(p.replace(/\.webm$/, '.json')); } catch { /* no sidecar */ } return true; });
+  // A clip the player still has open is locked on Windows (EBUSY / EPERM) for a moment after the
+  // page lets go of it: tried again a few times before giving up
+  const deleteProof = async f => {
+    const p = path.join(proofDir(), path.basename(f));
+    for (let i = 0; ; i++) {
+      try { if (fs.existsSync(p)) fs.unlinkSync(p); break; }
+      catch (e) { if (!['EBUSY', 'EPERM', 'EACCES'].includes(e.code) || i >= 8) throw new Error(`could not delete ${path.basename(f)}: ${e.code || e.message} (is it open in another program?)`); await new Promise(r => setTimeout(r, 400)); }
+    }
+    try { fs.unlinkSync(p.replace(/\.webm$/, '.json')); } catch { /* no sidecar */ }
+    return true;
+  };
+  handle('proof:delete', deleteProof);
+  // automatic clean-up: clips older than Video Proof → "Delete after" days (0 = keep forever),
+  // checked a minute after start and every hour
+  const proofCleanup = async () => {
+    const days = Number((store.get('settings').delivery || {}).proofKeepDays) || 0;
+    if (days <= 0) return 0;
+    const cut = Date.now() - days * 86400000;
+    let n = 0;
+    for (const f of fs.readdirSync(proofDir()).filter(x => x.endsWith('.webm'))) {
+      try { if (fs.statSync(path.join(proofDir(), f)).mtimeMs < cut) { await deleteProof(f); n++; } }
+      catch (e) { store.log('warn', '[Proof] auto-delete: ' + e.message); }
+    }
+    if (n) store.log('info', `[Proof] deleted ${n} clip(s) older than ${days} day(s)`);
+    return n;
+  };
+  handle('proof:cleanup', proofCleanup);
+  setTimeout(() => proofCleanup().catch(() => {}), 60000);
+  setInterval(() => proofCleanup().catch(() => {}), 3600000);
   handle('proof:dir', () => proofDir());
 }
 
