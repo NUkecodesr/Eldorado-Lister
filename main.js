@@ -209,15 +209,43 @@ function createWindow() {
 // Screen recording for Video Proof: the Roblox window of the account doing the trade (set by
 // proof:target from the process Zotac launched for it), else the first Roblox window, else the screen.
 let captureHwnd = null;
-function windowOfPid(pid) {
-  return new Promise(res => require('child_process').execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${Number(pid)}).MainWindowHandle`],
-    { windowsHide: true, timeout: 8000 }, (err, out) => { const h = Number(String(out || '').trim()); res(err || !h ? null : h); }));
+let captureStrict = false;   // the next capture must be exactly that window
+// every visible Roblox game window: { pid, hwnd, path } (top-level windows titled "Roblox", each
+// with its own process; MainWindowHandle alone came back empty for a game that was open)
+const ROBLOX_WINDOWS_PS = "Add-Type @\"\nusing System; using System.Text; using System.Runtime.InteropServices;\npublic class ZW {\n  public delegate bool P(IntPtr h, IntPtr l);\n  [DllImport(\"user32.dll\")] public static extern bool EnumWindows(P f, IntPtr l);\n  [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);\n  [DllImport(\"user32.dll\")] public static extern bool IsWindowVisible(IntPtr h);\n  [DllImport(\"user32.dll\", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);\n  public static string List() {\n    var sb = new StringBuilder();\n    EnumWindows((h, l) => { uint p; GetWindowThreadProcessId(h, out p); var t = new StringBuilder(256); GetWindowText(h, t, 256);\n      if (IsWindowVisible(h) && t.ToString().Contains(\"Roblox\")) sb.AppendLine(p + \"|\" + h.ToInt64()); return true; }, IntPtr.Zero);\n    return sb.ToString();\n  }\n}\n\"@\n[ZW]::List() -split \"`n\" | Where-Object { $_ -match \"\\|\" } | ForEach-Object { $a = $_.Trim().Split(\"|\"); $p = Get-Process -Id $a[0] -ErrorAction SilentlyContinue; $a[0] + \"|\" + $a[1] + \"|\" + ($p.Path) }";
+function robloxWindows() {
+  return new Promise(res => require('child_process').execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ROBLOX_WINDOWS_PS],
+    { windowsHide: true, timeout: 15000 }, (err, out) => {
+      if (err) return res([]);
+      res(String(out || '').split(/\r?\n/).map(l => l.trim().split('|')).filter(a => a.length >= 2 && Number(a[0]) && Number(a[1]))
+        .map(a => ({ pid: Number(a[0]), hwnd: Number(a[1]), path: a.slice(2).join('|') })));
+    }));
+}
+// the window of the game Zotac opened for this account; retried while the window comes up.
+// Without the account's own process: the one Roblox window that is not a Legit (stock account)
+// client and not another account's game. Never a guess between several.
+async function windowOfAccount(acctId) {
+  const legitDir = launcher.legit && launcher.legit.dir ? String(launcher.legit.dir).toLowerCase() : null;
+  for (let i = 0; i < 5; i++) {
+    const wins = await robloxWindows();
+    const pid = launcher.pids[acctId];
+    const own = pid && wins.find(w => w.pid === pid);
+    if (own) return own.hwnd;
+    const others = new Set(Object.entries(launcher.pids).filter(([id]) => id !== acctId).map(([, p]) => p));
+    const cands = wins.filter(w => /RobloxPlayerBeta\.exe$/i.test(w.path || '') && !others.has(w.pid) && !(legitDir && String(w.path || '').toLowerCase().startsWith(legitDir)));
+    if (!pid && cands.length === 1) return cands[0].hwnd;
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  return null;
 }
 function setupCapture() {
   session.defaultSession.setDisplayMediaRequestHandler(async (_req, cb) => {
     const sources = await desktopCapturer.getSources({ types: ['window', 'screen'] });
     const mine = captureHwnd ? sources.find(s => s.id.startsWith('window:' + captureHwnd + ':')) : null;
-    captureHwnd = null;
+    const strict = captureStrict;
+    captureHwnd = null; captureStrict = false;
+    // a delivery clip is the trading account's own window or nothing (never another account's game)
+    if (strict && !mine) { cb({}); return; }
     const pick = mine || sources.find(s => /roblox/i.test(s.name)) || sources.find(s => s.id.startsWith('screen')) || sources[0];
     cb({ video: pick });
   });
@@ -922,8 +950,10 @@ function ipc() {
     const byName = account && store.get('accounts').find(a => String(a.username).toLowerCase() === String(account).toLowerCase());
     const job = store.get('jobs').filter(j => j.orderId === orderId && j.status === 'running' && j.kind !== 'steal').pop();
     const acctId = byName ? byName.id : (d && d.mother) ? d.mother : job ? job.accountId : null;
-    const pid = acctId && launcher.pids[acctId];
-    if (pid) captureHwnd = await windowOfPid(pid);
+    captureStrict = !!acctId;
+    captureHwnd = acctId ? await windowOfAccount(acctId) : null;
+    const name = acctId && (store.get('accounts').find(a => a.id === acctId) || {}).username;
+    if (acctId && !captureHwnd) store.log('warn', `[Proof] Roblox window of @${name || '?'} not found - this trade is not recorded (never another account's window)`);
     return { account: acctId, hwnd: captureHwnd };
   });
   // <order>__<account>-<ms>.webm + .json sidecar; the clip is linked to the ledger entries of that
