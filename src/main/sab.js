@@ -150,6 +150,9 @@ function normalizePetImport(json, defaultAccount = '') {
       const acctName = pick(node, ['username', 'Username', 'account', 'player']) || acct;
       for (const k of CONTAINER) if (Array.isArray(node[k])) { walk(node[k], typeof acctName === 'string' ? acctName : acct); return; }
     }
+    // a Zotac export also holds pets that already left the account (sold, delivered, traded away,
+    // gone from the base): those are history, never stock to list again
+    if (node.status === 'sold' || node.status === 'gone' || node.delivered === true || node.tradedTo) return;
     const p = petFromAny(node, acct);
     if (p) { for (let i = 0; i < Math.max(1, Math.min(p.quantity || 1, 50)); i++) out.push({ ...p }); return; }
     const acctName = pick(node, ['username', 'Username', 'account', 'player', 'name']) || acct;
