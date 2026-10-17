@@ -54,6 +54,7 @@ function saveServerScan(d) {
   for (const b of d.bases || []) {
     const a = b.owner && Number(b.slots) > 0 && store.get('accounts').find(x => x.username.toLowerCase() === String(b.owner).toLowerCase());
     if (a && Number(b.slots) > (Number(a.slots) || 0)) { a.slots = Number(b.slots); slotsChanged = true; }   // far bases stream in partly: keep the highest count seen
+    if (a && b.rebirths != null && a.rebirths !== Number(b.rebirths)) { a.rebirths = Number(b.rebirths); slotsChanged = true; }
   }
   if (slotsChanged) store.save();
   const ids = Object.keys(serverScans).sort((a, b) => serverScans[b].receivedAt - serverScans[a].receivedAt);
@@ -476,6 +477,7 @@ function importPets(json, accountId, { replace = false, onlySaved = false } = {}
   }
   // how many pets that base holds (its podiums), for Roblox Accounts → Base slots
   if (replace && raw && raw.username && Number(raw.slots) > 0) { const sa = accounts.find(a => a.username.toLowerCase() === String(raw.username).toLowerCase()); if (sa && Number(raw.slots) > (Number(sa.slots) || 0)) sa.slots = Number(raw.slots); }
+  if (replace && raw && raw.username && raw.rebirths != null) { const sa = accounts.find(a => a.username.toLowerCase() === String(raw.username).toLowerCase()); if (sa) sa.rebirths = Number(raw.rebirths); }
   if (replace && raw && raw.uuidInfo && raw.username) {
     const ui = raw.uuidInfo, k = String(raw.username).toLowerCase();
     importPets.uuidLogged = importPets.uuidLogged || new Set();

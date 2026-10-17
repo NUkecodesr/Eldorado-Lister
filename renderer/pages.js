@@ -1158,16 +1158,19 @@ function accountStats() {
   const stock = inBase.filter(p => p.status !== 'sold');
   const listed = stock.filter(p => p.status === 'listed').length;
   const stockAccts = new Set(stock.map(p => p.accountId)).size;
+  // used = every brainrot in every base; total = every base's slots added up
   const withSlots = accts.filter(a => Number(a.slots) > 0);
   const total = withSlots.reduce((n, a) => n + Number(a.slots), 0);
-  const used = inBase.filter(p => withSlots.some(a => a.id === p.accountId)).length;
+  const used = inBase.length;
+  const usedKnown = inBase.filter(p => withSlots.some(a => a.id === p.accountId)).length;
+  const unknown = accts.length - withSlots.length;
   const ic = name => (typeof mxSvg === 'function' ? mxSvg(name, 16) : null);
   return h('div', { class: 'x-tiles x-acc-stats' },
     xTile('ACCOUNTS', String(accts.length), 'x-plain', `${accts.filter(a => a.hasCookie).length} connected`, ic('people')),
     xTile('PETS IN STOCK', String(stock.length), 'x-plain', `across ${stockAccts} account${stockAccts === 1 ? '' : 's'}`, ic('layers')),
     xTile('LISTED', `${listed}/${stock.length}`, 'x-plain', 'pets currently listed', ic('check')),
-    xTile('BASE SLOTS USED', total ? `${used}/${total}` : '—', total ? (total - used <= 0 ? 'x-red' : 'x-green') : 'x-plain',
-      total ? `${Math.max(0, total - used)} free${withSlots.length < accts.length ? ` · ${accts.length - withSlots.length} base${accts.length - withSlots.length === 1 ? '' : 's'} not scanned yet` : ''}` : 'scan the bases to count their slots', ic('folder')));
+    xTile('BASE SLOTS USED', total ? `${used}/${total}${unknown ? '+' : ''}` : `${used}/?`, total ? (total - usedKnown <= 0 ? 'x-red' : 'x-green') : 'x-plain',
+      total ? `${Math.max(0, total - usedKnown)} free${unknown ? ` · ${unknown} base${unknown === 1 ? '' : 's'} not counted yet (Auto Scan counts them)` : ''}` : 'Auto Scan counts each base\'s slots', ic('folder')));
 }
 PAGES.accounts = async root => {
   const f = RA.filter;
@@ -1291,9 +1294,18 @@ PAGES.accounts = async root => {
           h('div', { class: 'x-acard-av' },
             a.avatar ? h('img', { class: 'x-aava', src: a.avatar }) : h('div', { class: 'x-aava ph' }, a.username[0] ? a.username[0].toUpperCase() : '?'),
             h('span', { class: 'x-on' + (inGame ? ' on' : ''), title: inGame ? 'Delivery script online' : 'Not in game' })),
-          h('div', { class: 'x-acard-t' }, h('b', { title: a.username }, '@' + a.username), h('small', { class: 'muted' }, a.robloxUserId ? 'ID: ' + a.robloxUserId : (a.note || (a.hasCookie ? '' : 'not logged in')))),
-          // pet count only: each base has its own slot cap (seen 19-24), the game shows it in the trade window
-          h('span', { class: 'x-slot' }, h('i'), `${mine.length} pets`)),
+          h('div', { class: 'x-acard-t' }, h('b', { title: a.username }, '@' + a.username), h('small', { class: 'muted' }, [a.robloxUserId ? 'ID: ' + a.robloxUserId : (a.note || (a.hasCookie ? '' : 'not logged in')), a.rebirths != null ? 'Rebirth ' + a.rebirths : ''].filter(Boolean).join(' · '))),
+          (() => {   // listed / in stock, and pets in the base / the base's slots (counted by the scanner)
+            const inBase = S.pets.filter(p => p.accountId === a.id && !p.delivered && !p.session);
+            const stock = inBase.filter(p => p.status !== 'sold');
+            const cap = Number(a.slots) || 0, used = inBase.length, pct = cap ? Math.min(100, Math.round(used / cap * 100)) : 0;
+            return h('div', { class: 'x-astat' },
+              h('div', { class: 'x-astat-n x-aslots' }, h('div', null, h('b', null, String(stock.filter(p => p.status === 'listed').length)), h('span', null, '/' + stock.length)), h('small', null, 'LISTED')),
+              h('div', { class: 'x-astat-n x-aslots', title: cap ? `${used} brainrots in a base with ${cap} slots` : 'Slots not counted yet: Auto Scan or the scanner counts them' },
+                h('div', null, h('b', null, String(used)), h('span', null, '/' + (cap || '?'))),
+                h('i', { class: 'x-abar' + (cap && used >= cap ? ' full' : '') }, h('u', { style: { width: pct + '%' } })),
+                h('small', null, 'BASE SLOTS')));
+          })()),
         h('div', { class: 'x-acard-m' },
           // how ▶ Start opens this account: SCRIPT = with your executor (Zotac's scripts run),
           // Legit = real Roblox from Zotac's own clean install (no executor, no scripts)
