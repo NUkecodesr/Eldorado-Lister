@@ -854,8 +854,9 @@ async function openRec(key) {
       let bin = ''; const bytes = new Uint8Array(buf);
       for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
       try {
-        await M.call('proof:save', r.orderId, btoa(bin), { account: r.account, labels: r.labels, startedAt: started, endedAt: Date.now(), window: target && target.hwnd ? 'account window' : 'first Roblox window / screen' });
-        toast('Proof video saved' + (r.account ? ' (@' + r.account + ')' : ''), 'good');
+        const kept = await M.call('proof:save', r.orderId, btoa(bin), { account: r.account, labels: r.labels, startedAt: started, endedAt: Date.now(), window: target && target.hwnd ? 'account window' : 'first Roblox window / screen' });
+        if (kept) toast('Proof video saved' + (r.account ? ' (@' + r.account + ')' : ''), 'good');
+        else toast('Clip not kept: the delivery did not go through', 'info');
       } catch (e) { toast('Saving proof failed: ' + e.message, 'error'); }
       RECS.delete(key); VP.list = null; VP.deliv = null;   // reload both, or a new clip shows as unlinked
       if (S.page === 'proof') render();
@@ -936,9 +937,17 @@ PAGES.proof = async root => {
       h('input', { type: 'search', class: 'grow', placeholder: 'Search by buyer, date or status…', value: VP.q, onchange: e => { VP.q = e.target.value; render(); } }),
       sel([['all', 'All statuses'], ['ok', 'OK'], ['failed', 'Failed'], ['other', 'Other']], VP.status, v => { VP.status = v; render(); }),
       RECS.size ? h('button', { class: 'btn danger', onclick: () => stopProof() }, `Stop recording (${[...RECS.values()].map(r => r.account ? '@' + r.account : r.orderId).join(', ')})`) : h('button', { class: 'btn', onclick: () => startProof('manual', null, 'manual recording') }, 'Record now'),
+      badN ? h('button', { class: 'btn danger', title: 'Clips of cancelled / failed deliveries', onclick: async () => {
+        const bad = all.filter(x => x.st === 'failed');
+        if (!await confirmBox(`Delete ${bad.length} clip(s) of deliveries that did not go through (${fmtBytes(bad.reduce((a, x) => a + x.f.size, 0))})? Successful clips stay.`)) return;
+        for (const x of bad) await M.call('proof:delete', x.f.name).catch(() => {});
+        if (bad.some(x => x.f.name === VP.sel)) VP.sel = null;
+        VP.list = null; render(); toast(`Deleted ${bad.length} clip(s)`, 'good');
+      } }, `Delete failed (${badN})`) : null,
       h('button', { class: 'btn', onclick: () => M.call('open:path', dir) }, mxSvg('folder', 13), 'Folder'),
       h('button', { class: 'btn primary', onclick: () => { VP.list = null; VP.deliv = null; render(); } }, mxSvg('refresh', 13), 'Refresh')),
     h('div', { class: 'mx-folder' }, mxSvg('folder', 13), h('span', { class: 'muted' }, 'Saving to: '), h('span', { class: 'mono grow' }, dir, ' (default)'),
+      h('span', { class: 'muted', title: 'Off: a clip of a cancelled / failed delivery is not saved' }, 'Keep failed clips'), sw(!!(S.settings.delivery || {}).keepFailedProof, v => saveSettings({ delivery: { keepFailedProof: v } }).then(render)),
       h('span', { class: 'muted' }, 'Record buyer trades'), sw(!!(S.settings.delivery || {}).recordProof, v => saveSettings({ delivery: { recordProof: v } }).then(render))),
     h('div', { class: 'mx-vsplit' },
       h('div', { class: 'mx-vlist' },

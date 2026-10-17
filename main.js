@@ -967,6 +967,13 @@ function ipc() {
   // <order>__<account>-<ms>.webm + .json sidecar; the clip is linked to the ledger entries of that
   // order and account made while it recorded
   handle('proof:save', async (orderId, b64, meta = {}) => {
+    // only trades that went through are kept: a clip of a cancelled / failed delivery is dropped
+    // (Video Proof → "Keep failed clips" keeps them)
+    const dd = (store.get('deliveries') || {})[orderId];
+    if (dd && ['cancelled', 'manual'].includes(dd.state) && !(store.get('settings').delivery || {}).keepFailedProof) {
+      store.log('info', `[Proof] ${orderId}: delivery did not go through - clip not kept`);
+      return null;
+    }
     const acct = meta && meta.account ? '__' + String(meta.account).replace(/[^\w]/g, '') : '';
     const name = `${String(orderId || 'manual').replace(/[^\w-]/g, '')}${acct}-${Date.now()}.webm`;
     const f = path.join(proofDir(), name);
