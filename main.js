@@ -86,6 +86,7 @@ async function refreshAvatars() {
 const autoScan = {
   running: false, stopFlag: false, total: 0, done: 0, failed: 0, current: [], log: [],
   waiters: {},
+  hostId: null, hostOpened: false, waitSince: {},
   say(msg, level = 'info') { this.log.push({ t: Date.now(), msg, level }); if (this.log.length > 300) this.log.shift(); store.log(level, '[AutoScan] ' + msg); this.emit(); },
   state() { return { running: this.running, total: this.total, done: this.done, failed: this.failed, current: this.current, log: this.log, batch: (store.get('settings').autoscan || {}).batch || 3, ids: (store.get('settings').autoscan || {}).ids || null }; },
   emit() { send('autoscan', this.state()); },
@@ -95,7 +96,39 @@ const autoScan = {
     const w = this.waiters[k];
     if (w) { delete this.waiters[k]; w({ ok: true, noGen, count: count != null ? count : (r && r.added) || 0 }); }
   },
+  host() { return this.hostId ? store.get('accounts').find(x => x.id === this.hostId) || null : null; },
+  // an account's own scanner (SCRIPT accounts) may also answer for its own base
   wants(account) { return !!this.waiters[String(account || '').toLowerCase()]; },
+  // the scanning account sends a fresh scan of every base in the server while accounts still wait
+  wantsServer(account) {
+    const h = this.host();
+    return !!(this.running && h && h.username.toLowerCase() === String(account || '').toLowerCase() && Object.keys(this.waiters).length);
+  },
+  // A server scan from the scanning account: every base that belongs to an account this run waits
+  // for becomes that account's inventory, once the base is complete (the game's own pet count is
+  // reached: a player who just joined streams in for a few seconds).
+  onServerScan(d) {
+    if (!this.running || !d || !Array.isArray(d.bases)) return;
+    for (const b of d.bases) {
+      const k = String(b.owner || '').toLowerCase();
+      if (!k || !this.waiters[k]) continue;
+      const pets = Array.isArray(b.pets) ? b.pets : [];
+      // without the game's count (its data not on the scanning client yet, so no uuids either) a
+      // base is only taken after 90 s of waiting
+      if (b.expected == null ? (!pets.length || Date.now() - (this.waitSince[k] || 0) < 90000) : pets.length < b.expected) continue;
+      const r = importPets({ username: b.owner, userId: b.userId, pets, expected: b.expected, traitsKnown: true, remote: true }, null, { replace: true, onlySaved: true });
+      if (!r || r.skipped === true || r.incomplete) continue;
+      store.log('info', `[Scanner] ${b.owner}: ${r.added} pets synced (server scan by @${d.by})`);
+      send('pets:changed');
+      this.onImport(b.owner, r, pets.length, pets.filter(p => !(Number(p.gen) > 0)).length);
+    }
+  },
+  // the account that scans the server: a SCRIPT account (in game first, then one chosen for this run,
+  // then any logged-in one) - by state, never by name
+  pickHost(sel = []) {
+    const cands = store.get('accounts').filter(x => !x.legit && x.cookieEnc && x.username);
+    return cands.find(x => launcher.isOnline(x)) || cands.find(x => sel.includes(x.id)) || cands[0] || null;
+  },
   async start({ ids, batch } = {}) {
     if (this.running) return this.state();
     ids = Array.isArray(ids) ? ids : [];
@@ -104,104 +137,73 @@ const autoScan = {
     store.patchSettings({ autoscan: { batch, ids } });
     if (!accts.length) { this.say('No logged-in accounts selected', 'warn'); return this.state(); }
     if (!String((store.get('settings').launcher || {}).privateServer || '').trim()) { this.say('No private server link set - Auto Scan never opens accounts in a public server', 'error'); return this.state(); }
-    if ((store.get('settings').scanner || {}).autoexec === false) { this.say('Auto Scanner is off, so the scanner is not in autoexec and opened accounts would never scan. Turn on Auto Scanner (Roblox Accounts) first.', 'error'); return this.state(); }
+    if ((store.get('settings').scanner || {}).autoexec === false) { this.say('Auto Scanner is off, so the scanner is not in autoexec and the scanning account would never scan. Turn on Auto Scanner (Roblox Accounts) first.', 'error'); return this.state(); }
     if (!lastAutoexec.some(f => /zotac_scanner\.lua$/i.test(f))) syncAutoexec();
-    Object.assign(this, { running: true, stopFlag: false, total: accts.length, done: 0, failed: 0, current: [], hostP: null, hostId: null, hostLaunched: null, remote: {}, scanJobs: {} });
-    // Legit accounts in this run: the script account that scans them is chosen now, so its own scan
-    // (when it is in the run) does not close it before the Legit ones are done
-    if (accts.some(x => x.legit)) { const h = this.pickHost(ids); this.hostId = h ? h.id : null; }
-    this.say(`Started: ${accts.length} account(s), ${batch} per batch`);
+    const host = this.pickHost(ids);
+    if (!host) { this.say('Auto Scan needs one logged-in account in SCRIPT mode: it joins with the chosen accounts and scans the whole server (Roblox Accounts → SCRIPT)', 'error'); return this.state(); }
+    Object.assign(this, { running: true, stopFlag: false, total: accts.length, done: 0, failed: 0, current: [], waiters: {}, waitSince: {}, hostId: host.id, hostOpened: false });
+    this.say(`Started: ${accts.length} account(s), ${batch} per batch - @${host.username} scans the server`);
     (async () => {
-      // Legit accounts in batches of their own, after the others: the script account that scans
-      // them is in game by then (its own scan) or gets opened once
-      const groups = [];
-      for (const list of [accts.filter(x => !x.legit), accts.filter(x => x.legit)]) for (let i = 0; i < list.length; i += batch) groups.push(list.slice(i, i + batch));
-      for (let g = 0; g < groups.length && !this.stopFlag; g++) {
-        const group = groups[g];
-        this.current = group.map(a => a.username);
-        this.say(`Batch ${g + 1}: ${this.current.map(u => '@' + u).join(', ')}`);
-        await Promise.all(group.map((a, j) => this.scanOne(a, j * 2000)));
-      }
+      try {
+        if (await this.ensureHost(host)) {
+          const others = accts.filter(a => a.id !== host.id);
+          if (accts.some(a => a.id === host.id)) await this.batchOf([host], 'Scanning account');
+          for (let i = 0; i < others.length && !this.stopFlag; i += batch) await this.batchOf(others.slice(i, i + batch), `Batch ${i / batch + 1}`);
+        } else {
+          this.failed = accts.length;
+        }
+      } catch (e) { this.say('Auto Scan stopped: ' + e.message, 'error'); }
       this.say(this.stopFlag ? 'Stopped' : `Finished: ${this.done} scanned, ${this.failed} failed`);
-      this.running = false; this.current = []; this.emit();
-      // the script account Auto Scan opened to scan the Legit accounts: closed when nothing needs it
-      const h = this.hostLaunched && store.get('accounts').find(x => x.id === this.hostLaunched);
-      if (h && !store.get('jobs').some(j => j.accountId === h.id && ['pending', 'running'].includes(j.status))) launcher.closeGame(h.username).catch(() => {});
+      this.running = false; this.current = []; this.waiters = {}; this.emit();
+      // the scanning account is closed only when Auto Scan opened it and no delivery needs it
+      if (this.hostOpened && !store.get('jobs').some(j => j.accountId === host.id && ['pending', 'running'].includes(j.status))) launcher.closeGame(host.username).catch(() => {});
       send('pets:changed');
     })();
     return this.state();
+  },
+  // the scanning account in the private server with its scripts running (it stays for the whole run)
+  async ensureHost(host) {
+    if (launcher.isOnline(host)) return true;
+    try {
+      const r = await launcher.launch(host.id, {});
+      if (!r || !r.skipped) this.hostOpened = true;
+      this.say(`@${host.username}: ${r && r.skipped ? r.skipped : 'launched'} - waiting for its scripts`);
+    } catch (e) { this.say(`@${host.username}: ${e.message}`, 'error'); return false; }
+    for (let i = 0; i < 90 && !this.stopFlag; i++) {
+      if (launcher.isOnline(host)) return true;
+      await new Promise(r => setTimeout(r, 2000));
+    }
+    if (!this.stopFlag) this.say(`@${host.username}: its scripts never talked to Zotac in 3 minutes (is zotac_scanner.lua in its executor's autoexec?)`, 'error');
+    return false;
+  },
+  async batchOf(group, label) {
+    this.current = group.map(a => a.username);
+    this.say(`${label}: ${this.current.map(u => '@' + u).join(', ')}`);
+    await Promise.all(group.map((a, j) => this.scanOne(a, j * 2000)));
   },
   async scanOne(a, delay) {
     await new Promise(r => setTimeout(r, delay));
     if (this.stopFlag) return;
     const k = a.username.toLowerCase();
-    // a Legit account takes longer: the script account (maybe launched first) walks over to its base
-    const limit = a.legit ? 480000 : 180000;
-    const result = new Promise(res => { this.waiters[k] = res; setTimeout(() => { if (this.waiters[k] === res) { delete this.waiters[k]; res({ ok: false, why: `no scan within ${limit / 60000} minutes (${a.legit ? 'did the script account reach its base? are both scripts in its autoexec?' : 'is the scanner in your executor\'s autoexec?'})` }); } }, limit); });
-    const already = launcher.isOnline(a);
-    // Legit = real Roblox without the executor: no scanner can run in it, and Zotac never opens it
-    // with the executor. A SCRIPT account scans it instead (it walks to the front of that base).
-    if (a.legit) return this.scanLegit(a, k, result);
-    if (already) this.say(`@${a.username}: already in game - asking its scanner for a fresh scan`);
-    else {
-      try { await launcher.launch(a.id, { force: true }); this.say(`@${a.username}: launched, waiting for the base to load`); }
-      catch (e) { delete this.waiters[k]; this.failed++; this.say(`@${a.username}: ${e.message}`, 'error'); return; }
+    const isHost = a.id === this.hostId;
+    this.waitSince[k] = Date.now();
+    const result = new Promise(res => { this.waiters[k] = res; setTimeout(() => { if (this.waiters[k] === res) { delete this.waiters[k]; res({ ok: false, why: 'its base was not in the server scan within 4 minutes (did it join the private server?)' }); } }, 240000); });
+    let opened = false;
+    if (!isHost) {
+      try {
+        // Legit = real Roblox without the executor (Zotac never opens a Legit account with it)
+        const r = await launcher.launch(a.id, { legit: !!a.legit });
+        opened = !(r && r.skipped);
+        this.say(`@${a.username}: ${opened ? (a.legit ? 'opened with real Roblox (Legit)' : 'launched') : 'already in game'}, waiting for its base in the server scan`);
+      } catch (e) { if (this.waiters[k]) delete this.waiters[k]; this.failed++; this.say(`@${a.username}: ${e.message}`, 'error'); return; }
     }
     const r = await result;
-    if (r.ok) { this.done++; this.say(`@${a.username}: scanned (${r.count} pets)`); }
+    if (r.ok) { this.done++; this.say(`@${a.username}: scanned (${r.count} pets)${r.noGen ? ` - ${r.noGen} without gen/s (name tag out of range; a pet Zotac knew keeps its gen/s)` : ''}`); }
     else { this.failed++; this.say(`@${a.username}: ${r.why}`, 'warn'); }
     // only the windows Auto Scan opened, and never one that is busy with a delivery job
     const busy = () => store.get('jobs').some(j => j.accountId === a.id && ['pending', 'running'].includes(j.status));
-    // the script account that scans the Legit accounts stays open until the run ends
-    if (!already && a.id === this.hostId) { this.hostLaunched = a.id; this.say(`@${a.username}: kept open, it scans the Legit accounts`); return; }
-    if (!already) setTimeout(() => { if (!busy()) launcher.closeGame(a.username).catch(() => {}); else this.say(`@${a.username}: kept open, it has a delivery job`); }, 1500);
+    if (opened) setTimeout(() => { if (!busy()) launcher.closeGame(a.username).catch(() => {}); else this.say(`@${a.username}: kept open, it has a delivery job`); }, 1500);
   },
-  // --- Legit accounts: scanned by a SCRIPT account in the same private server ---
-  remote: {},   // script account (lower case) -> { username, userId, at }: the base its scanner reads now
-  wantsRemote(account) { return this.remote[String(account || '').toLowerCase()] || null; },
-  // the script account for this run: one already in game, else a logged-in SCRIPT account is opened
-  // (chosen by state, never by name: in game first, then one this run scans anyway)
-  pickHost(sel = []) {
-    const cands = store.get('accounts').filter(x => !x.legit && x.cookieEnc && x.username);
-    return cands.find(x => launcher.isOnline(x)) || cands.find(x => sel.includes(x.id)) || cands[0] || null;
-  },
-  scriptHost() {
-    if (this.hostP) return this.hostP;
-    this.hostP = (async () => {
-      const pick = store.get('accounts').find(x => x.id === this.hostId) || this.pickHost();
-      if (!pick) return null;
-      this.hostId = pick.id;
-      // in game already (also when its own scan in this run opened it: Legit accounts come last)
-      if (launcher.isOnline(pick)) return pick;
-      try { await launcher.launch(pick.id, { force: true }); this.hostLaunched = pick.id; this.say(`@${pick.username}: opened as the script account that scans the Legit accounts`); }
-      catch (e) { this.say(`@${pick.username}: could not open it as the script account: ${e.message}`, 'error'); return null; }
-      for (let i = 0; i < 90 && !this.stopFlag && !launcher.isOnline(pick); i++) await new Promise(r => setTimeout(r, 2000));
-      return pick;
-    })();
-    return this.hostP;
-  },
-  async scanLegit(a, k, result) {
-    const fail = why => { if (this.waiters[k]) { const w = this.waiters[k]; delete this.waiters[k]; w({ ok: false, why }); } };
-    const host = await this.scriptHost();
-    if (!host) { fail('Legit mode, and no logged-in account in SCRIPT mode can scan it (set one to SCRIPT on Roblox Accounts)'); }
-    let opened = false, job = null;
-    if (host && !this.stopFlag) {
-      const already = launcher.isOnline(a);
-      try {
-        if (!already) { await launcher.launch(a.id, { legit: true, force: true }); opened = true; }
-        job = delivery.queueScanJob(host, a);
-        this.scanJobs[job.id] = k;
-        this.say(`@${a.username}: ${already ? 'already in game' : 'opened with real Roblox (Legit)'} - @${host.username} walks to its base and scans it`);
-      } catch (e) { fail(e.message); }
-    }
-    const r = await result;
-    if (job) { delete this.scanJobs[job.id]; delivery.endScanJob(job.id, r.ok, r.ok ? 'scanned' : r.why); }
-    if (host) delete this.remote[host.username.toLowerCase()];
-    if (r.ok) { this.done++; this.say(`@${a.username}: scanned by @${host.username} (${r.count} pets)${r.noGen ? ` - ${r.noGen} without gen/s (name tags not in range)` : ''}`); }
-    else { this.failed++; this.say(`@${a.username}: ${r.why}`, 'warn'); }
-    if (opened) setTimeout(() => launcher.closeGame(a.username).catch(() => {}), 1500);
-  },
-  scanJobs: {},   // scan job id -> waiting account (lower case)
   stop() { this.stopFlag = true; for (const k of Object.keys(this.waiters)) { const w = this.waiters[k]; delete this.waiters[k]; w({ ok: false, why: 'stopped' }); } this.say('Stopping...'); return this.state(); }
 };
 
@@ -342,19 +344,7 @@ function wire() {
   launcher.legit.on('progress', p => send('legit:progress', p));
   launcher.on('launched', () => send('launcher:changed'));
   delivery.on('job', j => launcher.onJob(j));
-  // Auto Scan of a Legit account: the script account's agent stands in front of its base, so the
-  // script account's scanner reads that base now
-  delivery.on('scanAtBase', j => { autoScan.remote[String(j.account).toLowerCase()] = { username: j.fromUsername, userId: j.fromUserId, at: Date.now() }; autoScan.say(`@${j.account} is at @${j.fromUsername}'s base - scanning`); });
-  // the scan job failed in game (never joined, base not found, script never connected...)
-  delivery.on('scanJob', (j, ok, reason) => {
-    const k = autoScan.scanJobs[j.id];
-    if (!k || !autoScan.waiters[k]) return;
-    const w = autoScan.waiters[k];
-    const end = why => { if (autoScan.waiters[k] === w) { delete autoScan.waiters[k]; w({ ok: false, why }); } };
-    // the agent waited at the base and went home, but no scan came in: the scanner is not running there
-    if (ok) setTimeout(() => end(`@${j.account} stood at the base but its scanner sent nothing (is zotac_scanner.lua running in @${j.account}? Auto Scanner switch on Roblox Accounts)`), 20000);
-    else end(`@${j.account} could not scan it: ${reason || 'unknown'}`);
-  });
+
   // Security mode: the stock account a steal takes from is opened with real Roblox (never the
   // executor) and closed again afterwards, only when Zotac opened it for that
   // the recorded way into a base for the steal walk (userData/base-route.json wins over the bundled one)
@@ -412,7 +402,7 @@ function wire() {
   ipcMain.on('bridge:event', (_e, { type, payload }) => { if (type === 'talk:message') delivery.onMessage(payload); });
 
   try { syncAutoexec(); } catch (e) { store.log('warn', '[Autoexec] ' + e.message); }
-  startLocalServer({ store, bridge, delivery, wantRescan: acc => autoScan.wants(acc), wantRemote: acc => autoScan.wantsRemote(acc), onRemoteError: (user, err, by) => { const k = String(user || '').toLowerCase(); const w = autoScan.waiters[k]; if (w) { delete autoScan.waiters[k]; w({ ok: false, why: `@${by} could not scan it: ${err || 'unknown'}` }); } }, onServerScan: saveServerScan, onArt: a => { try { art.remember(a); } catch (e) { store.log('warn', '[Scanner] art: ' + e.message); } }, onAgentClosing: acc => { launcher.markClosing(acc); setTimeout(() => launcher.closeGame(acc).catch(() => {}), 2500); }, onClientError: (acc, msg) => launcher.clientError(acc, msg), importScan: data => { const r = importPets(data, null, { replace: true, onlySaved: true }); if (r.skipped === true) return r; refreshAvatarsSoon(); const noGen = data && data.remote && Array.isArray(data.pets) ? data.pets.filter(p => !(Number(p.gen) > 0)).length : 0; autoScan.onImport(data && data.username, r, data && Array.isArray(data.pets) ? data.pets.length : null, noGen); send('pets:changed'); store.log('info', `[Scanner] ${data && data.username}: ${r.added} pets synced`); return r; }, onCookies: () => { send('auth:changed'); afterLogin(); } });
+  startLocalServer({ store, bridge, delivery, wantRescan: acc => autoScan.wants(acc), wantServer: acc => autoScan.wantsServer(acc), onServerScan: d => { saveServerScan(d); autoScan.onServerScan(d); }, onArt: a => { try { art.remember(a); } catch (e) { store.log('warn', '[Scanner] art: ' + e.message); } }, onAgentClosing: acc => { launcher.markClosing(acc); setTimeout(() => launcher.closeGame(acc).catch(() => {}), 2500); }, onClientError: (acc, msg) => launcher.clientError(acc, msg), importScan: data => { const r = importPets(data, null, { replace: true, onlySaved: true }); if (r.skipped === true) return r; refreshAvatarsSoon(); const noGen = data && data.remote && Array.isArray(data.pets) ? data.pets.filter(p => !(Number(p.gen) > 0)).length : 0; autoScan.onImport(data && data.username, r, data && Array.isArray(data.pets) ? data.pets.length : null, noGen); send('pets:changed'); store.log('info', `[Scanner] ${data && data.username}: ${r.added} pets synced`); return r; }, onCookies: () => { send('auth:changed'); afterLogin(); } });
 }
 
 async function afterLogin() {

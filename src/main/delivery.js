@@ -638,8 +638,6 @@ class Delivery extends EventEmitter {
   async jobEvent(id, body = {}) {
     const j = this.store.get('jobs').find(x => x.id === id);
     if (!j || j.status !== 'running') return false;
-    // Auto Scan: the script account stands in front of the Legit account's base, its scanner reads it now
-    if (body.event === 'at_base' && j.kind === 'scan') { j.startedAt = Date.now(); this.store.save(); this.emit('scanAtBase', j); return true; }
     if (body.event === 'buyer_offline') {
       // waiting for the buyer to come online: not a failure, the run timer restarts, told once
       j.startedAt = Date.now();
@@ -749,27 +747,6 @@ class Delivery extends EventEmitter {
     }
   }
 
-  // Auto Scan of an account in Legit mode: the script account's agent walks to the front of its base
-  // and its scanner reads it there (no order, nothing traded)
-  queueScanJob(host, acct) {
-    const job = {
-      id: rid(6), kind: 'scan', orderId: null, accountId: host.id, account: host.username,
-      fromAccountId: acct.id, fromUsername: acct.username, fromUserId: acct.robloxUserId || null, pets: [],
-      status: 'pending', createdAt: Date.now(), closeWhenIdle: false, route: this.baseRoute ? this.baseRoute() : null
-    };
-    this.store.get('jobs').push(job);
-    this.store.save();
-    this.emit('job', job);
-    return job;
-  }
-  // the scan is in (or Auto Scan gave up): the agent stops waiting at the base and walks home
-  endScanJob(id, ok, reason) {
-    const j = this.store.get('jobs').find(x => x.id === id);
-    if (!j || !['pending', 'running'].includes(j.status)) return;
-    j.status = ok ? 'done' : 'cancelled'; j.reason = reason || null; j.finishedAt = Date.now();
-    this.store.save(); this.emit('job', j);
-  }
-
   // the agent asks whether its job is still wanted: anything but running (stopped, timed out) = stop
   jobStatus(id) { const j = this.store.get('jobs').find(x => x.id === id); return !j ? 'gone' : j.cancelRequested ? 'cancelled' : j.status; }
 
@@ -840,7 +817,6 @@ class Delivery extends EventEmitter {
     if (!ok && extra && extra.debug) { j.debug = String(extra.debug).slice(0, 800); this.log('warn', `Job ${id}: game saw ${j.debug}`); }
     this.store.save(); this.emit('job', j);
     if (j.kind === 'steal') { await this.stealResult(j, ok, reason, moved); return true; }   // stock -> mother, not a delivery
-    if (j.kind === 'scan') { this.emit('scanJob', j, ok, reason); return true; }   // Auto Scan of a Legit account (main)
     const d = this.map[j.orderId];
     // a pet really left for a buyer (agent checked the base): remembered for good, test trades too
     if (ok) {

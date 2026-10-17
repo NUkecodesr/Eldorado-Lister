@@ -129,7 +129,7 @@ async function openAutoScan() {
       h('div', { class: 'as-bar' }, h('i', { style: { width: pct + '%' } })),
       h('div', { class: 'as-card' }, h('div', { class: 'as-sel' }, h('span', null, '‹› EXECUTOR SCRIPT (AUTOEXEC)'), h('div', { class: 'grow' }),
           h('button', { class: 'btn sm', onclick: async () => xCopy(await M.call('scanner:autoexecScript'), 'Scanner script copied') }, '⎘ Copy script')),
-        h('small', { class: 'muted' }, 'Zotac puts this scanner (and the delivery script) into your executor\'s autoexec by itself (Synapse Z, AppData executors, and the folders added on Auto Delivery). Each opened account scans its base, Zotac imports it and closes that Roblox.')),
+        h('small', { class: 'muted' }, 'One account in SCRIPT mode joins the private server first and stays for the whole run; then the chosen accounts join batch by batch (Legit ones with real Roblox). The SCRIPT account\'s scanner (in your executor\'s autoexec, put there by Zotac) reads every base in the server and updates each chosen account\'s inventory, then that batch\'s Roblox windows close.')),
       h('div', { class: 'as-log', 'data-head': true }, (st.log || []).length ? st.log.slice().reverse().map(l => h('div', { class: 'l-' + l.level }, `${new Date(l.t).toLocaleTimeString()}  ${l.msg}`))
         : h('div', { class: 'muted' }, 'No runs yet — set the batch size and press Start.')));
     restoreScroll(body, boxes);

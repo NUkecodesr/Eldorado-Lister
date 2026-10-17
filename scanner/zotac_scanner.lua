@@ -680,13 +680,17 @@ local function scanServer(includeEmpty)
     local mine = ownPlotName and plots:FindFirstChild(ownPlotName)
     local bases = {}
     for _, plot in ipairs(plots:GetChildren()) do
-        local okR, pets = pcall(readPlot, plot, overheads, used, false)
-        if not okR or type(pets) ~= "table" then pets = {} end
+        local okR, pets, animals = pcall(readPlot, plot, overheads, used, false)
+        if not okR or type(pets) ~= "table" then pets, animals = {}, nil end
         local name, display, uid = ownerInfo(plot)
         if includeEmpty or name or #pets > 0 then
             local total = 0
             for _, p in ipairs(pets) do total += (p.gen or 0) end
-            table.insert(bases, {plot = plot.Name, owner = name, displayName = display, userId = uid, mine = plot == mine or uid == LP.UserId, pets = pets, totalGen = total, empty = not name and #pets == 0})
+            -- the game's own pet count for that base (nil until its data reached this client): Zotac
+            -- only takes a base as an inventory once all of its pets are in
+            local expected = nil
+            if type(animals) == "table" then expected = 0; for _, a in pairs(animals) do if type(a) == "table" and type(a.Index) == "string" then expected += 1 end end end
+            table.insert(bases, {plot = plot.Name, owner = name, displayName = display, userId = uid, mine = plot == mine or uid == LP.UserId, pets = pets, expected = expected, totalGen = total, empty = not name and #pets == 0})
         end
     end
     table.sort(bases, function(a, b)
@@ -929,58 +933,20 @@ local function rescanWanted()
     })
     if not ok or not res or res.StatusCode ~= 200 then return false end
     local okD, d = pcall(HttpService.JSONDecode, HttpService, res.Body)
-    return okD and type(d) == "table" and d.rescan == true, okD and type(d) == "table" and type(d.remote) == "table" and d.remote or nil
+    if not okD or type(d) ~= "table" then return false end
+    return d.rescan == true, d.server == true
 end
--- Auto Scan of an account in Legit mode: its base is read from here (this account's delivery
--- script has walked to the front of it, so the name tags with gen/s are in range) and sent to Zotac
--- under that account's name. Only reads what this client already has.
-local remoteDone = {}
-local function scanRemote(req)
-    local want = string.lower(tostring(req.username or ""))
-    if want == "" or remoteDone[want .. tostring(req.at)] then return end
-    remoteDone[want .. tostring(req.at)] = true
-    local plots = workspace:FindFirstChild("Plots")
-    local target, owner, display, uid
-    for _, plot in ipairs(plots and plots:GetChildren() or {}) do
-        local n, dn, id = ownerInfo(plot)
-        if n and (string.lower(n) == want or (req.userId and id == tonumber(req.userId))) then target, owner, display, uid = plot, n, dn, id break end
-    end
-    if not target then post("/scanner/remote", {by = LP.Name, username = req.username, error = "base not found in this server"}) return end
-    -- a player who just joined: the game's own data for that base (pet list with uuids) arrives a
-    -- little later than its models. Wait for it (max 30 s) so the pets come with their uuids
-    local tD = os.clock()
-    while running and os.clock() - tD < 30 do
-        local list = plotAnimalList(target.Name)
-        if list then
-            local n = 0
-            for _, a in pairs(list) do if type(a) == "table" and type(a.Index) == "string" then n += 1 end end
-            if petCount(target) >= n then break end
-        end
-        task.wait(1)
-    end
-    -- the name tags stream in as this account gets close: wait (max 20 s) until every pet has its gen/s
-    local t0, pets, animals, info = os.clock(), nil, nil, nil
-    repeat
-        pets, animals, info = readPlot(target, readOverheads(), {}, false)
-        local withGen = 0
-        for _, p in ipairs(pets) do if (p.gen or 0) > 0 then withGen += 1 end end
-        if #pets > 0 and withGen >= #pets then break end
-        task.wait(1)
-    until os.clock() - t0 > 20 or not running
-    local expected = nil
-    if animals then expected = 0; for _, a in pairs(animals) do if type(a) == "table" and type(a.Index) == "string" then expected += 1 end end end
-    local ok, why = post("/scanner/import", {expected = expected, username = owner, userId = uid, displayName = display, scannedAt = os.time(), pets = pets, traitsKnown = animals ~= nil, uuidInfo = info, remote = true, by = LP.Name})
-    if not ok then post("/scanner/remote", {by = LP.Name, username = req.username, error = "import failed: " .. tostring(why)}) end
-end
+-- rescan = Auto Scan wants this account's own base again; server = this account is Auto Scan's
+-- scanning account: every base in the server is sent (the chosen accounts' bases become their inventory)
 if SYNC then task.spawn(function()
     local t = 0
     while running do
         task.wait(5)
         if not running then break end
         t += 5
-        local again, remote = rescanWanted()
-        if again then lastSig = nil; pcall(runOnce, false); pcall(runServer, true) end
-        if remote then pcall(scanRemote, remote) end
+        local again, server = rescanWanted()
+        if again then lastSig = nil; pcall(runOnce, false) end
+        if again or server then pcall(runServer, true) end
         if t % 30 == 0 then heartbeat() end
     end
 end) end

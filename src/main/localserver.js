@@ -7,7 +7,7 @@ const crypto = require('crypto');
 const NOISE = /^(_ga|_gid|_gcl|_fbp|_ttp|_hj|ajs_|amp_|_clck|_clsk|intercom|__stripe|_uet|mp_|_tt_|ttcsid|_scid|_rdt|_pin|__hs|hubspot|_dd_s|OptanonConsent)/i;
 let lastCookieSig = '';
 
-function startLocalServer({ onClientError, store, bridge, delivery, importScan, onServerScan, onArt, wantRescan, wantRemote, onRemoteError, onCookies, onAgentClosing }) {
+function startLocalServer({ onClientError, store, bridge, delivery, importScan, onServerScan, onArt, wantRescan, wantServer, onCookies, onAgentClosing }) {
   const port = store.get('settings').localPort || 47321;
   const server = http.createServer(async (req, res) => {
     const send = (code, obj) => {
@@ -60,21 +60,16 @@ function startLocalServer({ onClientError, store, bridge, delivery, importScan, 
         return send(200, { ok: true, ...importScan(body) });
       }
 
-      // Server scan (in-game script): every base in the Roblox server the scanner is in. Read only,
-      // kept for the Server Scan page, never mixed into your own pets.
-      // the scanner asks every few seconds whether Auto Scan wants a fresh scan of its account
+      // the scanner asks every few seconds whether Auto Scan wants a fresh scan of its own account
+      // (rescan) or of every base in the server (server: it is Auto Scan's scanning account)
       if (url.pathname === '/scanner/wanted' && req.method === 'GET') {
         if (token !== s.agentToken) return send(401, { error: 'bad token' });
         const acc = url.searchParams.get('account') || '';
-        // remote = a base in this server the scanner should read for Auto Scan (a Legit account's)
-        return send(200, { rescan: !!(wantRescan && wantRescan(acc)), remote: (wantRemote && wantRemote(acc)) || null });
+        return send(200, { rescan: !!(wantRescan && wantRescan(acc)), server: !!(wantServer && wantServer(acc)) });
       }
-      // the scanner could not read a Legit account's base for Auto Scan
-      if (url.pathname === '/scanner/remote' && req.method === 'POST') {
-        if (token !== s.agentToken) return send(401, { error: 'bad token' });
-        onRemoteError && body && onRemoteError(body.username, body.error, body.by);
-        return send(200, { ok: true });
-      }
+
+      // Server scan (in-game script): every base in the Roblox server the scanner is in. Kept for
+      // the Server Scan page; during Auto Scan the bases of the chosen accounts become their inventory.
 
       if (url.pathname === '/scanner/art' && req.method === 'POST') {
         if (token !== s.agentToken) return send(401, { error: 'bad token' });

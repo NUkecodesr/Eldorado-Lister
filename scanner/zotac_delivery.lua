@@ -999,55 +999,6 @@ local function stealPets(job, took)
     end
     return true
 end
--- Auto Scan of an account in Legit mode (real Roblox, no scanner in it): this account walks to the
--- front of that player's base, where the pets' name tags (gen/s) are in range, tells Zotac it is
--- there, waits while this account's scanner reads that base, then walks home. Never enters the base.
-local function visitBase(job)
-    local from = tostring(job.fromUsername or "")
-    if from == "" then return false, "job has no account to scan" end
-    notify("Waiting for @" .. from .. " to join (scan)")
-    local plr, t0, lastWant = nil, os.clock(), os.clock()
-    repeat
-        plr = Players:FindFirstChild(from)
-        if not plr then
-            task.wait(0.3)
-            if os.clock() - lastWant > 5 then lastWant = os.clock(); if not wanted(job) then return false, "cancelled by Zotac" end end
-        end
-    until plr or os.clock() - t0 > STEAL_WAIT_PLAYER or not running
-    if not plr then return false, "@" .. from .. " never joined the private server" end
-    local plot, tp = nil, os.clock()
-    repeat plot = plotOwnedBy(plr); if not plot then task.wait(0.3) end until plot or os.clock() - tp > 60
-    if not plot then return false, "base of @" .. from .. " not found" end
-    local route = type(job.route) == "table" and type(job.route.nodes) == "table" and #job.route.nodes > 1 and job.route or nil
-    local pivot = plot:GetPivot()
-    -- the recorded way in starts on open ground in front of the base; without a route, a spot on the
-    -- line between here and the base, outside its edge
-    local spot
-    if route and route.entry and route.nodes[(tonumber(route.entry) or 0) + 1] then spot = nodeWorld(route, pivot, (tonumber(route.entry) or 0) + 1) end
-    if not spot then
-        local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-        local _, size = plot:GetBoundingBox()
-        local dir = root and ((root.Position - pivot.Position) * Vector3.new(1, 0, 1)) or Vector3.new(0, 0, 1)
-        dir = dir.Magnitude > 0.1 and dir.Unit or Vector3.new(0, 0, 1)
-        spot = pivot.Position + dir * (math.max(size.X, size.Z) / 2 + 8)
-    end
-    log("info", ("scan: walking to the front of @%s's base"):format(from))
-    if not walkStraight(spot, 4, 60) and not walkTo(spot, 5, 60) then log("warn", "scan: did not reach the front of the base - scanning from here") end
-    api("POST", "/jobs/" .. job.id .. "/event", {event = "at_base", plot = plot.Name})
-    notify("At @" .. from .. "'s base - scanning")
-    -- Zotac ends the job once the scan is in (or after 90 s)
-    local tW = os.clock()
-    while running and os.clock() - tW < 90 do
-        task.wait(2)
-        if not wanted(job) then break end
-    end
-    local home = findMyPlot()
-    local hit = home and home:FindFirstChild("DeliveryHitbox", true)
-    local homePos = hit and hit:IsA("BasePart") and hit.Position or (home and home:GetPivot().Position)
-    if homePos and not walkStraight(homePos, 4, 60) then walkTo(homePos, 5, 60) end
-    return true
-end
-
 local function steal(job)
     local took = {}
     local okS, okDone, why = pcall(stealPets, job, took)
@@ -1099,16 +1050,14 @@ while running do
         closeAt = nil
         if job.kind == "steal" then
             log("info", ("job %s: take %d brainrot(s) from @%s's base"):format(job.id, #(job.pets or {}), tostring(job.fromUsername)))
-        elseif job.kind == "scan" then
-            log("info", ("job %s: scan @%s's base"):format(job.id, tostring(job.fromUsername)))
         else
             log("info", ("job %s: %d brainrot(s) -> @%s"):format(job.id, #(job.pets or {}), tostring(job.buyerUsername)))
         end
         lastDebug = nil
-        local ok, okDone, why, moved = pcall(job.kind == "steal" and steal or job.kind == "scan" and visitBase or deliver, job)
+        local ok, okDone, why, moved = pcall(job.kind == "steal" and steal or deliver, job)
         if not ok then okDone, why = false, "script error: " .. tostring(okDone) end
         api("POST", "/jobs/" .. job.id, {status = okDone and "done" or "failed", reason = why, moved = moved, debug = (not okDone) and lastDebug or nil})
-        notify(okDone and (job.kind == "steal" and ("Took the pets from @" .. tostring(job.fromUsername)) or job.kind == "scan" and ("Scanned @" .. tostring(job.fromUsername) .. "'s base") or ("Delivered to @" .. tostring(job.buyerUsername))) or ((job.kind == "scan" and "Scan failed: " or "Delivery failed: ") .. tostring(why)))
+        notify(okDone and (job.kind == "steal" and ("Took the pets from @" .. tostring(job.fromUsername)) or ("Delivered to @" .. tostring(job.buyerUsername))) or ("Delivery failed: " .. tostring(why)))
         log(okDone and "info" or "warn", ("job %s %s%s"):format(job.id, okDone and "done" or "failed", why and (" - " .. why) or ""))
         -- close only after it worked: a failed job is tried again in a moment, in this same game
         if job.closeWhenIdle then closeAt = os.clock() + (okDone and 15 or 90) end
