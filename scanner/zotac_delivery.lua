@@ -639,8 +639,8 @@ local function modelUuid(model)
         local u = normUuid(model:GetAttribute(k))
         if u then return u, "model." .. k end
     end
-    local ok, attrs = pcall(function() return model:GetAttributes() end)
-    if ok then for k, v in pairs(attrs) do local u = normUuid(v); if u then return u, "model." .. k end end end
+    -- only the named uuid attributes: some brainrots (Cash or Card, Flying Dutchman) carry a fixed
+    -- uuid-shaped attribute that is the same on every copy, so "any uuid attribute" gave 10 pets one uuid
     return nil
 end
 
@@ -996,9 +996,11 @@ local function stealPets(job, took)
             local best, bestD = nil, math.huge
             -- the exact pet when the scan gave Zotac its uuid
             if pet.uuid then
+                local hits = {}
                 for _, c in ipairs(plot:GetChildren()) do
-                    if isPetModel(c) and not used[c] and modelUuid(c) == pet.uuid then best, bestD = c, -1 break end
+                    if isPetModel(c) and not used[c] and modelUuid(c) == pet.uuid then table.insert(hits, c) end
                 end
+                if #hits == 1 then best, bestD = hits[1], -1 end
             end
             for _, c in ipairs(bestD < 0 and {} or plot:GetChildren()) do
                 if isPetModel(c) and not used[c] and norm(c.Name) == norm(pet.name) and mutOk(c, pet) then

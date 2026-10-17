@@ -444,6 +444,7 @@ function wire() {
   ipcMain.on('bridge:event', (_e, { type, payload }) => { if (type === 'talk:message') delivery.onMessage(payload); });
 
   try { syncAutoexec(); } catch (e) { store.log('warn', '[Autoexec] ' + e.message); }
+  try { dedupeUuids(); } catch (e) { store.log('warn', '[Scanner] uuid check: ' + e.message); }
   setTimeout(() => { for (const j of store.get('jobs')) if (j.status === 'pending' && Date.now() - (j.createdAt || 0) < 10 * 60000) launcher.onJob(j); }, 8000);
   startLocalServer({ store, bridge, delivery, wantRescan: acc => autoScan.wants(acc), wantServer: acc => autoScan.wantsServer(acc), onServerScan: d => { saveServerScan(d); autoScan.onServerScan(d); }, onArt: a => { try { art.remember(a); } catch (e) { store.log('warn', '[Scanner] art: ' + e.message); } }, onAgentClosing: acc => { launcher.markClosing(acc); setTimeout(() => launcher.closeGame(acc).catch(() => {}), 2500); }, onClientError: (acc, msg) => launcher.clientError(acc, msg), importScan: data => { const r = importPets(data, null, { replace: true, onlySaved: true }); if (r.skipped === true) return r; refreshAvatarsSoon(); const noGen = data && data.remote && Array.isArray(data.pets) ? data.pets.filter(p => !(Number(p.gen) > 0)).length : 0; autoScan.onImport(data && data.username, r, data && Array.isArray(data.pets) ? data.pets.length : null, noGen); send('pets:changed'); store.log('info', `[Scanner] ${data && data.username}: ${r.added} pets synced`); return r; }, onCookies: () => { send('auth:changed'); afterLogin(); } });
 }
@@ -471,6 +472,18 @@ async function afterLogin() {
 
 // Import pets from any supported JSON. replace=true (plot scanner sync) first drops the
 // account's still-available pets, so a rescan does not duplicate them.
+// Scans before 1.22.9 could give many different pets one uuid (a fixed model attribute of some
+// brainrots), and "same uuid = same pet" then swapped their data on rescans. A uuid held by more
+// than one stored pet is removed from all of them (they match by name/mutation/gen/traits again).
+function dedupeUuids() {
+  const by = {};
+  for (const p of store.get('pets')) if (p.uuid) (by[p.uuid] = by[p.uuid] || []).push(p);
+  let n = 0;
+  for (const list of Object.values(by)) if (list.length > 1) for (const p of list) { delete p.uuid; n++; }
+  for (const j of store.get('jobs')) for (const jp of j.pets || []) if (jp.uuid && (by[jp.uuid] || []).length > 1) delete jp.uuid;
+  if (n) { store.log('info', `[Scanner] ${n} pets shared a uuid with another pet - uuid cleared, they match by name/mutation/gen again`); store.save(); }
+  return n;
+}
 function importPets(json, accountId, { replace = false, onlySaved = false } = {}) {
   const raw = typeof json === 'string' ? JSON.parse(json) : json;
   // a scan taken before the base finished loading: pets missing, keep what we have
@@ -507,6 +520,8 @@ function importPets(json, accountId, { replace = false, onlySaved = false } = {}
   }
   const fixed = accounts.find(a => a.id === accountId);
   const items = sab.normalizePetImport(raw, fixed ? fixed.username : '');
+  // one uuid on two pets of the same import is not a real brainrot uuid (see dedupeUuids)
+  { const n = {}; for (const it of items) if (it.uuid) n[it.uuid] = (n[it.uuid] || 0) + 1; for (const it of items) if (it.uuid && n[it.uuid] > 1) delete it.uuid; }
   const added = [];
   let removed = 0;
   let dropped = [];      // unlisted pets of the scanned accounts, re-matched below
@@ -617,6 +632,7 @@ function importPets(json, accountId, { replace = false, onlySaved = false } = {}
     }
   }
   if (onlySaved && !fixed) for (const it of items) if (!it.account) skippedNames.add('(no account in the JSON)');
+  dedupeUuids();   // a uuid this import gave to a pet another account already holds
   store.save(); send('pets:changed');
   return { added: added.length, removed, kept: kept.length, matched: matched.length, accounts: accounts.length, skipped: [...skippedNames] };
 }

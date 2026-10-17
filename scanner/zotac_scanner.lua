@@ -126,8 +126,8 @@ local function modelUuid(model)
         local u = normUuid(model:GetAttribute(k))
         if u then return u, "model." .. k end
     end
-    local ok, attrs = pcall(function() return model:GetAttributes() end)
-    if ok then for k, v in pairs(attrs) do local u = normUuid(v); if u then return u, "model." .. k end end end
+    -- only the named uuid attributes: some brainrots (Cash or Card, Flying Dutchman) carry a fixed
+    -- uuid-shaped attribute that is the same on every copy, so "any uuid attribute" gave 10 pets one uuid
     return nil
 end
 local function entrySlot(a, key)
@@ -575,7 +575,7 @@ local function readPlot(plot, overheads, used, withModels)
             local mutAttr = c:GetAttribute("Mutation")
             local e = takeEntry(entries, c.Name, mu, podiumSlot(podiums, pos), mutAttr or "None")
             local a = e and e.a
-            local uuid = mu or (e and e.uuid) or nil
+            local uuid = (e and e.uuid) or mu or nil
             if uuid then info.withUuid = (info.withUuid or 0) + 1 end
             local mutation = mutAttr or "None"
 
@@ -604,6 +604,9 @@ local function readPlot(plot, overheads, used, withModels)
             })
         end
     end
+    local seenU = {}
+    for _, p in ipairs(pets) do if p.uuid then seenU[p.uuid] = (seenU[p.uuid] or 0) + 1 end end
+    for _, p in ipairs(pets) do if p.uuid and seenU[p.uuid] > 1 then p.uuid = nil; info.dupUuid = (info.dupUuid or 0) + 1 end end
     table.sort(pets, function(x, y) return (x.gen or 0) > (y.gen or 0) end)
     return pets, animals, info
 end
