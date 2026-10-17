@@ -86,12 +86,25 @@ local function findRow(list, name, uid)
     end
     return nil
 end
+local function openTradeMenu()
+    local g = PG:FindFirstChild("TradePlayerList")
+    if g and g.Enabled and g:FindFirstChild("TradePlayerList") and g.TradePlayerList.Visible then return true end
+    local lc = PG:FindFirstChild("LeftCenter")
+    local btn = lc and lc:FindFirstChild("TradePlayerList", true)
+    if not (btn and btn:IsA("GuiButton")) then return false end
+    fire(btn.Activated, nil, 1)
+    local t0 = os.clock()
+    repeat task.wait(0.1) until (g and g.Enabled and g.TradePlayerList.Visible) or os.clock() - t0 > 3
+    return g and g.Enabled and g.TradePlayerList.Visible
+end
 local function sendTrade(name, uid)
+    openTradeMenu()
     local box, list = tradeMenu()
     if not (box and list) then return false, "the game's trade menu is not loaded" end
     local row = findRow(list, name, uid)
     if not row then
-        box.Text = name
+        box.Text = ""
+        for ch in string.gmatch(name, ".") do box.Text = box.Text .. ch; task.wait(0.06) end
         if not fire(box.FocusLost, true, nil) then return false, "trade search box not hooked" end
         local t0 = os.clock()
         repeat RunService.Heartbeat:Wait(); row = findRow(list, name, uid) until row or os.clock() - t0 > 6
