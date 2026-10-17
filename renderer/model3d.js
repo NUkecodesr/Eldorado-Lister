@@ -1,5 +1,5 @@
 // Renders a brainrot's game model (parts sent by the scanner, meshes parsed in main,
-// textures as data URLs) to a transparent 512x512 PNG, seen from the front like in game.
+// textures as data URLs) to a transparent 1024x1024 PNG, seen from the front like in game.
 // cf array (x y z R00..R22, Roblox CFrame components) -> THREE.Matrix4
 function cfMatrix(c) {
   return new THREE.Matrix4().set(c[3], c[4], c[5], c[0], c[6], c[7], c[8], c[1], c[9], c[10], c[11], c[2], 0, 0, 0, 1);
@@ -8,7 +8,7 @@ async function renderModel3D({ parts, meshes, textures, bones = {} }) {
   // per bone: live pose relative to rest (both in model space)
   const delta = {};
   for (const [name, b] of Object.entries(bones || {})) delta[name] = cfMatrix(b.pose).multiply(cfMatrix(b.rest).invert());
-  const S = 512;
+  const S = 1024;
   const canvas = document.createElement('canvas'); canvas.width = S; canvas.height = S;
   const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, preserveDrawingBuffer: true });
   renderer.outputEncoding = THREE.sRGBEncoding;

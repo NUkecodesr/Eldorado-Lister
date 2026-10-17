@@ -70,18 +70,20 @@ class Wiki {
   // data: URL of the brainrot's wiki picture, or null when the wiki has none
   async picture(name) {
     const key = norm(name);
-    const f = path.join(this.dir, key + '.png');
+    // 1024 px copies (cards are 1200 px now); an older 512 px copy is the fallback
+    const f = path.join(this.dir, key + '@1024.png'), old = path.join(this.dir, key + '.png');
     if (fs.existsSync(f)) return dataUrl(fs.readFileSync(f));
     const url = (await this.index())[key];
-    if (!url) return null;
+    if (!url) return fs.existsSync(old) ? dataUrl(fs.readFileSync(old)) : null;
     if (!this.inflight.has(key)) this.inflight.set(key, this.download(url, f).finally(() => this.inflight.delete(key)));
-    return (await this.inflight.get(key)) ? dataUrl(fs.readFileSync(f)) : null;
+    if (await this.inflight.get(key)) return dataUrl(fs.readFileSync(f));
+    return fs.existsSync(old) ? dataUrl(fs.readFileSync(old)) : null;
   }
 
   async download(url, file) {
-    // a 512px copy (the originals are up to 3 MB each, which made card generation time out);
+    // a 1024px copy (the originals are up to 3 MB each, which made card generation time out);
     // format=original keeps it a PNG instead of WebP. Falls back to the full-size file.
-    const scaled = url.replace(/\/revision\/latest(?!\/scale)/, '/revision/latest/scale-to-width-down/512');
+    const scaled = url.replace(/\/revision\/latest(?!\/scale)/, '/revision/latest/scale-to-width-down/1024');
     for (const u of [...new Set([scaled, url])]) {
       for (let attempt = 0; attempt < 2; attempt++) {
         try {

@@ -872,7 +872,7 @@ function imageEditorTab(root, tabs) {
     drawing = true;
     try {
       const r = await renderCardCanvas(previewOpts());
-      const g = cv.getContext('2d'); g.clearRect(0, 0, 600, 600); g.drawImage(r.canvas, 0, 0);
+      const g = cv.getContext('2d'); g.clearRect(0, 0, 600, 600); g.drawImage(r.canvas, 0, 0, 600, 600);
       boxes = r.boxes; paintGuides(); paintHints();
     } catch (e) { console.error(e); } finally { drawing = false; if (again) { again = false; draw(); } }
   };

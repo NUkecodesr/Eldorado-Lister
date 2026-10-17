@@ -1,4 +1,5 @@
-// Automatic listing image: 600x600 card drawn on a canvas, returned as a PNG data URL.
+// Automatic listing image: card laid out on a 600x600 grid, drawn at CARD_SCALE (1200x1200 PNG) so the
+// picture Eldorado shows large is sharp. All layout numbers stay in 600-units.
 // The card is built from layers (background, pet picture, traits row, pet name, M/s label,
 // shop name) placed by an image template (Templates -> Image Editor). Positions are % of the
 // 600px canvas, centre-anchored. The built-in "Default" template is the classic Zotac card.
@@ -73,18 +74,34 @@ function loadImg(src) {
   return p;
 }
 
+// Eldorado's offer image upload takes files up to 10 MB (their eld-file-upload default); cards
+// stay under 3 MB, drawn smaller when a busy picture would make the PNG bigger than that
+const CARD_MAX_BYTES = 3 * 1024 * 1024;
 async function renderListingImage(opts) {
-  return (await renderCardCanvas(opts)).canvas.toDataURL('image/png');
+  let url = '';
+  for (const scale of [CARD_SCALE, 1.6, 1.25, 1]) {
+    url = (await renderCardCanvas({ ...opts, scale })).canvas.toDataURL('image/png');
+    if ((url.length - 22) * 3 / 4 <= CARD_MAX_BYTES) break;
+  }
+  return url;
 }
 
 // Draws the card and returns { canvas, boxes } — boxes are each drawn layer's bounds in px
 // (used by the Image Editor for its dashed guides / hit areas).
-async function renderCardCanvas({ pet, rarity, art, traitArt = [], mutationArt = null, shopName = '', recolor = true, template = null }) {
+const CARD_SCALE = 2;
+async function renderCardCanvas({ pet, rarity, art, traitArt = [], mutationArt = null, shopName = '', recolor = true, template = null, scale = CARD_SCALE }) {
   const T = normImageTemplate(template || activeImageTemplate());
-  const L = T.layers, W = 600;
+  const L = T.layers, W = 600, S = scale;
   const px = v => Math.round(Number(v) * W) / 100;   // % of the canvas -> px (0.01 px grid)
-  const c = document.createElement('canvas'); c.width = W; c.height = W;
+  const c = document.createElement('canvas'); c.width = Math.round(W * S); c.height = Math.round(W * S);
   const g = c.getContext('2d');
+  g.setTransform(S, 0, 0, S, 0, 0);   // draw in 600-units, rendered at S x
+  // shadows ignore the transform: scale them too so the card looks the same as at 600px
+  for (const k of ['shadowBlur', 'shadowOffsetX', 'shadowOffsetY']) {
+    const d = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, k);
+    Object.defineProperty(g, k, { configurable: true, get() { return d.get.call(g) / S; }, set(v) { d.set.call(g, v * S); } });
+  }
+  g.imageSmoothingQuality = 'high';
   const mkey = mutKey(pet.mutation);
   const mutated = mkey !== 'none' && mkey !== 'normal';
   const known = mkey in MUTATION_COLORS;
@@ -220,7 +237,7 @@ async function renderCardCanvas({ pet, rarity, art, traitArt = [], mutationArt =
         const r = Math.min(bw / petImg.width, bh / petImg.height);
         const w = petImg.width * r, hh = petImg.height * r;
         const fx = recolor && mutated ? MUTATION_FX[mkey] : null;
-        const pic = recolor && mutated && known ? tintPicture(petImg, w, hh, pal, mkey, mutIcon) : petImg;
+        const pic = recolor && mutated && known ? tintPicture(petImg, w * S, hh * S, pal, mkey, mutIcon, S) : petImg;
         g.save();
         // glowing mutations get a coloured halo instead of the plain drop shadow
         if (fx && fx.glow) { g.shadowColor = fx.glow; g.shadowBlur = 38; g.shadowOffsetY = 0; }
@@ -299,7 +316,9 @@ function iconPalette(icon) {
   return pal;
 }
 function hexRgb(x) { return [1, 3, 5].map(i => parseInt(x.slice(i, i + 2), 16)); }
-function tintPicture(img, w, hgt, pal, mkey, icon) {
+// k = pixels per 600-unit (the card scale): fixed-size marks (sparkles, stripes) grow with it so
+// the pattern looks the same at any card size
+function tintPicture(img, w, hgt, pal, mkey, icon, k = 1) {
   const c = document.createElement('canvas');
   c.width = Math.max(1, Math.round(w)); c.height = Math.max(1, Math.round(hgt));
   const g = c.getContext('2d');
@@ -354,8 +373,8 @@ function tintPicture(img, w, hgt, pal, mkey, icon) {
     lg.addColorStop(0.25, 'rgba(255,255,255,0)'); lg.addColorStop(0.42, `rgba(255,255,255,${fx.shine})`); lg.addColorStop(0.5, 'rgba(255,255,255,0)');
     g.fillStyle = lg; g.fillRect(0, 0, W, H);
   }
-  if (fx.stars) for (let n = 0; n < fx.stars; n++) { const r = rnd() * 1.8 + 0.6; g.fillStyle = `rgba(255,255,255,${0.5 + rnd() * 0.5})`; g.beginPath(); g.arc(rnd() * W, rnd() * H, r, 0, Math.PI * 2); g.fill(); }
-  if (fx.stripes) { g.globalAlpha = 0.28; g.fillStyle = '#ffffff'; for (let x = -H; x < W; x += 22) { g.beginPath(); g.moveTo(x, H); g.lineTo(x + 10, H); g.lineTo(x + 10 + H, 0); g.lineTo(x + H, 0); g.fill(); } g.globalAlpha = 1; }
+  if (fx.stars) for (let n = 0; n < fx.stars; n++) { const r = (rnd() * 1.8 + 0.6) * k; g.fillStyle = `rgba(255,255,255,${0.5 + rnd() * 0.5})`; g.beginPath(); g.arc(rnd() * W, rnd() * H, r, 0, Math.PI * 2); g.fill(); }
+  if (fx.stripes) { g.globalAlpha = 0.28; g.fillStyle = '#ffffff'; for (let x = -H; x < W; x += 22 * k) { g.beginPath(); g.moveTo(x, H); g.lineTo(x + 10 * k, H); g.lineTo(x + 10 * k + H, 0); g.lineTo(x + H, 0); g.fill(); } g.globalAlpha = 1; }
   const u = Math.max(2, Math.round(Math.min(W, H) / 60));   // pattern size follows the picture size
   if (fx.hatch) {   // Radioactive: dense diagonal hatch over the green
     g.strokeStyle = fx.hatch; g.lineWidth = u * 0.9;
@@ -398,7 +417,7 @@ function tintPicture(img, w, hgt, pal, mkey, icon) {
     g.fillStyle = sh; g.fillRect(0, 0, W, H);
   }
   if (fx.night) {
-    g.strokeStyle = 'rgba(0,0,0,.22)'; g.lineWidth = 1;
+    g.strokeStyle = 'rgba(0,0,0,.22)'; g.lineWidth = k;
     for (let x = 0; x < W; x += u * 3.2) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); }
     for (let y = 0; y < H; y += u * 3.2) { g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); }
     const pts = Array.from({ length: 7 }, () => [W * (0.1 + rnd() * 0.8), H * (0.1 + rnd() * 0.8)]);
@@ -415,7 +434,7 @@ function tintPicture(img, w, hgt, pal, mkey, icon) {
     for (let n = 0; n < fx.sparkle; n++) {
       let x, y, tries = 0;
       do { x = rnd() * W; y = rnd() * H; tries++; } while (tries < 20 && d[(Math.floor(y) * W + Math.floor(x)) * 4 + 3] < 200);
-      const r = 4 + rnd() * 7; g.fillStyle = 'rgba(255,255,255,.95)';
+      const r = (4 + rnd() * 7) * k; g.fillStyle = 'rgba(255,255,255,.95)';
       g.beginPath(); g.moveTo(x, y - r); g.quadraticCurveTo(x, y, x + r, y); g.quadraticCurveTo(x, y, x, y + r); g.quadraticCurveTo(x, y, x - r, y); g.quadraticCurveTo(x, y, x, y - r); g.fill();
     }
     g.restore();

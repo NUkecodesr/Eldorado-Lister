@@ -47,7 +47,7 @@ class Art {
       const json = JSON.stringify(model);
       if (fs.existsSync(mf) && fs.readFileSync(mf, 'utf8') === json) continue;
       fs.writeFileSync(mf, json);
-      try { fs.unlinkSync(this.file('render', key)); } catch { /* not rendered yet */ }
+      try { fs.unlinkSync(this.file('render1024', key)); } catch { /* not rendered yet */ }
       n++;
     }
     if (art.shape && Object.keys(art.shape).length) { this.ids.shape = art.shape; this.store.save(); }   // entry layouts of misses, for debugging
@@ -103,7 +103,7 @@ class Art {
     if (this.ids.pets && this.ids.pets[name]) { const u = await this.dataUrl('pets', name); if (u) return u; }
     const keys = [name + '|None', name + '|' + (mutation || 'None')];   // normal model first
     for (const key of keys) {
-      const f = this.file('render', key);
+      const f = this.file('render1024', key);
       if (fs.existsSync(f)) return 'data:image/png;base64,' + fs.readFileSync(f).toString('base64');
       const mf = path.join(this.dir, 'models', norm(key) + '.json');
       if (!fs.existsSync(mf)) continue;
