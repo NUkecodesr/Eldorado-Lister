@@ -344,6 +344,11 @@ function importPets(json, accountId, { replace = false, onlySaved = false } = {}
   const added = [];
   let removed = 0;
   let dropped = [];      // unlisted pets of the scanned accounts, re-matched below
+  let sessionLeft = [];  // pasted pets of the scanned accounts, adopted when the scan shows them
+  // pasted JSON: a pet Zotac already has on that account (scanned inventory or an earlier paste)
+  // is that pet, not a second copy; it shows in Auto List again
+  const have = replace ? [] : store.get('pets').filter(p => p.status !== 'sold' && !p.delivered);
+  const matched = [];
   // pets of deliveries still running or waiting for the seller
   const inDelivery = new Set();
   for (const d of Object.values(store.get('deliveries') || {})) if (d && !['done', 'cancelled'].includes(d.state)) for (const id of d.petIds || []) inDelivery.add(id);
@@ -361,7 +366,9 @@ function importPets(json, accountId, { replace = false, onlySaved = false } = {}
         if ((!it.traits || !it.traits.length) && q && q.length) it.traits = q.shift();
       }
     }
-    // temporary pasted pets are not part of the synced inventory: a rescan leaves them alone
+    // temporary pasted pets are not part of the synced inventory: a rescan never drops them, but
+    // one the scan shows in that base becomes that inventory pet (no second copy)
+    sessionLeft = store.get('pets').filter(p => ids.has(p.accountId) && p.status === 'available' && p.session);
     dropped = store.get('pets').filter(p => ids.has(p.accountId) && p.status === 'available' && !inDelivery.has(p.id) && !p.session);
     store.set('pets', store.get('pets').filter(p => !(ids.has(p.accountId) && p.status === 'available' && !inDelivery.has(p.id) && !p.session)));
     removed = before - store.get('pets').length;
@@ -383,12 +390,19 @@ function importPets(json, accountId, { replace = false, onlySaved = false } = {}
     if (onlySaved && !acct) continue;
     if (replace && acct) {
       const i = listedLeft.findIndex(p => p.accountId === acct.id && sab.norm(p.name) === sab.norm(it.name) && sab.norm(p.mutation) === sab.norm(it.mutation || 'None'));
-      if (i >= 0) { listedLeft.splice(i, 1); continue; }
+      if (i >= 0) { const was = listedLeft.splice(i, 1)[0]; if (was.session) was.session = false; continue; }
       // the exact same pet as an unlisted one Zotac already had: keep that one (same id, price,
       // title, card...) instead of a fresh copy
       const key = sab.petKey({ ...it, mutation: it.mutation || 'None' });
       const j = dropped.findIndex(p => !p._kept && p.accountId === acct.id && sab.petKey(p) === key);
       if (j >= 0) { const old = dropped[j]; old._kept = true; if (it.rarity) old.rarity = it.rarity; store.get('pets').push(old); continue; }
+      const sj = sessionLeft.findIndex(p => p.accountId === acct.id && sab.petKey(p) === key);
+      if (sj >= 0) { const was = sessionLeft.splice(sj, 1)[0]; was.session = false; if (it.rarity) was.rarity = it.rarity; continue; }
+    }
+    if (!replace && acct) {
+      const key = sab.petKey({ ...it, mutation: it.mutation || 'None' });
+      const j = have.findIndex(p => p.accountId === acct.id && sab.petKey(p) === key);
+      if (j >= 0) { const old = have.splice(j, 1)[0]; if (old.alHidden) old.alHidden = false; matched.push(old); continue; }
     }
     const pet = { id: rid(6), accountId: acct ? acct.id : null, name: it.name, mutation: it.mutation || 'None', gen: it.gen || 0, traits: it.traits || [], rarity: it.rarity || '', cost: it.cost || 0, status: it.offerId ? 'listed' : 'available', offerId: it.offerId || null, price: it.price || null, createdAt: Date.now() };
     store.get('pets').push(pet); added.push(pet);
@@ -414,7 +428,7 @@ function importPets(json, accountId, { replace = false, onlySaved = false } = {}
   }
   if (onlySaved && !fixed) for (const it of items) if (!it.account) skippedNames.add('(no account in the JSON)');
   store.save(); send('pets:changed');
-  return { added: added.length, removed, kept: kept.length, accounts: accounts.length, skipped: [...skippedNames] };
+  return { added: added.length, removed, kept: kept.length, matched: matched.length, accounts: accounts.length, skipped: [...skippedNames] };
 }
 
 function scannerScript(which = 'scanner') {
@@ -630,6 +644,28 @@ function ipc() {
     const set = new Set([].concat(ids));
     for (const p of store.get('pets')) if (set.has(p.id)) { Object.assign(p, patch); if (patch.gen !== undefined) p.gen = sab.parseGen(patch.gen); if (patch.status === 'sold' && !p.soldAt) p.soldAt = Date.now(); }
     store.save(); send('pets:changed'); return true;
+  });
+  // Auto List ✕: off Auto List only. A scanned pet stays in its account's inventory (hidden from
+  // Auto List, put back from the "Removed" filter); a pasted (temporary) pet only lived in Auto List,
+  // so it is deleted unless it is listed or sold. Eldorado offers are never touched.
+  handle('pets:autolistRemove', ids => {
+    const set = new Set([].concat(ids));
+    let hidden = 0, deleted = 0;
+    const keep = [];
+    for (const p of store.get('pets')) {
+      if (!set.has(p.id)) { keep.push(p); continue; }
+      if (p.session && p.status === 'available' && !p.orderId) { deleted++; continue; }
+      p.alHidden = true; hidden++; keep.push(p);
+    }
+    store.set('pets', keep); send('pets:changed');
+    return { hidden, deleted };
+  });
+  handle('pets:autolistRestore', ids => {
+    const set = new Set([].concat(ids));
+    let n = 0;
+    for (const p of store.get('pets')) if (set.has(p.id) && p.alHidden) { p.alHidden = false; n++; }
+    store.save(); send('pets:changed');
+    return n;
   });
   handle('pets:delete', ids => { const set = new Set(ids); store.set('pets', store.get('pets').filter(p => !set.has(p.id))); send('pets:changed'); return true; });
   handle('pets:quickFill', (ids, tpl) => {

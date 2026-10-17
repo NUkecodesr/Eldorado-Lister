@@ -183,9 +183,11 @@ document.addEventListener('mousedown', e => {
 PAGES.autolist = async root => {
   const s = S.settings; const al = s.autolist; const rules = s.rules;
   const q = AL.filter.q.toLowerCase();
+  // pets taken off Auto List stay in their account's inventory; the "Removed" filter shows them
+  const removedView = AL.filter.status === 'removed';
   const pets = S.pets.filter(p =>
     (!AL.filter.account || p.accountId === AL.filter.account) &&
-    (AL.filter.status === 'all' || p.status === AL.filter.status) &&
+    (removedView ? !!p.alHidden : !p.alHidden && (AL.filter.status === 'all' || p.status === AL.filter.status)) &&
     (!q || `${p.name} ${p.mutation} ${(p.traits || []).join(' ')} ${p.title || ''}`.toLowerCase().includes(q)))
     .sort((a, b) => AL.sort === 'name' ? AL.dir * String(a.name).localeCompare(String(b.name)) || (b.gen - a.gen) : AL.dir * ((a.gen || 0) - (b.gen || 0)));
   for (const id of [...AL.selected]) if (!S.pets.some(p => p.id === id)) AL.selected.delete(id);
@@ -208,7 +210,7 @@ PAGES.autolist = async root => {
     const r = await run(() => M.call('pets:import', json, target || null));
     if (r) {
       const sk = (r.skipped || []).filter(Boolean);
-      toast(`Added ${r.added} temporary pets${sk.length ? ' — skipped (not a saved account): ' + sk.map(n => n.startsWith('(') ? n : '@' + n).join(', ') : ''}`, r.added ? 'good' : 'error', sk.length ? 9000 : 4200);
+      toast(`Added ${r.added} temporary pets${r.matched ? `, ${r.matched} already in Zotac (shown again, not doubled)` : ''}${sk.length ? ' — skipped (not a saved account): ' + sk.map(n => n.startsWith('(') ? n : '@' + n).join(', ') : ''}`, r.added || r.matched ? 'good' : 'error', sk.length ? 9000 : 5000);
       AL.json = ''; await refreshData(); render();
     }
   };
@@ -251,7 +253,15 @@ PAGES.autolist = async root => {
   };
 
   const markSold = async p => { const pr = await promptBox('Mark as sold (sold outside Zotac)', `Sale price $${p.offerId ? ' — the Eldorado offer stays live, delete it there if needed' : ''}`, p.price || ''); if (pr === null) return; await M.call('pets:markSold', [p.id], pr); AL.selected.delete(p.id); await refreshData(); render(); };
-  const delPet = async p => { if (!await confirmBox(`Delete ${p.name} from the app? (Eldorado offers are not touched)`)) return; await M.call('pets:delete', [p.id]); AL.selected.delete(p.id); await refreshData(); render(); };
+  // off Auto List only: a scanned pet stays in its account's inventory, a pasted one is gone
+  const removeFromList = async ids => {
+    const r = await run(() => M.call('pets:autolistRemove', ids)); if (!r) return;
+    ids.forEach(id => AL.selected.delete(id));
+    toast([r.hidden ? `${r.hidden} removed from Auto List (still in the account inventory; filter "Removed" puts them back)` : '', r.deleted ? `${r.deleted} pasted pet(s) removed` : ''].filter(Boolean).join(' · '), 'good', 6000);
+    await refreshData(); render();
+  };
+  const putBack = async ids => { const n = await run(() => M.call('pets:autolistRestore', ids)); ids.forEach(id => AL.selected.delete(id)); if (n) toast(`${n} back in Auto List`, 'good'); await refreshData(); render(); };
+  const delPet = p => removeFromList([p.id]);
   // open our Searcher prefilled with this brainrot and run the search
   const searchEldorado = p => searchSimilar(p);
 
@@ -298,7 +308,9 @@ PAGES.autolist = async root => {
         if (!ids.length) return toast('Only listed pets can be reset (sold ones belong to an order)', 'error');
         if (!await confirmBox(`Put ${ids.length} listed pet(s) back to available? Their Eldorado offer is NOT deleted: only do this when the offer is already gone.`)) return;
         await M.call('pets:update', ids, { status: 'available', offerId: null }); await refreshData(); render(); } }, 'Reset to available'),
-      h('button', { class: 'btn sm ghost danger', onclick: async () => { const ids = [...AL.selected]; if (!await confirmBox(`Delete ${ids.length} pets from the app? (Eldorado offers are not touched)`)) return; await M.call('pets:delete', ids); AL.selected.clear(); await refreshData(); render(); } }, t('delete'))] : null);
+      removedView
+        ? h('button', { class: 'btn sm', onclick: () => putBack([...AL.selected]) }, '↩ Put back')
+        : h('button', { class: 'btn sm ghost danger', title: 'Off Auto List only: scanned pets stay in their account inventory', onclick: async () => { const ids = [...AL.selected]; if (!await confirmBox(`Remove ${ids.length} pet(s) from Auto List? Scanned pets stay in their account's inventory (filter "Removed" puts them back); pasted pets are removed. Eldorado offers are not touched.`)) return; removeFromList(ids); } }, 'Remove')] : null);
 
   // collapsible card (open state remembered per card)
   const alCard = (key, glyph, title, ...body) => {
@@ -308,7 +320,8 @@ PAGES.autolist = async root => {
         h('span', { class: 'x-glyph' }, glyph), title, h('div', { class: 'grow' }), h('span', { class: 'x-caret' }, open ? '⌄' : '›')),
       open ? body : null);
   };
-  const live = pets.filter(p => p.status === 'available');   // bulk Quick Fill / Price / Generate: not-yet-listed pets only
+  // bulk Quick Fill / Price / Generate: not-yet-listed pets only, never ones taken off Auto List
+  const live = removedView ? [] : pets.filter(p => p.status === 'available');
   const selIds = () => [...AL.selected];
 
   // ---- QUICK FILL ----
@@ -440,7 +453,7 @@ PAGES.autolist = async root => {
     h('span', { class: 'x-lbl' }, 'SORT'), sortBtn('name', 'Name'), sortBtn('gen', 'Generation'),
     h('div', { class: 'grow' }),
     S.accounts.length > 1 ? sel([['', 'All accounts'], ...S.accounts.map(a => [a.id, a.username])], AL.filter.account, v => { AL.filter.account = v; render(); }) : null,
-    sel([['available', 'Available'], ['listed', 'Listed'], ['sold', 'Sold'], ['all', 'All']], AL.filter.status, v => { AL.filter.status = v; render(); }),
+    sel([['available', 'Available'], ['listed', 'Listed'], ['sold', 'Sold'], ['all', 'All'], ['removed', `Removed (${S.pets.filter(p => p.alHidden).length})`]], AL.filter.status, v => { AL.filter.status = v; AL.selected.clear(); render(); }),
     h('input', { type: 'search', class: 'x-psearch', placeholder: '⌕  Search pet...', value: AL.filter.q, oninput: e => { AL.filter.q = e.target.value; clearTimeout(AL.qt); AL.qt = setTimeout(render, 250); } }));
 
   const priceCell = p => {
@@ -478,7 +491,8 @@ PAGES.autolist = async root => {
       h('span', { class: 'x-alown', title: 'Owner account' }, acctName(p.accountId)),
       h('button', { class: 'x-srch', onclick: () => searchEldorado(p) }, 'Search on Eldorado'),
       priceCell(p),
-      h('button', { class: 'x-aldel', title: 'Delete from the app', onclick: () => delPet(p) }, '✕'));
+      removedView ? h('button', { class: 'x-aldel', title: 'Put back in Auto List', onclick: () => putBack([p.id]) }, '↩')
+        : h('button', { class: 'x-aldel', title: p.session ? 'Remove from Auto List (pasted pet)' : 'Remove from Auto List (stays in the account inventory)', onclick: () => delPet(p) }, '✕'));
   };
   const lim = AL.limit;
   const list = pets.length ? h('div', { class: 'x-allist' },
@@ -493,7 +507,7 @@ PAGES.autolist = async root => {
   const startBtn = S.listerRunning
     ? h('button', { class: 'btn danger', onclick: () => M.call('autolist:stop') }, 'Stop')
     : h('button', { class: 'btn primary', onclick: async () => {
-      const chosen = [...AL.selected].map(id => S.pets.find(p => p.id === id)).filter(p => p && p.status === 'available');
+      const chosen = [...AL.selected].map(id => S.pets.find(p => p.id === id)).filter(p => p && p.status === 'available' && !p.alHidden);
       const ids = chosen.filter(xDeliverable).map(p => p.id);
       if (chosen.length > ids.length) toast(`${chosen.length - ids.length} pet(s) skipped: their account is not logged in, so Zotac could not deliver them`, 'error', 8000);
       if (!ids.length) return toast('Select available pets of logged-in accounts to list', 'error');
