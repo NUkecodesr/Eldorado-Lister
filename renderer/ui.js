@@ -158,7 +158,7 @@ function icon(name) {
 }
 
 // Single-series bar chart with hover tooltip. data: [{label, value}]
-function barChart(data, { height = 220, fmt = v => v, color = '#f2b631' } = {}) {
+function barChart(data, { height = 220, fmt = v => v, color = '#7c5cff' } = {}) {
   const wrap = h('div', { class: 'chart' });
   const c = h('canvas', { style: { width: '100%', height: height + 'px', display: 'block' } });
   const tip = h('div', { class: 'tip' });
@@ -173,7 +173,7 @@ function barChart(data, { height = 220, fmt = v => v, color = '#f2b631' } = {}) 
     const max = Math.max(1e-9, ...data.map(d => d.value));
     const step = niceStep(max);
     const top = Math.ceil(max / step) * step || 1;
-    g.font = '11px Segoe UI'; g.fillStyle = '#7d725f'; g.strokeStyle = '#2c251b'; g.lineWidth = 1;
+    g.font = '11px Segoe UI'; g.fillStyle = '#7c87b8'; g.strokeStyle = '#1d2440'; g.lineWidth = 1;
     for (let v = 0; v <= top + 1e-9; v += step) {
       const y = H - padB - (v / top) * (H - padB - padT);
       g.beginPath(); g.moveTo(padL, Math.round(y) + .5); g.lineTo(W, Math.round(y) + .5); g.stroke();
@@ -187,7 +187,7 @@ function barChart(data, { height = 220, fmt = v => v, color = '#f2b631' } = {}) 
       g.fillStyle = color;
       roundTop(g, x, y, w, bh, Math.min(4, w / 2));
       bars.push({ x, w, y, d });
-      if (n <= 16 || i % Math.ceil(n / 12) === 0) { g.fillStyle = '#7d725f'; g.fillText(d.label, x, H - 6); }
+      if (n <= 16 || i % Math.ceil(n / 12) === 0) { g.fillStyle = '#7c87b8'; g.fillText(d.label, x, H - 6); }
     });
   };
   c.addEventListener('mousemove', e => {

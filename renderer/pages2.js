@@ -589,11 +589,12 @@ PAGES.delivery = async root => {
     h('div', { class: 'mx-head-l' }, h('span', { class: 'mx-bar' }), h('div', null, h('h1', null, 'Auto Delivery'), h('p', null, 'Automatic deliveries via Roblox Trade Machine'))),
     h('div', { class: 'row mx-head-r' },
       h('span', { class: 'pill ' + (S.info.talk === 'on' ? 'good' : S.info.talk === 'error' ? 'bad' : '') }, h('span', { class: 'dot' }), 'Chat ' + S.info.talk),
-      h('button', { class: 'btn sm', onclick: async () => { const ok = await run(() => M.call('delivery:talk')); toast(ok ? 'Chat listener connected' : 'Chat listener failed', ok ? 'good' : 'error'); M.call('app:info').then(i => { S.info = i; render(); }); } }, 'Reconnect chat'),
+      h('span', { class: 'pill ' + (online ? 'good' : ''), title: 'A delivery script is connected from a game' }, h('span', { class: 'dot' }), online ? 'Script connected' : 'Script offline'),
       h('button', { class: 'btn sm', title: 'Run a fake order through the buyer chat + real trade', onclick: () => openOrderSimulator() }, '🧪 Simulate order'),
+      h('button', { class: 'btn sm', onclick: async () => { const ok = await run(() => M.call('delivery:talk')); toast(ok ? 'Chat listener connected' : 'Chat listener failed', ok ? 'good' : 'error'); M.call('app:info').then(i => { S.info = i; render(); }); } }, 'Reconnect chat'),
       h('span', { class: 'mx-led ' + (cfg.enabled ? 'on' : '') }),
       sw(cfg.enabled, v => toggleAutoexec('delivery', v))));
-  const tabs = h('div', { class: 'mx-tabs' }, [['activity', 'Deliver Activity'], ['messages', 'Automatic Messages'], ['tutorial', 'Tutorial']].map(([k, l]) => h('button', { class: 'mx-tab' + (DV.tab === k ? ' on' : ''), onclick: () => { DV.tab = k; render(); } }, l)));
+  const tabs = h('div', { class: 'mx-tabs' }, [['activity', 'Activity'], ['messages', 'Messages'], ['tutorial', 'Tutorial']].map(([k, l]) => h('button', { class: 'mx-tab' + (DV.tab === k ? ' on' : ''), onclick: () => { DV.tab = k; render(); } }, l)));
 
   // ---------- messages ----------
   const steps = { ...cfg.steps };
@@ -665,33 +666,33 @@ PAGES.delivery = async root => {
   const hist = dels.filter(d => ['done', 'manual', 'cancelled'].includes(d.state)).sort((a, b) => (b.finishedAt || b.createdAt) - (a.finishedAt || a.createdAt))
     .filter(d => DV.hist === 'all' || (DV.hist === 'ok') === (d.state === 'done'));
 
-  const activity = h('div', { class: 'mx-stack' },
-    h('div', { class: 'mx-tiles4' },
-      [['IN QUEUE', stats.queue, ''], ['TRADING', stats.trading, 'gold'], ['COMPLETED', stats.done, 'good'], ['FAILED', stats.failed, 'bad']].map(([k, v, c]) => h('div', { class: 'mx-stat' }, h('div', { class: 'k' }, k), h('div', { class: 'v ' + c }, String(v))))),
-    mxCard(mxIco('delivery', 'green'), 'Delivery Settings', 'How orders are delivered from your stock accounts', null,
+  // Activity: count tiles; left column = how delivery works, right column = what it is doing now
+  const tiles = h('div', { class: 'mx-tiles4' },
+    [['IN QUEUE', stats.queue, 'cyan'], ['TRADING', stats.trading, 'gold'], ['COMPLETED', stats.done, 'good'], ['FAILED', stats.failed, 'bad']].map(([k, v, c]) => h('div', { class: 'mx-stat' }, h('div', { class: 'k' }, k), h('div', { class: 'v ' + c }, String(v)))));
+  const settingsCard = mxCard(mxIco('delivery', 'green'), 'Delivery Settings', 'How orders are delivered from your stock accounts', null,
       h('div', { class: 'mx-rows' },
         setting('Mark order delivered', 'Calls Eldorado "deliver" after all trades succeed', sw(cfg.markDelivered, v => saveSettings({ delivery: { markDelivered: v } }))),
         setting('Cancel order if delivery fails', 'After 3 failed attempts: tell the buyer why and cancel the order on Eldorado (refund). Off = manual fallback', sw(cfg.cancelOnFail !== false, v => saveSettings({ delivery: { cancelOnFail: v } }))),
         setting('Record video proof', 'Records the Roblox window during delivery (Video Proof page)', sw(cfg.recordProof, v => saveSettings({ delivery: { recordProof: v } }))),
-        setting('Script connect timeout', 'Seconds a queued trade waits for the account\'s delivery script to connect (a running trade gets 7–10 min)', num(cfg.agentTimeoutSec, v => saveSettings({ delivery: { agentTimeoutSec: v } }))))),
-    mxCard(mxIco('layers', 'green'), 'Delivery Mode', 'How orders are delivered in-game', null,
+        setting('Script connect timeout', 'Seconds a queued trade waits for the account\'s delivery script to connect (a running trade gets 7–10 min)', num(cfg.agentTimeoutSec, v => saveSettings({ delivery: { agentTimeoutSec: v } })))));
+  const modeCard = mxCard(mxIco('layers', 'green'), 'Delivery Mode', 'How orders are delivered in-game', null,
       h('div', { class: 'mx-modes' },
         h('button', { class: 'mx-modeopt' + (mode === 'security' ? ' on' : ''), onclick: () => pickMode('security') },
           h('b', null, 'Security Mode Only'),
           h('small', null, 'Mother steals every pet and delivers in ', h('b', null, 'one trade'), '. Works with any account setup.')),
         h('button', { class: 'mx-modeopt' + (mode === 'single' ? ' on' : ''), onclick: () => pickMode('single') },
           h('b', null, 'Single Mode ', h('span', { class: 'muted' }, '+ Security on multi-account')),
-          h('small', null, h('b', null, 'Single-account'), ' orders deliver straight from the stock account (faster, no steal). ', h('b', null, 'Multi-account'), ' orders auto-fallback to Security.')))),
-    // the mother candidates: accounts in SCRIPT mode (their script must be connected to trade)
-    mxCard(mxIco('code', 'purple'), 'Script Account', 'Runs Zotac\'s scripts: the mother that steals and trades the buyer (SCRIPT mode on Roblox Accounts)',
+          h('small', null, h('b', null, 'Single-account'), ' orders deliver straight from the stock account (faster, no steal). ', h('b', null, 'Multi-account'), ' orders auto-fallback to Security.'))));
+  // the mother candidates: accounts in SCRIPT mode (their script must be connected to trade)
+  const scriptAcctCard = mxCard(mxIco('code', 'purple'), 'Script Account', 'Runs Zotac\'s scripts: the mother that steals and trades the buyer (SCRIPT mode on Roblox Accounts)',
       h('span', { class: 'mx-badge ' + (scriptOnline ? 'good' : '') }, scriptOnline ? 'CONNECTED' : 'NOT CONNECTED'),
       scriptAccts.length ? h('div', { class: 'mx-rows' }, scriptAccts.map(a => {
         const st = (DV.lst || {})[a.id] || {};
         return h('div', { class: 'mx-acct' },
           h('div', { class: 'av' }, (a.username || '?')[0].toUpperCase(), h('span', { class: 'led ' + (st.online ? 'on' : '') })),
           h('div', null, h('b', null, a.username), h('div', { class: 'muted', style: { fontSize: '11px' } }, st.online ? 'in game, script connected' : 'not in game — opened with the executor when an order needs it')));
-      })) : h('div', { class: 'mx-empty' }, 'No logged-in account is in SCRIPT mode: set one to SCRIPT on Roblox Accounts (it becomes the mother).')),
-    mxCard(mxIco('code'), 'Autoexec', 'The delivery script must run by itself when Roblox opens', h('span', { class: 'mx-badge ' + ((DV.autoexec || []).length ? 'good' : 'bad') }, (DV.autoexec || []).length ? 'INSTALLED' : 'NOT INSTALLED'),
+      })) : h('div', { class: 'mx-empty' }, 'No logged-in account is in SCRIPT mode: set one to SCRIPT on Roblox Accounts (it becomes the mother).'));
+  const autoexecCard = mxCard(mxIco('code'), 'Autoexec', 'The delivery script must run by itself when Roblox opens', h('span', { class: 'mx-badge ' + ((DV.autoexec || []).length ? 'good' : 'bad') }, (DV.autoexec || []).length ? 'INSTALLED' : 'NOT INSTALLED'),
       h('p', { class: 'ink2', style: { marginTop: 0 } }, 'Zotac copies zotac_delivery.lua into your executor\'s autoexec folder. Synapse Z and executors in AppData are found by themselves; for any other executor add its autoexec folder here. Without it Roblox opens but nothing trades.'),
       (DV.autoexec || []).length ? h('div', { class: 'mx-rows' }, DV.autoexec.map(f => h('div', { class: 'muted mono', style: { fontSize: '11px' } }, '✓ ' + f))) : h('div', { class: 'mx-empty' }, 'No executor autoexec folder found yet.'),
       h('div', { class: 'row', style: { marginTop: '8px' } },
@@ -701,24 +702,30 @@ PAGES.delivery = async root => {
           if (!/autoexec/i.test(dir) && !await confirmBox(`"${dir}" is not called autoexec. Use it anyway?`)) return;
           await saveSettings({ delivery: { autoexecDirs: [...new Set([...(cfg.autoexecDirs || []), dir])] } });
           DV.autoexec = await run(() => M.call('agent:syncAutoexec')); render(); toast('Delivery script installed', 'good');
-        } }, '+ Add autoexec folder'))),
-    mxCard(mxIco('code'), 'Script', 'Only to run by hand: Zotac already installs it in autoexec', null,
-      h('div', { class: 'mx-script' }, scriptBox, h('div', { class: 'col' }, h('button', { class: 'btn sm', onclick: () => { navigator.clipboard.writeText(scriptBox.value); toast('Script copied', 'good'); } }, 'Copy')))),
-    mxCard(mxIco('clip', 'blue'), 'Delivery Queue', 'Pending trades awaiting execution',
+        } }, '+ Add autoexec folder')));
+  const scriptCard = mxCard(mxIco('code'), 'Script', 'Only to run by hand: Zotac already installs it in autoexec', null,
+    h('div', { class: 'mx-script' }, scriptBox, h('div', { class: 'col' }, h('button', { class: 'btn sm', onclick: () => { navigator.clipboard.writeText(scriptBox.value); toast('Script copied', 'good'); } }, 'Copy'))));
+  const queueCard = mxCard(mxIco('clip', 'blue'), 'Delivery Queue', 'Pending trades awaiting execution',
       h('div', { class: 'row' }, h('span', { class: 'mx-count' }, queue.length + ' items'), h('button', { class: 'btn sm', onclick: reload }, mxSvg('refresh', 12))),
       queue.length ? h('div', { class: 'mx-dlist' }, queue.map(d => h('div', { class: 'mx-drow' }, thumb(d),
         h('div', { class: 'grow' }, h('div', { class: 'pet-name' }, d.title || d.orderId), h('small', { class: 'muted mono' }, d.orderId), h('small', { class: 'muted' }, ' · ' + (d.username || 'waiting for username…') + ' · ' + d.accounts.length + ' acct · ' + ago(d.createdAt))),
         h('span', { class: 'pill ' + (stateCls[d.state] || 'info') }, d.state), rowActions(d))))
-        : mxEmpty('clip', 'No deliveries in queue')),
-    mxCard(mxIco('pulse', 'green'), 'Activity Log', 'Real-time delivery events', h('button', { class: 'btn sm', onclick: () => { DV.clearedAt = Date.now(); render(); } }, 'Clear'),
-      h('div', { class: 'log mx-log' }, logs.length ? logs.map(l => h('div', { class: 'l-' + l.level }, `[${mxTime(l.t)}] ${l.msg.replace(/^\[(Delivery|Proof|Agent)\]\s*/, '')}`)) : h('span', { class: 'muted' }, 'No events yet.'))),
-    mxCard(mxIco('clock', 'purple'), 'Delivery History', 'Completed and failed deliveries',
+        : mxEmpty('clip', 'No deliveries in queue'));
+  const logCard = mxCard(mxIco('pulse', 'green'), 'Activity Log', 'Real-time delivery events', h('button', { class: 'btn sm', onclick: () => { DV.clearedAt = Date.now(); render(); } }, 'Clear'),
+      h('div', { class: 'log mx-log' }, logs.length ? logs.map(l => h('div', { class: 'l-' + l.level }, `[${mxTime(l.t)}] ${l.msg.replace(/^\[(Delivery|Proof|Agent)\]\s*/, '')}`)) : h('span', { class: 'muted' }, 'No events yet.')));
+  const histCard = mxCard(mxIco('clock', 'purple'), 'Delivery History', 'Completed and failed deliveries',
       h('div', { class: 'mx-pills sm' }, [['all', 'All'], ['ok', '✓'], ['bad', '✗']].map(([k, l]) => h('button', { class: 'mx-pill' + (DV.hist === k ? ' on' : ''), onclick: () => { DV.hist = k; render(); } }, l))),
       hist.length ? h('div', { class: 'mx-dlist scroll' }, hist.map(d => h('div', { class: 'mx-drow', onclick: () => modal('Conversation', h('div', { class: 'log', style: { maxHeight: '60vh' } }, d.log.map(l => h('div', { class: l.err ? 'l-error' : 'l-info' }, `${new Date(l.t).toLocaleTimeString()} ${l.in ? '◀ ' + l.in : l.out ? '▶ ' + l.out : '✕ ' + l.err}`))), [{ label: t('close') }]) }, thumb(d),
         h('div', { class: 'grow' }, h('div', null, h('b', null, d.title || d.orderId), ' ', h('small', { class: 'muted' }, (d.username || '') + '  ' + fmtDate(d.finishedAt || d.createdAt))),
           h('div', { class: d.state === 'done' ? 'mx-ok' : d.state === 'cancelled' ? 'muted' : 'mx-fail' }, d.state === 'done' ? '✓ Delivered' : d.state === 'cancelled' ? (d.failReason ? 'Cancelled — ' + d.failReason : 'Cancelled') : '✗ Needs you — ' + (d.failReason || 'manual'))))))
-        : mxEmpty('clock', 'No history yet')),
-    h('details', null, h('summary', null, 'Agent jobs & API'),
+        : mxEmpty('clock', 'No history yet'));
+  const activity = h('div', { class: 'mx-stack' },
+    tiles,
+    h('div', { class: 'mx-dcols' },
+      h('div', { class: 'mx-stack' }, modeCard, settingsCard, scriptAcctCard, autoexecCard, scriptCard),
+      h('div', { class: 'mx-stack' }, queueCard, logCard)),
+    histCard,
+    h('details', { class: 'mx-jobs' }, h('summary', null, 'Agent jobs & API'),
       table(jobs, [
         { label: 'Job', render: j => h('span', { class: 'mono' }, j.id) },
         { label: 'Kind', render: j => h('span', { class: 'pill' + (j.kind === 'steal' ? ' purple' : '') }, j.kind === 'steal' ? 'steal' : 'trade') },
@@ -807,7 +814,7 @@ async function openRec(key) {
       g.fillStyle = '#000'; g.fillRect(0, 0, W, STAMP);
       try { g.drawImage(v, 0, STAMP, W, H); } catch { /* frame not ready */ }
       const secs = Math.round((Date.now() - started) / 1000);
-      g.fillStyle = '#f2b631'; g.font = '700 15px Segoe UI'; g.textBaseline = 'middle';
+      g.fillStyle = '#a594ff'; g.font = '700 15px Segoe UI'; g.textBaseline = 'middle';
       g.fillText('ZOTAC PROOF', 10, STAMP / 2);
       g.fillStyle = '#fff'; g.font = '13px Segoe UI';
       const who = r.account ? '@' + r.account : 'screen';

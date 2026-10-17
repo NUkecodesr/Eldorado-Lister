@@ -45,12 +45,12 @@ function xTile(label, value, cls = '', sub = null, iconEl = null) {
 function xPills(options, value, onchange) {
   return h('div', { class: 'x-pills' }, options.map(o => { const [v, l] = Array.isArray(o) ? o : [o, o]; return h('button', { class: 'x-pill' + (v === value ? ' on' : ''), onclick: () => onchange(v) }, l); }));
 }
-const xMutColor = m => { const k = String(m || 'none').toLowerCase().replace(/\s+/g, '-'); const p = MUTATION_COLORS[k]; return k === 'none' ? null : (k === 'rainbow' ? '#ff6ad5' : p ? p[0] : '#f2b631'); };
+const xMutColor = m => { const k = String(m || 'none').toLowerCase().replace(/\s+/g, '-'); const p = MUTATION_COLORS[k]; return k === 'none' ? null : (k === 'rainbow' ? '#ff6ad5' : p ? p[0] : '#a594ff'); };
 const xRarity = name => { const i = (S.items || []).find(x => x.name && String(x.name).toLowerCase() === String(name || '').toLowerCase()); return i && i.rarity || ''; };
 const xInitials = n => String(n || '?').split(/\s+/).filter(Boolean).map(w => w[0]).join('').slice(0, 3).toUpperCase();
 function xAvatar(pet, size = 34) {
-  const c = xMutColor(pet.mutation) || RARITY_COLORS[pet.rarity || xRarity(pet.name)] || '#8d806b';
-  return h('div', { class: 'x-ava', style: { width: size + 'px', height: size + 'px', background: `linear-gradient(135deg, ${c}55, #15110c)`, borderColor: c + '88', fontSize: Math.round(size * .36) + 'px' } }, xInitials(pet.name));
+  const c = xMutColor(pet.mutation) || RARITY_COLORS[pet.rarity || xRarity(pet.name)] || '#7c87b8';
+  return h('div', { class: 'x-ava', style: { width: size + 'px', height: size + 'px', background: `linear-gradient(135deg, ${c}55, #0e1430)`, borderColor: c + '88', fontSize: Math.round(size * .36) + 'px' } }, xInitials(pet.name));
 }
 // order picture (the listing image) with the initials tile as fallback
 function xOrderAva(o, size = 34) {
@@ -135,7 +135,7 @@ async function openAutoScan() {
   AS.draw = draw;
   draw();
 }
-function xDot(m) { const c = xMutColor(m); return h('span', { class: 'x-mut' }, h('i', { style: { background: c || '#4b4233' } }), m && !/^none$/i.test(m) ? m : h('span', { class: 'muted' }, 'None')); }
+function xDot(m) { const c = xMutColor(m); return h('span', { class: 'x-mut' }, h('i', { style: { background: c || '#3a4580' } }), m && !/^none$/i.test(m) ? m : h('span', { class: 'muted' }, 'None')); }
 function xJsonCount(text) {
   try {
     const j = JSON.parse(text); if (Array.isArray(j)) return j.length;
@@ -171,7 +171,7 @@ function xMutBlock(m) {
   const pic = !none && ART_THUMBS.mutations[m];
   const pal = MUTATION_COLORS[k];
   const bg = k === 'rainbow' ? 'linear-gradient(135deg, #ff4d4d, #ffe44d, #3fcf72, #4fa3f7, #a66bff)'
-    : none ? 'linear-gradient(135deg, #f1f1f4, #8b8b93)' : pal ? `linear-gradient(135deg, ${pal[0]}, ${pal[1]})` : 'linear-gradient(135deg, #f2b631, #6b4a06)';
+    : none ? 'linear-gradient(135deg, #f1f1f4, #8b8b93)' : pal ? `linear-gradient(135deg, ${pal[0]}, ${pal[1]})` : 'linear-gradient(135deg, #a594ff, #3a2a8a)';
   return h('span', { class: 'x-mblk', title: none ? 'No mutation' : m }, pic ? h('img', { src: pic, alt: m }) : h('i', { style: { background: bg } }));
 }
 // close the delivery-time dropdown / emoji picker when clicking elsewhere
@@ -298,9 +298,9 @@ PAGES.autolist = async root => {
 
   // ---- selection bar ----
   const allChecked = pets.length && pets.every(p => AL.selected.has(p.id));
-  const selBar = h('div', { class: 'x-selbar' },
-    h('input', { type: 'checkbox', checked: allChecked, onchange: e => { pets.forEach(p => e.target.checked ? AL.selected.add(p.id) : AL.selected.delete(p.id)); render(); } }),
-    h('span', null, `${AL.selected.size} selected of ${pets.length} pets`),
+  const selBar = h('div', { class: 'x-selbar x-actionbar' },
+    h('input', { type: 'checkbox', checked: allChecked, title: 'Select all shown', onchange: e => { pets.forEach(p => e.target.checked ? AL.selected.add(p.id) : AL.selected.delete(p.id)); render(); } }),
+    h('span', null, h('b', null, String(AL.selected.size)), ` selected of ${pets.length} pets`),
     h('div', { class: 'grow' }),
     AL.selected.size ? [
       h('button', { class: 'btn sm ghost', title: 'For listed pets whose Eldorado offer is gone', onclick: async () => {
@@ -310,7 +310,8 @@ PAGES.autolist = async root => {
         await M.call('pets:update', ids, { status: 'available', offerId: null }); await refreshData(); render(); } }, 'Reset to available'),
       removedView
         ? h('button', { class: 'btn sm', onclick: () => putBack([...AL.selected]) }, '↩ Put back')
-        : h('button', { class: 'btn sm ghost danger', title: 'Off Auto List only: scanned pets stay in their account inventory', onclick: async () => { const ids = [...AL.selected]; if (!await confirmBox(`Remove ${ids.length} pet(s) from Auto List? Scanned pets stay in their account's inventory (filter "Removed" puts them back); pasted pets are removed. Eldorado offers are not touched.`)) return; removeFromList(ids); } }, 'Remove')] : null);
+        : h('button', { class: 'btn sm ghost danger', title: 'Off Auto List only: scanned pets stay in their account inventory', onclick: async () => { const ids = [...AL.selected]; if (!await confirmBox(`Remove ${ids.length} pet(s) from Auto List? Scanned pets stay in their account's inventory (filter "Removed" puts them back); pasted pets are removed. Eldorado offers are not touched.`)) return; removeFromList(ids); } }, 'Remove')] : null,
+    h('span', { class: 'x-actslot' }));
 
   // collapsible card (open state remembered per card)
   const alCard = (key, glyph, title, ...body) => {
@@ -449,11 +450,13 @@ PAGES.autolist = async root => {
   // ---- pet list ----
   const sortBtn = (key, label) => h('button', { class: 'x-chip' + (AL.sort === key ? ' on' : ''), onclick: () => { if (AL.sort === key) AL.dir = -AL.dir; else { AL.sort = key; AL.dir = key === 'name' ? 1 : -1; } render(); } },
     label, AL.sort === key ? (AL.dir > 0 ? ' ↑' : ' ↓') : '');
+  const statusPills = h('div', { class: 'x-stpills' }, [['available', 'Ready'], ['listed', 'Listed'], ['sold', 'Sold'], ['all', 'All'], ['removed', `Removed (${S.pets.filter(p => p.alHidden).length})`]]
+    .map(([k, l]) => h('button', { class: AL.filter.status === k ? 'on' : '', onclick: () => { AL.filter.status = k; AL.selected.clear(); render(); } }, l)));
   const sortBar = h('div', { class: 'x-sortbar' },
-    h('span', { class: 'x-lbl' }, 'SORT'), sortBtn('name', 'Name'), sortBtn('gen', 'Generation'),
+    statusPills,
+    h('span', { class: 'x-lbl', style: { marginLeft: '8px' } }, 'SORT'), sortBtn('name', 'Name'), sortBtn('gen', 'Generation'),
     h('div', { class: 'grow' }),
     S.accounts.length > 1 ? sel([['', 'All accounts'], ...S.accounts.map(a => [a.id, a.username])], AL.filter.account, v => { AL.filter.account = v; render(); }) : null,
-    sel([['available', 'Available'], ['listed', 'Listed'], ['sold', 'Sold'], ['all', 'All'], ['removed', `Removed (${S.pets.filter(p => p.alHidden).length})`]], AL.filter.status, v => { AL.filter.status = v; AL.selected.clear(); render(); }),
     h('input', { type: 'search', class: 'x-psearch', placeholder: '⌕  Search pet...', value: AL.filter.q, oninput: e => { AL.filter.q = e.target.value; clearTimeout(AL.qt); AL.qt = setTimeout(render, 250); } }));
 
   const priceCell = (p, ids = [p.id]) => {
@@ -529,14 +532,20 @@ PAGES.autolist = async root => {
       await run(() => M.call('autolist:start', ids, { prices: ok.prices })); S.listerRunning = true; render();
     } }, `Start Auto List (${AL.selected.size})`);
 
+  // Import: the scanner script or pasted JSON, one at a time
+  AL.importTab = AL.importTab || (AL.json ? 'json' : 'script');
+  const importCard = h('div', { class: 'x-import' },
+    h('div', { class: 'x-stpills' }, [['script', 'Scanner script'], ['json', 'Paste JSON']].map(([k, l]) => h('button', { class: AL.importTab === k ? 'on' : '', onclick: () => { AL.importTab = k; render(); } }, l))),
+    AL.importTab === 'json' ? inputPanel : scriptPanel);
   root.append(
-    xHead('A', 'Auto List', null, startBtn),
-    scriptPanel, inputPanel,
-    selBar, quickFill, bulkPrice, listingRules, genImages,
+    xHead('A', 'Auto List', 'Import pets, fill titles and prices, list them on Eldorado', null),
+    h('div', { class: 'x-top2' }, importCard, quickFill),
+    bulkPrice, listingRules, genImages,
     prog.total ? h('div', { class: 'card', style: { marginBottom: '12px' } },
       h('h3', null, 'Progress ', h('small', null, `${prog.done}/${prog.total} · ${prog.ok} ok · ${prog.failed} failed ${prog.current ? '· now: ' + prog.current : ''}`)),
       h('div', { class: 'progress' }, h('div', { style: { width: (100 * prog.done / Math.max(1, prog.total)) + '%' } }))) : null,
     sortBar, list,
+    (() => { const slot = selBar.querySelector('.x-actslot'); if (slot) slot.replaceWith(startBtn); return selBar; })(),
     h('details', { class: 'x-fold', open: AL.open ? true : null, ontoggle: e => { AL.open = e.target.open; } },
       h('summary', null, 'Auto List settings · Activity'),
       h('div', { class: 'grid g2', style: { marginTop: '12px' } },
@@ -1083,7 +1092,7 @@ function confirmAutoList(ids) {
           const review = special.length && (g.p.traits || []).some(t => special.includes(String(t).toLowerCase()));
           return h('div', { class: 'x-cf-row' + (g.price ? '' : ' nop') },
             h('b', { class: 'x-cf-name' }, g.p.name),
-            mut ? (() => { const c = xMutColor(mut) || '#f2b631'; return h('span', { class: 'x-cf-mut', style: { color: c, background: c + '2e', border: '1px solid ' + c + '66' } }, mut); })() : h('span'),
+            mut ? (() => { const c = xMutColor(mut) || '#7c5cff'; return h('span', { class: 'x-cf-mut', style: { color: c, background: c + '2e', border: '1px solid ' + c + '66' } }, mut); })() : h('span'),
             h('span', { class: 'x-cf-gen' }, formatGen(g.p.gen)),
             h('span', { class: 'x-cf-qty' }, '×' + g.n),
             h('b', { class: 'x-cf-sub' }, g.price ? money(g.price * g.n) : (review ? 'set price' : (status === 'pricing' ? '…' : 'no price'))));
@@ -1247,30 +1256,41 @@ PAGES.accounts = async root => {
     const ok = await confirmAutoList(ids); if (!ok) return;
     await run(() => M.call('autolist:start', ids, { prices: ok.prices })); S.listerRunning = true; toast('Auto List started', 'good');
   };
-  const accountRow = a => {
+  // By Account: one card per account; an open card's pets show in a full-width panel right after
+  // it (the grid backfills the row, so the panel sits under that card's row)
+  const accountCard = a => {
     const mine = live.filter(p => p.accountId === a.id);
     const shown = petsFiltered.filter(p => p.accountId === a.id);
     const open = RA.open.has(a.id);
-    return h('div', { class: 'x-arow' },
-      h('div', { class: 'x-ahead', onclick: () => { open ? RA.open.delete(a.id) : RA.open.add(a.id); render(); } },
-        h('span', { class: 'x-drag' }, '⠿'),
-        a.avatar ? h('img', { class: 'x-aava', src: a.avatar }) : h('div', { class: 'x-aava ph' }, a.username[0] ? a.username[0].toUpperCase() : '?'),
-        h('span', { class: 'x-on' + ((LST[a.id] || {}).online ? ' on' : ''), title: (LST[a.id] || {}).online ? 'Delivery script online' : 'Not in game' }),
-        h('b', null, '@' + a.username), h('small', { class: 'muted' }, a.robloxUserId ? 'ID: ' + a.robloxUserId : (a.note || '')),
-        h('div', { class: 'grow' }),
-        // pet count only: each base has its own slot cap (seen 19-24), the game shows it in the trade window
-        h('span', { class: 'x-slot' }, h('i'), `${mine.length} pets`),
-        h('button', { class: 'x-ib', title: 'Copy username', onclick: e => { e.stopPropagation(); xCopy(a.username, 'Username copied'); } }, '⎘'),
-        h('button', { class: 'x-ab', title: 'List this account\'s available pets on Eldorado', onclick: e => { e.stopPropagation(); startAcct(a); } }, 'List'),
-        // how ▶ Start opens this account: SCRIPT = with your executor (Zotac's scripts run),
-        // Legit = real Roblox from Zotac's own clean install (no executor, no scripts)
-        h('button', { class: 'x-ab script' + (!a.legit ? ' on' : ''), title: 'SCRIPT: Start opens Roblox with your executor, Zotac\'s scanner/delivery scripts run', onclick: e => { e.stopPropagation(); if (a.legit) setMode(a, false); } }, 'SCRIPT'),
-        h('button', { class: 'x-ab legit' + (a.legit ? ' on' : ''), title: 'Legit: Start opens real Roblox (no executor, no scripts). Zotac never opens a Legit account with the executor', onclick: e => { e.stopPropagation(); if (!a.legit) setMode(a, true); } }, 'Legit'),
-        h('button', { class: 'x-ab start', title: a.hasCookie ? (a.legit ? 'Open real Roblox on this account (private server)' : 'Open Roblox with your executor on this account (private server)') : 'Add the account cookie first (✎)', disabled: !a.hasCookie, onclick: e => { e.stopPropagation(); launch(a); } }, '▶ Start'),
-        h('button', { class: 'x-ib', title: 'Edit', onclick: e => { e.stopPropagation(); editAcct(a); } }, '✎'),
-        h('button', { class: 'x-ib del', title: 'Remove account', onclick: async e => { e.stopPropagation(); if (await confirmBox(`Remove ${a.username} from Zotac? Its unlisted pets go with it. (Not possible while it has listed pets or sold pets not delivered yet.)`)) { if (await run(() => M.call('accounts:delete', a.id))) { await refreshData(); render(); } } } }, '🗑'),
-        h('span', { class: 'x-caret' }, open ? '▴' : '▾')),
-      open ? (shown.length ? grid(shown, a.id) : h('div', { class: 'x-empty sm' }, mine.length ? 'No pets match the filters.' : 'No pets on this account yet.')) : null);
+    const inGame = !!(LST[a.id] || {}).online;
+    const toggle = () => { open ? RA.open.delete(a.id) : RA.open.add(a.id); render(); };
+    return [
+      h('div', { class: 'x-acard' + (open ? ' open' : '') },
+        h('div', { class: 'x-acard-h', onclick: toggle },
+          h('div', { class: 'x-acard-av' },
+            a.avatar ? h('img', { class: 'x-aava', src: a.avatar }) : h('div', { class: 'x-aava ph' }, a.username[0] ? a.username[0].toUpperCase() : '?'),
+            h('span', { class: 'x-on' + (inGame ? ' on' : ''), title: inGame ? 'Delivery script online' : 'Not in game' })),
+          h('div', { class: 'x-acard-t' }, h('b', { title: a.username }, '@' + a.username), h('small', { class: 'muted' }, a.robloxUserId ? 'ID: ' + a.robloxUserId : (a.note || (a.hasCookie ? '' : 'not logged in')))),
+          // pet count only: each base has its own slot cap (seen 19-24), the game shows it in the trade window
+          h('span', { class: 'x-slot' }, h('i'), `${mine.length} pets`)),
+        h('div', { class: 'x-acard-m' },
+          // how ▶ Start opens this account: SCRIPT = with your executor (Zotac's scripts run),
+          // Legit = real Roblox from Zotac's own clean install (no executor, no scripts)
+          h('div', { class: 'x-aseg' },
+            h('button', { class: 'script' + (!a.legit ? ' on' : ''), title: 'SCRIPT: Start opens Roblox with your executor, Zotac\'s scanner/delivery scripts run', onclick: () => { if (a.legit) setMode(a, false); } }, 'SCRIPT'),
+            h('button', { class: 'legit' + (a.legit ? ' on' : ''), title: 'Legit: Start opens real Roblox (no executor, no scripts). Zotac never opens a Legit account with the executor', onclick: () => { if (!a.legit) setMode(a, true); } }, 'Legit')),
+          h('div', { class: 'grow' }),
+          h('button', { class: 'x-ab start', title: a.hasCookie ? (a.legit ? 'Open real Roblox on this account (private server)' : 'Open Roblox with your executor on this account (private server)') : 'Add the account cookie first (✎)', disabled: !a.hasCookie, onclick: () => launch(a) }, '▶ Start')),
+        h('div', { class: 'x-acard-f' },
+          h('button', { class: 'x-ab', title: 'List this account\'s available pets on Eldorado', onclick: () => startAcct(a) }, 'List'),
+          h('button', { class: 'x-ib', title: 'Copy username', onclick: () => xCopy(a.username, 'Username copied') }, '⎘'),
+          h('button', { class: 'x-ib', title: 'Edit', onclick: () => editAcct(a) }, '✎'),
+          h('button', { class: 'x-ib del', title: 'Remove account', onclick: async () => { if (await confirmBox(`Remove ${a.username} from Zotac? Its unlisted pets go with it. (Not possible while it has listed pets or sold pets not delivered yet.)`)) { if (await run(() => M.call('accounts:delete', a.id))) { await refreshData(); render(); } } } }, '🗑'),
+          h('div', { class: 'grow' }),
+          h('button', { class: 'x-ib x-acard-x', title: open ? 'Hide pets' : 'Show pets', onclick: toggle }, open ? 'Pets ▴' : 'Pets ▾'))),
+      open ? h('div', { class: 'x-arow x-apets' },
+        h('div', { class: 'x-ahead', onclick: toggle }, h('b', null, '@' + a.username), h('small', { class: 'muted' }, `${shown.length} of ${mine.length} pets`), h('div', { class: 'grow' }), h('span', { class: 'x-caret' }, '▴')),
+        shown.length ? grid(shown, a.id) : h('div', { class: 'x-empty sm' }, mine.length ? 'No pets match the filters.' : 'No pets on this account yet.')) : null];
   };
 
   // ---- Account Settings tab (money + account management) ----
@@ -1335,7 +1355,7 @@ PAGES.accounts = async root => {
         emptyCount ? h('button', { class: 'x-chip' + (RA.showEmpty ? ' on' : ''), title: 'Accounts that are not logged in (no saved cookie)', onclick: () => { RA.showEmpty = !RA.showEmpty; render(); } }, RA.showEmpty ? `Hide others (${emptyCount})` : `Show others (${emptyCount})`) : null] : null),
     RA.view === 'all'
       ? (petsFiltered.length ? grid(petsFiltered, 'all') : h('div', { class: 'x-empty' }, 'No pets match.'))
-      : (accts.length ? accts.filter(a => !petFilterOn || petsFiltered.some(p => p.accountId === a.id)).map(accountRow) : h('div', { class: 'x-empty' }, S.accounts.length ? 'No logged-in account yet. Log in an account (✎ → cookie or browser login), or use Show others.' : 'No accounts yet. Import a JSON or add one.')),
+      : (accts.length ? h('div', { class: 'x-acards' }, accts.filter(a => !petFilterOn || petsFiltered.some(p => p.accountId === a.id)).map(accountCard)) : h('div', { class: 'x-empty' }, S.accounts.length ? 'No logged-in account yet. Log in an account (✎ → cookie or browser login), or use Show others.' : 'No accounts yet. Import a JSON or add one.')),
     (RA.view === 'account' && petsFiltered.some(p => !p.accountId)) ? h('div', { class: 'x-arow' }, h('div', { class: 'x-ahead' }, h('b', null, 'Unassigned'), h('small', { class: 'muted' }, 'pets without an account')), grid(petsFiltered.filter(p => !p.accountId), 'un')) : null);
 
   root.append(

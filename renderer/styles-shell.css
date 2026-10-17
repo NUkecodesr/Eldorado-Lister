@@ -9,12 +9,12 @@
 .sf-status { border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 700; border: 1px solid; }
 .sf-status small { display: block; font-weight: 500; font-size: 10.5px; opacity: .8; padding-left: 14px; }
 .sf-status .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 7px; background: currentColor; }
-.sf-status.on { color: #4fdc84; background: rgba(63, 207, 114, .1); border-color: rgba(63, 207, 114, .45); }
-.sf-status.off { color: #ff6b6b; background: rgba(255, 77, 77, .08); border-color: rgba(255, 77, 77, .35); }
+.sf-status.on { color: #34d399; background: rgba(52, 211, 153, .1); border-color: rgba(52, 211, 153, .45); }
+.sf-status.off { color: #f87171; background: rgba(248, 113, 113, .08); border-color: rgba(248, 113, 113, .35); }
 .sf-conn { display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; color: var(--ink2); padding: 2px 2px 0; }
 .sf-conn b { color: var(--gold); }
 .sf-conn .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; }
-.sf-conn .dot.good { background: #f2b631; } .sf-conn .dot.bad { background: #ff4d4d; }
+.sf-conn .dot.good { background: #7c5cff; } .sf-conn .dot.bad { background: #f87171; }
 .sf-ver { color: var(--muted); font-size: 10px; text-align: center; }
 
 /* private text (email): blurred until hovered */
