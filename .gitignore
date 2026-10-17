@@ -6,3 +6,6 @@ dist_new/
 .env
 zotac-data.json
 meowl-data.json
+# local notes for AI assistants, not part of the app
+AGENTS.md
+CLAUDE.md
