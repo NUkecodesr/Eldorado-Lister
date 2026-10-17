@@ -27,11 +27,19 @@ class AutoLister extends EventEmitter {
       const m = attrs.find(a => a.id === g.mutationAttr);
       const b = attrs.find(a => a.id === g.msAttr);
       const n = attrs.find(a => a.id === g.msNumericAttr);
+      const t = attrs.find(a => a.id === g.traitsAttr);
       const mOk = !m || (m.value && m.value.id) === mut;
       const bOk = !b || (b.value && b.value.id) === bucket;
       const nOk = !n || !pet.gen || Math.abs(Number(n.value) - pet.gen) / pet.gen < 0.02;
-      return mOk && bOk && nOk;
+      const offerTraits = t ? (t.values || (t.value ? [t.value] : [])).map(v => sab.norm(v.name || v)).sort().join(',') : null;
+      const tOk = offerTraits === null || offerTraits === (pet.traits || []).map(sab.norm).sort().join(',');
+      return mOk && bOk && nOk && tOk;
     });
+  }
+
+  // pets that are the exact same brainrot (name, mutation, gen/s, traits) become one offer
+  static sameKey(p) {
+    return [sab.norm(p.name), sab.norm(p.mutation || 'None'), Math.round(Number(p.gen) || 0), (p.traits || []).map(sab.norm).sort().join(',')].join('|');
   }
 
   async start(petIds, opts = {}) {
@@ -48,9 +56,18 @@ class AutoLister extends EventEmitter {
       try { myOffers = await this.eld.myOffersAll('Active'); } catch (e) { this.log('warn', 'Stock detection disabled (could not load my offers): ' + e.message); }
     }
     const accounts = this.store.get('accounts');
-    for (const pet of pets) {
+    // identical pets are listed together as one offer with quantity = how many there are
+    const groups = [];
+    const byKey = new Map();
+    for (const p of pets) {
+      const k = AutoLister.sameKey(p);
+      if (byKey.has(k)) byKey.get(k).push(p); else { const g = [p]; byKey.set(k, g); groups.push(g); }
+    }
+    for (const group of groups) {
+      const pet = group[0];
+      const qty = group.length;
       if (this.stopFlag) break;
-      this.progress.current = `${pet.name} ${pet.mutation || ''}`.trim();
+      this.progress.current = `${pet.name} ${pet.mutation || ''}`.trim() + (qty > 1 ? ` ×${qty}` : '');
       this.emit('progress', this.progress);
       try {
         const acct = accounts.find(a => a.id === pet.accountId);
@@ -72,10 +89,10 @@ class AutoLister extends EventEmitter {
         // 2. stock detection
         const stock = al.stockDetection ? this.findStock(pet, myOffers) : null;
         if (stock) {
-          await this.eld.bumpQuantity(stock, 1);
-          stock.quantity = (stock.quantity || 1) + 1;
-          this.updatePet(pet.id, { status: 'listed', offerId: stock.id, price: stock.pricePerUnit ? stock.pricePerUnit.amount : price, listedAt: Date.now() });
-          this.log('info', `Stock +1 → "${stock.offerTitle}" now qty ${stock.quantity}`);
+          await this.eld.bumpQuantity(stock, qty);
+          stock.quantity = (stock.quantity || 1) + qty;
+          for (const p of group) this.updatePet(p.id, { status: 'listed', offerId: stock.id, price: stock.pricePerUnit ? stock.pricePerUnit.amount : price, listedAt: Date.now() });
+          this.log('info', `Stock +${qty} → "${stock.offerTitle}" now qty ${stock.quantity}`);
         } else {
           // 3. text
           const vars = { account: acct ? acct.username : '', emoji: al.emoji };
@@ -95,19 +112,18 @@ class AutoLister extends EventEmitter {
               if (b64) image = await this.eld.uploadImage(b64, `${sab.slug(pet.name)}.png`);
             } catch (e) { this.log('warn', `Image skipped for ${pet.name}: ${e.message}`); }
           }
-          const payload = await this.eld.buildOfferPayload(pet, { title, description, price, deliveryTime: pet.deliveryTime || al.deliveryTime, image });
+          const payload = await this.eld.buildOfferPayload(pet, { title, description, price, deliveryTime: pet.deliveryTime || al.deliveryTime, image, quantity: qty });
           const res = await this.eld.createOffer(payload);
           const offerId = (res && (res.id || res.offerId || (res.offer && res.offer.id))) || (typeof res === 'string' ? res : null);
-          this.updatePet(pet.id, { status: 'listed', offerId, price, title, description, listedAt: Date.now() });
-          this.log('info', `Listed ${title} @ $${price} (${basis})`);
-          if (offerId) myOffers.push({ id: offerId, offerTitle: title, quantity: 1, tradeEnvironmentValues: [{ value: payload._item.name, id: payload._item.id }], attributes: [], pricePerUnit: { amount: price } });
+          for (const p of group) this.updatePet(p.id, { status: 'listed', offerId, price, title, description, listedAt: Date.now() });
+          this.log('info', `Listed ${title} @ $${price}${qty > 1 ? ` × ${qty} (quantity ${qty})` : ''} (${basis})`);
         }
-        this.progress.ok++;
+        this.progress.ok += qty;
       } catch (e) {
-        this.progress.failed++;
-        this.log('error', `${pet.name}: ${e.message}`, e.data);
+        this.progress.failed += qty;
+        this.log('error', `${pet.name}${qty > 1 ? ' ×' + qty : ''}: ${e.message}`, e.data);
       }
-      this.progress.done++;
+      this.progress.done += qty;
       this.emit('progress', this.progress);
       if (this.progress.done < pets.length && !this.stopFlag) await this.sleep((al.delaySec || 5) * 1000);
     }

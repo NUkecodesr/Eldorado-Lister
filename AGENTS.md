@@ -90,7 +90,10 @@ npx electron-builder --win nsis    # -> dist\Zotac Lister Setup <version>.exe
 - **Auto List** (`pages.js` Auto List, `src/main/autolist.js`): pets from the scanner or pasted
   JSON, Quick Fill templates, smart pricing (`src/main/pricing.js`), Generate Images (cards saved
   under `art/cards`, row shows the card, or the wiki picture before a card exists), Start Auto List
-  (uploads card + creates offers). Pasted-JSON pets and the accounts a paste created are
+  (uploads card + creates offers). Exact duplicates in one run (same name, mutation, gen/s,
+  traits: `AutoLister.sameKey`) become ONE offer with quantity N; a pet identical to an offer already
+  live gets +N quantity on it (Stock detection). A sale of quantity q delivers q of the offer's pets
+  (`services.js` sale matching slices by quantity). Pasted-JSON pets and the accounts a paste created are
   **session-only**: removed on restart unless listed/sold or used.
 - **Listings** (`pages.js`): Active / Paused / Closed tabs (Eldorado states are `Active, Paused,
   Closed, Inactive, PendingReview`; "Expired" is rejected), per-state error box, repricer.
