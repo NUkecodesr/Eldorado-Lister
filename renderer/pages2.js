@@ -377,7 +377,8 @@ PAGES.notifications = async root => {
 const DV = { data: null, tab: 'activity', hist: 'all', clearedAt: 0 };
 const STEP_META = [
   ['STEP 1 - GREETING', 'Order received, asking the buyer for their username', 'gold', [
-    ['greeting', 'Greeting', 'sent on every new order', '{buyer} {orderId}'],
+    ['greeting', 'Greeting', 'new order without a Roblox username: asks for it', '{buyer} {orderId}'],
+    ['greetingKnownUser', 'Greeting (username given at checkout)', 'the buyer is only asked to confirm it', '{buyer} {username}'],
     ['multiAccount', 'Multi-account order', 'only when pets span accounts', '{accounts}']]],
   ['STEP 2 - USERNAME CHECK', "Validating and confirming the buyer's Roblox username", 'purple', [
     ['confirmUsername', 'Username confirmation', 'Yes/No prompt', '{username}'],

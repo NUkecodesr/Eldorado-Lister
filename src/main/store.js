@@ -7,6 +7,7 @@ const rid = (n = 12) => crypto.randomBytes(n).toString('hex');
 
 const DEFAULT_DELIVERY_STEPS = {
   greeting: 'Hi {buyer}! Thanks for your order.\n\nTo complete your delivery via the Trade Machine in Steal a Brainrot, please send your in-game username and make sure you are online.',
+  greetingKnownUser: 'Hi {buyer}! Thanks for your order.\n\nYou entered {username} as your Roblox username at checkout. Make sure you are online in Steal a Brainrot.',
   multiAccount: 'Your order has pets across {accounts} different accounts. Delivery will be done sequentially — please wait!',
   confirmUsername: 'Please *confirm* if this is your correct in-game username: {username}\n\nReply with:\n1 - Yes\n2 - No',
   invalidReply: 'Please reply with 1 (Yes) or 2 (No) to confirm your username.',

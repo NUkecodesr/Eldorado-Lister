@@ -189,19 +189,42 @@ class Delivery extends EventEmitter {
     this.ensureTalk();
     d.conversationId = await this.conversationOf(order.id, order.conversationId);
     if (!pets.length) this.log('warn', `Order ${order.id}: no listed pets matched offer — delivery will need manual pet selection`);
-    await this.say(d, 'greeting');
-    if (accounts.length > 1) await this.say(d, 'multiAccount');
-    try {
-      const preset = await this.eld.deliveryDetail(order.id, 'RobloxUsername');
-      if (preset && typeof preset === 'string') await this.proposeUsername(d, preset);
-    } catch { /* buyer will type it */ }
+    // Buyers usually type their Roblox username at checkout: then they are only asked to confirm
+    // it; otherwise the normal greeting asks them for it.
+    let preset = null;
+    try { const v = await this.eld.deliveryDetail(order.id, 'RobloxUsername'); if (v && typeof v === 'string') preset = v.trim(); } catch { /* buyer will type it */ }
+    const user = preset ? await this.lookupUser(preset) : null;
+    if (user) {
+      const text = (this.cfg.steps || {}).greetingKnownUser ? null : `Hi ${d.buyer || ''}! Thanks for your order.\n\nYou entered ${user.name} as your Roblox username at checkout. Make sure you are online in Steal a Brainrot.`;
+      if (text) await this.sayText(d, text); else await this.say(d, 'greetingKnownUser', { username: user.name });
+      if (accounts.length > 1) await this.say(d, 'multiAccount');
+      await this.proposeUsername(d, user.name, user);
+    } else {
+      await this.say(d, 'greeting');
+      if (accounts.length > 1) await this.say(d, 'multiAccount');
+    }
     this.emit('update', d);
   }
 
   // Picks the Roblox username out of a buyer message. Chat words ("hi i just bought it") must
   // never be taken as a username: common words are skipped, username-looking tokens win, each
   // candidate must exist on Roblox, and a long message without one gets asked again.
-  async proposeUsername(d, raw) {
+  async lookupUser(name) {
+    const n = String(name || '').trim().replace(/^@/, '');
+    if (!/^[A-Za-z0-9_]{3,20}$/.test(n)) return null;
+    try { return await robloxUser(n); } catch (e) { this.log('warn', 'Roblox lookup failed: ' + e.message); return { name: n, id: null }; }
+  }
+
+  // a ready-made message (not one of the editable steps)
+  async sayText(d, text) {
+    if (d.sim) { d.log.push({ t: Date.now(), out: text }); this.store.save(); this.emit('update', d); return; }
+    try { await this.eld.sendOrderMessage(d.orderId, text); d.log.push({ t: Date.now(), out: text }); }
+    catch (e) { this.log('error', `send → ${d.orderId}: ${e.message}`); d.log.push({ t: Date.now(), err: e.message }); }
+    this.store.save(); this.emit('update', d);
+  }
+
+  async proposeUsername(d, raw, known) {
+    if (known) return this.confirmUser(d, known);
     const words = String(raw).trim().split(/[\s,;:!?()"']+/).map(w => w.replace(/^@/, '').replace(/[.]+$/, '')).filter(Boolean);
     const tokens = words.filter(w => /^[A-Za-z0-9_]{3,20}$/.test(w) && !/^_|_$/.test(w));
     const score = w => (/\d/.test(w) ? 3 : 0) + (/_/.test(w) ? 2 : 0) + (/[a-z]/.test(w) && /[A-Z]/.test(w.slice(1)) ? 1 : 0) + (w.length >= 6 ? 1 : 0) - (CHAT_WORDS.has(w.toLowerCase()) ? 10 : 0);
@@ -215,6 +238,10 @@ class Delivery extends EventEmitter {
       if (user) break;
     }
     if (!user) { await this.say(d, 'usernameNotFound'); return; }
+    return this.confirmUser(d, user);
+  }
+
+  async confirmUser(d, user) {
     d.username = user.name; d.robloxId = user.id; d.state = 'awaitConfirm';
     d.avatar = user.id ? await robloxAvatar(user.id) : null;
     await this.say(d, 'confirmUsername', { username: user.name }, d.avatar);
