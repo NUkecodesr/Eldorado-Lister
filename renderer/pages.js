@@ -93,6 +93,30 @@ function xPetThumb(p, onclick) {
 }
 // ---- Auto Scan window: pick logged-in accounts, batch size, Start; live progress + log ----
 const AS = { st: null, sel: null, draw: null };
+// after a run: the accounts that did not launch / were not scanned in 45 s, with a retry for just those
+function autoScanFailedPopup({ accounts = [], batch = 3 } = {}) {
+  if (!accounts.length) return;
+  const old = document.querySelector('.as-failpop'); if (old) old.remove();
+  const bg = h('div', { class: 'modal-bg as-failpop', onmousedown: e => { if (e.target === bg) bg.remove(); } });
+  const pick = new Set(accounts.map(a => a.id));
+  const list = h('div', { class: 'as-faillist' }, accounts.map(a => h('label', { class: 'as-failrow' },
+    h('input', { type: 'checkbox', checked: true, onchange: e => { e.target.checked ? pick.add(a.id) : pick.delete(a.id); } }),
+    h('div', null, h('b', null, '@' + a.username), h('small', null, a.why || 'not scanned')))));
+  bg.append(h('div', { class: 'modal as-modal' },
+    h('div', { class: 'as-head' }, h('div', { class: 'as-ico', style: { color: '#ff8a5c' } }, '!'),
+      h('div', { class: 'grow' }, h('b', null, `${accounts.length} account${accounts.length === 1 ? '' : 's'} not scanned`), h('small', null, 'They did not launch or their base was not read in 45 s')),
+      h('button', { class: 'as-x', onclick: () => bg.remove() }, '✕')),
+    list,
+    h('div', { class: 'row', style: { justifyContent: 'flex-end', marginTop: '12px', gap: '8px' } },
+      h('button', { class: 'btn', onclick: () => bg.remove() }, 'Close'),
+      h('button', { class: 'btn primary', onclick: async () => {
+        const ids = [...pick]; if (!ids.length) return toast('Pick at least one account', 'error');
+        bg.remove();
+        AS.st = await run(() => M.call('autoscan:start', { ids, batch })) || AS.st;
+        if (AS.draw) AS.draw(); else openAutoScan();
+      } }, `↻ Retry ${accounts.length === 1 ? '' : 'selected'}`))));
+  $('#modal-root').append(bg);
+}
 async function openAutoScan() {
   if (!AS.st) AS.st = await M.call('autoscan:state');
   const accts = S.accounts.filter(a => a.hasCookie);
@@ -116,6 +140,7 @@ async function openAutoScan() {
       h('div', { class: 'as-row' }, h('span', null, 'Accounts per batch'),
         h('input', { type: 'number', min: '1', max: '10', value: batch, disabled: st.running, oninput: e => { batch = Math.max(1, Math.min(10, Number(e.target.value) || 1)); } }),
         h('div', { class: 'grow' }),
+        !st.running && (st.failedList || []).length ? h('button', { class: 'btn', title: (st.failedList || []).map(f => '@' + f.username + ': ' + f.why).join('\n'), onclick: () => autoScanFailedPopup({ accounts: st.failedList, batch }) }, `↻ Retry failed (${st.failedList.length})`) : null,
         st.running ? h('button', { class: 'btn danger', onclick: () => M.call('autoscan:stop') }, '■ Stop')
           : h('button', { class: 'btn primary', onclick: async () => { AS.st = await run(() => M.call('autoscan:start', { ids: [...AS.sel], batch })) || AS.st; draw(); } }, '▶ Start')),
       h('div', { class: 'as-sel' }, h('span', null, 'ACCOUNTS TO SCAN ', h('b', null, `${AS.sel.size}/${accts.length}`)), h('div', { class: 'grow' }),

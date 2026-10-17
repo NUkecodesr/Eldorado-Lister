@@ -94,9 +94,11 @@ async function refreshAvatars() {
 const autoScan = {
   running: false, stopFlag: false, total: 0, done: 0, failed: 0, current: [], log: [],
   waiters: {},
-  hostId: null, waitSince: {}, joinAt: {}, opened: new Set(),
+  hostId: null, waitSince: {}, joinAt: {}, opened: new Set(), failedList: [], batch: 3,
+  SCAN_LIMIT: 45000,   // an account not scanned this long after its launch counts as failed (retry from the popup)
+  fail(a, why) { this.failed++; if (!this.failedList.some(f => f.id === a.id)) this.failedList.push({ id: a.id, username: a.username, why }); },
   say(msg, level = 'info') { this.log.push({ t: Date.now(), msg, level }); if (this.log.length > 300) this.log.shift(); store.log(level, '[AutoScan] ' + msg); this.emit(); },
-  state() { return { running: this.running, total: this.total, done: this.done, failed: this.failed, current: this.current, log: this.log, batch: (store.get('settings').autoscan || {}).batch || 3, ids: (store.get('settings').autoscan || {}).ids || null }; },
+  state() { return { running: this.running, total: this.total, done: this.done, failed: this.failed, failedList: this.failedList, current: this.current, log: this.log, batch: (store.get('settings').autoscan || {}).batch || 3, ids: (store.get('settings').autoscan || {}).ids || null }; },
   emit() { send('autoscan', this.state()); },
   onImport(username, r, count, noGen = 0) {
     if (r && r.incomplete) return;   // half-loaded base: keep waiting for the real scan
@@ -126,7 +128,7 @@ const autoScan = {
       const pets = Array.isArray(b.pets) ? b.pets : [];
       // without the game's count (its data not on the scanning client yet, so no uuids either) a
       // base is only taken after 90 s of waiting
-      if (b.expected == null ? (!pets.length || Date.now() - (this.waitSince[k] || 0) < 90000) : pets.length < b.expected) continue;
+      if (b.expected == null ? (!pets.length || Date.now() - (this.waitSince[k] || 0) < 30000) : pets.length < b.expected) continue;
       const r = importPets({ username: b.owner, userId: b.userId, pets, expected: b.expected, slots: b.slots, traitsKnown: true, remote: true }, null, { replace: true, onlySaved: true });
       if (!r || r.skipped === true || r.incomplete) continue;
       store.log('info', `[Scanner] ${b.owner}: ${r.added} pets synced (server scan by @${d.by})`);
@@ -152,7 +154,7 @@ const autoScan = {
     if (!lastAutoexec.some(f => /zotac_scanner\.lua$/i.test(f))) syncAutoexec();
     const host = this.pickHost(ids);
     if (!host) { this.say('Auto Scan needs one logged-in account in SCRIPT mode: it joins with the chosen accounts and scans the whole server (Roblox Accounts → SCRIPT)', 'error'); return this.state(); }
-    Object.assign(this, { running: true, stopFlag: false, total: accts.length, done: 0, failed: 0, current: [], waiters: {}, waitSince: {}, joinAt: {}, opened: new Set(), hostId: host.id });
+    Object.assign(this, { running: true, stopFlag: false, total: accts.length, done: 0, failed: 0, failedList: [], batch, current: [], waiters: {}, waitSince: {}, joinAt: {}, opened: new Set(), hostId: host.id });
     this.say(`Started: ${accts.length} account(s), ${batch} per batch - @${host.username} scans the server`);
     (async () => {
       try {
@@ -161,7 +163,7 @@ const autoScan = {
           if (accts.some(a => a.id === host.id)) await this.batchOf([host], 'Scanning account');
           for (let i = 0; i < others.length && !this.stopFlag; i += batch) await this.batchOf(others.slice(i, i + batch), `Batch ${i / batch + 1}`);
         } else {
-          this.failed = accts.length;
+          for (const a of accts) this.fail(a, `the scanning account @${host.username} never got into the game`);
         }
       } catch (e) { this.say('Auto Scan stopped: ' + e.message, 'error'); }
       this.say(this.stopFlag ? 'Stopped' : `Finished: ${this.done} scanned, ${this.failed} failed`);
@@ -169,6 +171,8 @@ const autoScan = {
       // every window this run opened is closed (the scanning account too), checked one by one
       await this.closeOpened().catch(e => this.say('Closing the windows: ' + e.message, 'error'));
       send('pets:changed');
+      // accounts that did not launch / were not scanned: a popup offers to retry just those
+      if (!this.stopFlag && this.failedList.length) send('autoscan:failed', { accounts: this.failedList, batch: this.batch });
     })();
     return this.state();
   },
@@ -199,7 +203,11 @@ const autoScan = {
     const isHost = a.id === this.hostId;
     if (isHost) this.joinAt[k] = Date.now();
     this.waitSince[k] = Date.now();
-    const result = new Promise(res => { this.waiters[k] = res; setTimeout(() => { if (this.waiters[k] === res) { delete this.waiters[k]; res({ ok: false, why: 'its base was not in the server scan within 4 minutes (did it join the private server?)' }); } }, 240000); });
+    // the 45 s count from the launch, not from queueing (the launch itself can take a few seconds)
+    let res0;
+    const result = new Promise(res => { this.waiters[k] = res; res0 = res; });
+    const arm = () => setTimeout(() => { if (this.waiters[k] === res0) { delete this.waiters[k]; res0({ ok: false, why: `not scanned within ${this.SCAN_LIMIT / 1000} s (did it launch and join the private server?)` }); } }, this.SCAN_LIMIT);
+    if (isHost) arm();
     let opened = false;
     if (!isHost) {
       try {
@@ -208,12 +216,13 @@ const autoScan = {
         opened = !(r && r.skipped);
         if (opened) this.opened.add(a.id);
         this.joinAt[k] = Date.now();
+        arm();
         this.say(`@${a.username}: ${opened ? (a.legit ? 'opened with real Roblox (Legit)' : 'launched') : 'already in game'}, waiting for its base in the server scan`);
-      } catch (e) { if (this.waiters[k]) delete this.waiters[k]; this.failed++; this.say(`@${a.username}: ${e.message}`, 'error'); return; }
+      } catch (e) { if (this.waiters[k]) delete this.waiters[k]; this.fail(a, 'did not launch: ' + e.message); this.say(`@${a.username}: ${e.message}`, 'error'); return; }
     }
     const r = await result;
     if (r.ok) { this.done++; this.say(`@${a.username}: scanned (${r.count} pets)${r.noGen ? ` - ${r.noGen} without gen/s (name tag out of range; a pet Zotac knew keeps its gen/s)` : ''}`); }
-    else { this.failed++; this.say(`@${a.username}: ${r.why}`, 'warn'); }
+    else { if (r.why !== 'stopped') this.fail(a, r.why); else this.failed++; this.say(`@${a.username}: ${r.why}`, 'warn'); }
     // only the windows Auto Scan opened, and never one that is busy with a delivery job
     const busy = () => store.get('jobs').some(j => j.accountId === a.id && ['pending', 'running'].includes(j.status));
     if (opened) setTimeout(() => this.closeOne(a), 1500);

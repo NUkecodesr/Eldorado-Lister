@@ -204,6 +204,7 @@ function wire() {
   M.on('repricer:done', () => { if (S.page === 'listings') soft(); });
   M.on('server:scan', () => { if (S.page === 'server') liveTick('local', true); });
   M.on('autoscan', st => { AS.st = st; if (AS.draw) AS.draw(); });
+  M.on('autoscan:failed', r => autoScanFailedPopup(r));
   M.on('toast', t => { if (t && t.text) toast(t.text, t.kind || 'info', 10000); });
   M.on('sale', o => { toast('Sale: ' + (o && (o.title || o.id) || 'new order'), 'good', 8000); liveNow(); });
   M.on('dispute', o => toast('Dispute opened on order ' + (o && o.id || ''), 'error', 10000));
