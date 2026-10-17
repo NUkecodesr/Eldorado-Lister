@@ -552,11 +552,14 @@ local function readPlot(plot, overheads, used, withModels)
                 table.sort(names)
                 info.modelAttrs = table.concat(names, ",")
             end
-            local e = takeEntry(entries, c.Name, mu, podiumSlot(podiums, pos), c:GetAttribute("Mutation"))
+            -- the mutation is the model's own attribute (no attribute = a base pet). The plot cache
+            -- entry is only matched to the model by name, so its Mutation can be another copy's
+            local mutAttr = c:GetAttribute("Mutation")
+            local e = takeEntry(entries, c.Name, mu, podiumSlot(podiums, pos), mutAttr or "None")
             local a = e and e.a
             local uuid = mu or (e and e.uuid) or nil
             if uuid then info.withUuid = (info.withUuid or 0) + 1 end
-            local mutation = c:GetAttribute("Mutation") or (a and a.Mutation) or "None"
+            local mutation = mutAttr or "None"
 
             local cache = RS:FindFirstChild("Controllers") and RS.Controllers:FindFirstChild("AssetStreamController")
             cache = cache and cache:FindFirstChild("AssetCache")

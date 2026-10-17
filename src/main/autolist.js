@@ -28,11 +28,15 @@ class AutoLister extends EventEmitter {
       const b = attrs.find(a => a.id === g.msAttr);
       const n = attrs.find(a => a.id === g.msNumericAttr);
       const t = attrs.find(a => a.id === g.traitsAttr);
-      const mOk = !m || (m.value && m.value.id) === mut;
+      // exactly the same brainrot only: an offer without a mutation is a base one (it used to match
+      // any mutation), without traits has none, and gen/s must be there and within 2%
+      const v = m && m.value;
+      const offerMut = !v || /^(none|normal|default|base)$/i.test(String(v.name || v.id || '')) ? 'none' : v.id;
+      const mOk = offerMut === mut;   // mutationId gives 'none' for a base pet
       const bOk = !b || (b.value && b.value.id) === bucket;
-      const nOk = !n || !pet.gen || Math.abs(Number(n.value) - pet.gen) / pet.gen < 0.02;
-      const offerTraits = t ? (t.values || (t.value ? [t.value] : [])).map(v => sab.norm(v.name || v)).sort().join(',') : null;
-      const tOk = offerTraits === null || offerTraits === (pet.traits || []).map(sab.norm).sort().join(',');
+      const nOk = pet.gen ? (!!n && Math.abs(Number(n.value) - pet.gen) / pet.gen < 0.02) : true;
+      const offerTraits = t ? (t.values || (t.value ? [t.value] : [])).map(v => sab.norm(v.name || v)).sort().join(',') : '';
+      const tOk = offerTraits === (pet.traits || []).map(sab.norm).sort().join(',');
       return mOk && bOk && nOk && tOk;
     });
   }
@@ -44,7 +48,27 @@ class AutoLister extends EventEmitter {
     if (this.running) throw new Error('Auto List already running');
     const settings = this.store.get('settings');
     const al = { ...settings.autolist, ...opts };
-    const pets = this.store.get('pets').filter(p => petIds.includes(p.id));
+    let pets = this.store.get('pets').filter(p => petIds.includes(p.id));
+    // two records with the same brainrot uuid are one pet in the game (left over from older imports):
+    // the extra record goes, so it is never listed twice
+    {
+      const seen = new Map(), extra = new Set();
+      for (const p of this.store.get('pets')) {
+        if (!p.uuid || p.delivered) continue;
+        const k = p.accountId + '|' + p.uuid;
+        if (!seen.has(k)) { seen.set(k, p); continue; }
+        // keep the one that is listed / sold (it belongs to an offer or order), else the first
+        const keep = seen.get(k);
+        const drop = (p.status !== 'available' && keep.status === 'available') ? keep : p;
+        if (drop === keep) seen.set(k, p);
+        if (drop.status === 'available' && !drop.orderId) extra.add(drop.id);
+      }
+      if (extra.size) {
+        this.store.set('pets', this.store.get('pets').filter(p => !extra.has(p.id)));
+        this.log('warn', `${extra.size} duplicate record(s) of the same brainrot (same uuid) removed before listing`);
+        pets = pets.filter(p => !extra.has(p.id));
+      }
+    }
     this.running = true; this.stopFlag = false;
     this.progress = { done: 0, total: pets.length, ok: 0, failed: 0, current: null };
     this.emit('progress', this.progress);
@@ -89,10 +113,19 @@ class AutoLister extends EventEmitter {
         // 2. stock detection
         const stock = al.stockDetection ? this.findStock(pet, myOffers) : null;
         if (stock) {
-          await this.eld.bumpQuantity(stock, qty);
-          stock.quantity = (stock.quantity || 1) + qty;
+          // the offer may already stand for some of these pets: Zotac lost track of a listed pet (its
+          // record was reset) and it is listed again. Those are linked, not added: only pets beyond
+          // what the offer already covers raise its quantity.
+          const onOffer = this.store.get('pets').filter(p => p.offerId === stock.id && p.status === 'listed' && !p.delivered && !group.includes(p));
+          const live = Math.max(1, Number(stock.quantity) || 1);
+          const sameUuid = group.filter(p => p.uuid && onOffer.some(o => o.uuid === p.uuid)).length;
+          const already = Math.min(qty, Math.max(sameUuid, live - onOffer.length));
+          const add = qty - already;
+          if (add > 0) { await this.eld.bumpQuantity(stock, add); stock.quantity = live + add; }
           for (const p of group) this.updatePet(p.id, { status: 'listed', offerId: stock.id, price: stock.pricePerUnit ? stock.pricePerUnit.amount : price, listedAt: Date.now() });
-          this.log('info', `Stock +${qty} → "${stock.offerTitle}" now qty ${stock.quantity}`);
+          this.log('info', add > 0
+            ? `Stock +${add} → "${stock.offerTitle}" now qty ${stock.quantity}${already ? ` (${already} already on it, linked)` : ''}`
+            : `"${stock.offerTitle}" already lists ${qty > 1 ? 'these pets' : 'this pet'} (qty ${live}) - linked, quantity unchanged`);
         } else {
           // 3. text
           const vars = { account: acct ? acct.username : '', emoji: al.emoji };

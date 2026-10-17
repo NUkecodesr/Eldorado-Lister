@@ -478,7 +478,8 @@ PAGES.autolist = async root => {
   const row = (grp, rev) => {
     const p = grp[0];
     const ids = grp.map(x => x.id);
-    const n = grp.length;
+    // real copies: two records with the same brainrot uuid are one pet in the game
+    const n = new Set(grp.map(x => x.uuid || x.id)).size;
     const allSel = ids.every(id => AL.selected.has(id));
     const tEl = h('span', { class: 'x-alt' }, p.title || xFill(al.titleTemplate, p));
     if (!p.title) titleEls.push([tEl, p]);
