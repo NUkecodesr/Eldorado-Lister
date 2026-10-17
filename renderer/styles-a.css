@@ -197,6 +197,10 @@ textarea.x-json { min-height: 76px; font-size: 11px; background: #0c0906; }
 .x-send { width: 36px; height: 36px; border-radius: 50%; border: 1px solid #d89d1a; background: linear-gradient(180deg, var(--gold), var(--gold2)); color: #1d1404; cursor: pointer; font-size: 14px; }
 .x-wv { flex: 1; height: auto; border: 0; border-radius: 0; }
 .x-am .grow { min-width: 0; }
+/* a filter pill row followed by a bar or panel (Chat, Orders): keep them apart */
+.x-pills + .x-bar, .x-pills + .x-panel, .x-pills + .x-chat { margin-top: 12px; }
+.x-am { margin-bottom: 12px; }
+.x-asw { gap: 6px; align-items: center; flex-wrap: nowrap; }
 
 /* Sales History filter fixes: inputs inside a column label must not take the
    row's 140px flex-basis as height; date pickers get the dark input style. */

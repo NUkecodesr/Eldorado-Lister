@@ -73,6 +73,7 @@ const DEFAULTS = {
     // deliveryTimes: competitor offers must use one of these (empty = fall back to maxDeliveryTime)
     rules: { maxDeliveryTime: 'Hour1', deliveryTimes: ['Instant', 'Minute20', 'Hour1'], minFeedback: 95, minRatings: 5, ignoreOwn: true, ignoreTitleWords: '' },
     repricer: { enabled: false, intervalMin: 20, undercut: 0.01, floorPct: 70, onlyIfBeaten: true, scope: 'all', offerIds: [] },
+    scanner: { autoexec: true },   // Auto Scanner: zotac_scanner.lua in autoexec (Roblox Accounts switch)
     delivery: { enabled: false, markDelivered: true, recordProof: false, cancelOnFail: true, consolidate: true, agentTimeoutSec: 240, steps: DEFAULT_DELIVERY_STEPS },
     launcher: { autoLaunch: true, privateServer: '', exePath: '', multiInstance: true, cooldownSec: 120, closeAfterDelivery: true },
     extensionToken: rid(8),

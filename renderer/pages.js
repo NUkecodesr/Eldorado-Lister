@@ -249,11 +249,7 @@ PAGES.autolist = async root => {
   const markSold = async p => { const pr = await promptBox('Mark as sold (sold outside Zotac)', `Sale price $${p.offerId ? ' — the Eldorado offer stays live, delete it there if needed' : ''}`, p.price || ''); if (pr === null) return; await M.call('pets:markSold', [p.id], pr); AL.selected.delete(p.id); await refreshData(); render(); };
   const delPet = async p => { if (!await confirmBox(`Delete ${p.name} from the app? (Eldorado offers are not touched)`)) return; await M.call('pets:delete', [p.id]); AL.selected.delete(p.id); await refreshData(); render(); };
   // open our Searcher prefilled with this brainrot and run the search
-  const searchEldorado = async p => {
-    Object.assign(SR.q, { name: p.name, page: 1 });
-    SR.res = null; SR.loading = true; go('searcher');
-    SR.res = await run(() => M.call('eld:search', { ...SR.q, pageSize: 30 })); SR.loading = false; render();
-  };
+  const searchEldorado = p => searchSimilar(p);
 
   // ---- scanner script panel: read-only, always the bundled scanner with this install's port +
   // token (an edited copy did nothing for autoexec and kept an old token after a token change) ----
@@ -265,7 +261,8 @@ PAGES.autolist = async root => {
   jsonArea.addEventListener('input', () => { AL.json = jsonArea.value; countEl.textContent = String(xJsonCount(AL.json)); });
 
   const scriptPanel = h('section', { class: 'x-panel' },
-    h('div', { class: 'x-ptitle' }, h('span', { class: 'x-glyph' }, '</>'), 'PLOT SCANNER SCRIPT'),
+    h('div', { class: 'x-ptitle' }, h('span', { class: 'x-glyph' }, '</>'), 'PLOT SCANNER SCRIPT', h('div', { class: 'grow' }),
+      h('small', { class: 'muted', style: { fontWeight: 400, letterSpacing: 0 } }, 'Auto Scanner'), sw((S.settings.scanner || {}).autoexec !== false, v => toggleAutoexec('scanner', v))),
     h('p', { class: 'x-ptext' }, 'Zotac already puts the scanner in your executor\'s autoexec, so every account it opens scans ', h('b', null, 'its own base'), ' and keeps it synced every 30 s. Copy it only to run it by hand (this copy shows an in-game window and also puts the JSON on your clipboard, to paste below if Zotac was closed).'),
     h('div', { class: 'x-code' }, scriptArea,
       h('div', { class: 'row x-code-btns' },
@@ -1303,7 +1300,8 @@ PAGES.accounts = async root => {
         h('button', { class: 'btn sm primary', onclick: async () => { const txt2 = await readFileText(); if (!txt2) return; const r = await run(() => M.call('accounts:import', txt2)); if (r) { toast(`Imported ${r.accounts} accounts, ${r.pets} pets`, 'good'); await refreshData(); render(); } } }, '⬆ Import JSON'),
         h('button', { class: 'btn sm', onclick: async () => xCopy(await M.call('accounts:export'), 'All accounts copied') }, '⎘ Copy All'),
         h('button', { class: 'btn sm', onclick: () => { RA.org = RA.org === 'name' ? 'pets' : RA.org === 'pets' ? 'free' : 'name'; toast('Sorted by ' + ({ name: 'name', pets: 'most pets', free: 'fewest pets' }[RA.org]), 'info', 2200); render(); } }, '⠿ Organize'),
-        h('button', { class: 'btn sm primary', onclick: () => openAutoScan() }, '⌕ Auto Scan'),
+        h('div', { class: 'row x-asw', title: 'zotac_scanner.lua in your executor autoexec: every account Zotac opens scans its base' }, h('small', { class: 'muted' }, 'Auto Scanner'), sw((S.settings.scanner || {}).autoexec !== false, v => toggleAutoexec('scanner', v))),
+        h('button', { class: 'btn sm primary', onclick: () => { if ((S.settings.scanner || {}).autoexec === false) return toast('Turn on Auto Scanner first: without it opened accounts never scan', 'error', 7000); openAutoScan(); } }, '⌕ Auto Scan'),
         h('button', { class: 'btn sm', title: 'Launch every account that has a cookie and is not in game', onclick: async () => { const n = S.accounts.filter(a => a.hasCookie).length; if (!n) return toast('No logged-in accounts', 'error'); if (!await confirmBox(`Open Roblox on all ${n} logged-in accounts (4 s apart, accounts already in game are skipped)?`)) return; toast('Launching accounts…', 'info'); const r = await run(() => M.call('accounts:launchAll')); if (r) toast(r.map(x => `${x.username}: ${x.error || x.skipped || 'launched'}`).join(' · ') || 'No accounts with cookies', 'good', 9000); } }, '▶ Launch All'),
         h('button', { class: 'btn sm', title: 'Restart the multi-instance helper (when a new client closes the old one)', onclick: () => run(() => M.call('launcher:fix'), 'Launcher reset') }, '⟳ Fix Launch'),
         h('button', { class: 'btn sm primary', title: 'Sign in to a stock account on roblox.com; the account and its cookie are added', onclick: async () => { const r = await run(() => M.call('accounts:loginBrowser', null)); if (r) { toast(`${r.created ? 'Added' : 'Updated'} @${r.username} — cookie saved`, 'good'); await refreshData(); render(); } } }, '⎆ Browser Login'),
@@ -1375,6 +1373,17 @@ PAGES.sales = async root => {
 };
 
 // ============================== SEARCHER ==================================
+// "Search on Eldorado" from a pet: same brainrot AND same mutation, cheapest first; every other
+// filter is cleared so an old one can not hide the results
+async function searchSimilar(p) {
+  const nk = x => String(x || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const mAttr = (S.attrs || []).find(a => a.id === S.settings.game.mutationAttr);
+  const want = p.mutation && !/^normal$/i.test(p.mutation) ? p.mutation : 'None';
+  const hit = mAttr && mAttr.selectValues.find(v => nk(v.name) === nk(want) || nk(v.id) === nk(want));
+  SR.q = { ...SR.q, name: p.name, mutation: hit ? hit.id : (nk(want) === 'none' ? 'none' : nk(want)), genBucket: '', trait: '', minPrice: '', maxPrice: '', deliveryTime: '', search: '', sort: 'priceAsc', page: 1 };
+  SR.res = null; SR.loading = true; go('searcher');
+  SR.res = await run(() => M.call('eld:search', { ...SR.q, pageSize: 30 })); SR.loading = false; render();
+}
 const SR = { q: { name: '', mutation: '', genBucket: '', trait: '', minPrice: '', maxPrice: '', deliveryTime: '', sort: 'priceAsc', search: '', page: 1 }, res: null, loading: false };
 PAGES.searcher = async root => {
   const q = SR.q;

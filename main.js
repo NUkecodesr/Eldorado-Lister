@@ -102,6 +102,7 @@ const autoScan = {
     store.patchSettings({ autoscan: { batch, ids } });
     if (!accts.length) { this.say('No logged-in accounts selected', 'warn'); return this.state(); }
     if (!String((store.get('settings').launcher || {}).privateServer || '').trim()) { this.say('No private server link set - Auto Scan never opens accounts in a public server', 'error'); return this.state(); }
+    if ((store.get('settings').scanner || {}).autoexec === false) { this.say('Auto Scanner is off, so the scanner is not in autoexec and opened accounts would never scan. Turn on Auto Scanner (Roblox Accounts) first.', 'error'); return this.state(); }
     if (!lastAutoexec.some(f => /zotac_scanner\.lua$/i.test(f))) syncAutoexec();
     Object.assign(this, { running: true, stopFlag: false, total: accts.length, done: 0, failed: 0, current: [] });
     this.say(`Started: ${accts.length} account(s), ${batch} per batch`);
@@ -391,13 +392,16 @@ function scannerScript(which = 'scanner') {
   return src;
 }
 
-// Delivery agent in the executor's autoexec, so it starts by itself in every Roblox client the
-// executor attaches to (Zotac launches + closes stock accounts per order). Synapse Z always gets
-// it; Volt / Real only keep an existing copy current. Rewritten on every start and token change,
-// so autoexec never runs a stale version or an old token.
+// Delivery agent + scanner in the executor's autoexec, so they start by itself in every Roblox
+// client the executor attaches to (Zotac launches + closes stock accounts per order). Each is only
+// there while its switch is on: Auto Delivery (delivery.enabled) -> zotac_delivery.lua, Auto Scanner
+// (scanner.autoexec) -> zotac_scanner.lua; switched off = the file is removed from every folder.
+// Synapse Z always gets them; Volt / Real only when Zotac's scripts were there before (remembered
+// in settings.autoexecRemoved after a removal). Rewritten on every start and token change, so
+// autoexec never runs a stale version or an old token.
 let lastAutoexec = [];
-function syncAutoexec() {
-  if (process.env.ZOTAC_NO_AUTOEXEC) return lastAutoexec;   // test copies must not overwrite the real autoexec
+let lastAutoexecRemoved = [];
+function autoexecTargets() {
   const base = process.env.LOCALAPPDATA || '';
   const roam = process.env.APPDATA || '';
   const targets = [
@@ -411,20 +415,45 @@ function syncAutoexec() {
     // folders picked on the Auto Delivery page (any executor, wherever it is installed)
     ...((store.get('settings').delivery || {}).autoexecDirs || []).map(dir => ({ dir, always: true }))
   ].filter((t, i, all) => all.findIndex(x => x.dir.toLowerCase() === t.dir.toLowerCase()) === i);
-  const files = [['zotac_delivery.lua', scannerScript('delivery')], ['zotac_scanner.lua', scannerScript('scanner-auto')]];
-  const done = [];
+  const s = store.get('settings');
+  const removed = new Set((s.autoexecRemoved || []).map(d => d.toLowerCase()));
+  const names = ['zotac_delivery.lua', 'zotac_scanner.lua'];
+  // a folder is used when it exists and is for sure an executor Zotac installs into
+  return targets.filter(t => fs.existsSync(t.dir) && (t.always || removed.has(t.dir.toLowerCase()) || names.some(n => fs.existsSync(path.join(t.dir, n)))));
+}
+const AUTOEXEC_FILES = { delivery: 'zotac_delivery.lua', scanner: 'zotac_scanner.lua' };
+function autoexecWanted() {
+  const s = store.get('settings');
+  return { 'zotac_delivery.lua': !!(s.delivery || {}).enabled, 'zotac_scanner.lua': (s.scanner || {}).autoexec !== false };
+}
+function syncAutoexec() {
+  if (process.env.ZOTAC_NO_AUTOEXEC) return lastAutoexec;   // test copies must not overwrite the real autoexec
+  const targets = autoexecTargets();
+  const want = autoexecWanted();
+  const s = store.get('settings');
+  const removedDirs = new Set((s.autoexecRemoved || []).map(d => d.toLowerCase()));
+  const files = [['zotac_delivery.lua', () => scannerScript('delivery')], ['zotac_scanner.lua', () => scannerScript('scanner-auto')]];
+  const done = [], gone = [];
   for (const t of targets) for (const [name, script] of files) {
     const f = path.join(t.dir, name);
-    if (name === 'zotac_delivery.lua') try { const old = path.join(t.dir, 'meowl_delivery.lua'); if (fs.existsSync(old)) { fs.unlinkSync(old); if (!fs.existsSync(f)) fs.writeFileSync(f, ''); } } catch { /* in use */ }
+    if (name === 'zotac_delivery.lua') try { const old = path.join(t.dir, 'meowl_delivery.lua'); if (fs.existsSync(old)) fs.unlinkSync(old); } catch { /* in use */ }
     try {
-      if (!fs.existsSync(t.dir) || (!t.always && !fs.existsSync(f) && name === 'zotac_delivery.lua') || (!t.always && name !== 'zotac_delivery.lua' && !fs.existsSync(path.join(t.dir, 'zotac_delivery.lua')))) continue;
-      if (fs.existsSync(f) && fs.readFileSync(f, 'utf8') === script) { done.push(f); continue; }
-      fs.writeFileSync(f, script);
+      if (!want[name]) {   // switched off: not in this autoexec
+        if (fs.existsSync(f)) { fs.unlinkSync(f); gone.push(f); }
+        removedDirs.add(t.dir.toLowerCase());   // so switching on puts it back here too
+        continue;
+      }
+      const src = script();
+      if (fs.existsSync(f) && fs.readFileSync(f, 'utf8') === src) { done.push(f); continue; }
+      fs.writeFileSync(f, src);
       done.push(f);
     } catch (e) { store.log('warn', `[Autoexec] ${f}: ${e.message}`); }
   }
-  if (done.length) store.log('info', '[Autoexec] delivery agent + scanner installed: ' + done.join(', '));
-  lastAutoexec = done;
+  const nextRemoved = [...removedDirs];
+  if (nextRemoved.join('|') !== (s.autoexecRemoved || []).map(d => d.toLowerCase()).join('|')) { s.autoexecRemoved = nextRemoved; store.save(); }
+  if (gone.length) store.log('info', '[Autoexec] removed: ' + gone.join(', '));
+  if (done.length) store.log('info', '[Autoexec] installed: ' + done.join(', '));
+  lastAutoexec = done; lastAutoexecRemoved = gone;
   return done;
 }
 
@@ -697,6 +726,23 @@ function ipc() {
   handle('autoscan:clear', () => { autoScan.log = []; autoScan.emit(); return true; });
   handle('scanner:autoexecScript', () => scannerScript('scanner-auto'));
   handle('agent:autoexecStatus', () => lastAutoexec);
+  // the folders an Auto Delivery / Auto Scanner switch puts its script into (or removes it from)
+  handle('autoexec:plan', kind => {
+    const name = AUTOEXEC_FILES[kind];
+    if (!name) throw new Error('unknown script ' + kind);
+    if (process.env.ZOTAC_NO_AUTOEXEC) return { name, dirs: [], present: [], test: true };
+    const dirs = autoexecTargets().map(t => t.dir);
+    return { name, dirs, present: dirs.filter(d => fs.existsSync(path.join(d, name))) };
+  });
+  handle('autoexec:set', (kind, on) => {
+    const name = AUTOEXEC_FILES[kind];
+    if (!name) throw new Error('unknown script ' + kind);
+    if (kind === 'delivery') store.patchSettings({ delivery: { enabled: !!on } });
+    else store.patchSettings({ scanner: { autoexec: !!on } });
+    if (kind === 'delivery' && on) delivery.ensureTalk();
+    syncAutoexec();
+    return { name, on: !!on, installed: lastAutoexec.filter(f => f.toLowerCase().endsWith(name)), removed: lastAutoexecRemoved.filter(f => f.toLowerCase().endsWith(name)), settings: store.get('settings') };
+  });
   // diagnostics: raw Eldorado answers for the image upload (no listing is created)
   handle('eld:testUpload', async b64 => bridge.request('POST', 'files/me/Offer', { form: { image: { base64: b64, filename: 'test.png', type: 'image/png' } } }));
   handle('delivery:jobs', () => store.get('jobs').slice(-20));
@@ -710,6 +756,8 @@ function ipc() {
     if (patch.repricer) repricer.schedule();
     if (patch.game) { eld.cache.library = null; }
     if (patch.delivery && patch.delivery.enabled) delivery.ensureTalk();
+    // the switches decide which scripts are in autoexec
+    if ((patch.delivery && 'enabled' in patch.delivery) || (patch.scanner && 'autoexec' in patch.scanner)) syncAutoexec();
     return s;
   });
   handle('settings:regenToken', which => { const s = store.get('settings'); s[which] = rid(8); store.save(); if (which === 'agentToken') syncAutoexec(); return s[which]; });

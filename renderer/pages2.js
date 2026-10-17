@@ -420,6 +420,7 @@ const richText = parts => parts.map(p => Array.isArray(p) ? h('b', null, p[0]) :
 // buyer's replies, and after the buyer confirms the real delivery job is queued (the in-game
 // trade, launch and agent are all real). Nothing is sent to Eldorado or Discord.
 async function openOrderSimulator() {
+  if (!(S.settings.delivery || {}).enabled && !await confirmBox('Auto Delivery is off, so zotac_delivery.lua is not in autoexec and the in-game trade at the end will not run. Simulate anyway (chat only)?')) return;
   const avail = S.pets.filter(p => p.status !== 'sold' && !p.delivered);   // delivered pets left the base
   if (!avail.length) return toast('No pets to sell', 'error');
   const petSel = h('select', null, avail.map(p => h('option', { value: p.id }, `${p.name}${p.mutation && p.mutation !== 'None' ? ' · ' + p.mutation : ''} · ${formatGen(p.gen)} · @${(S.accounts.find(a => a.id === p.accountId) || {}).username || '?'}`)));
@@ -539,7 +540,7 @@ PAGES.server = async root => {
     h('div', { class: 'sv-pn' }, h('b', null, p.name), h('small', null, [p.rarity, showOwner ? who(p.base) : null].filter(Boolean).join(' · '))),
     xMutBlock(p.mutation), traitsEl(p),
     h('span', { class: 'sv-gen' }, formatGen(p.gen || 0)),
-    h('button', { class: 'x-srch', onclick: async () => { Object.assign(SR.q, { name: p.name, page: 1 }); SR.res = null; SR.loading = true; go('searcher'); SR.res = await run(() => M.call('eld:search', { ...SR.q, pageSize: 30 })); SR.loading = false; render(); } }, 'Search on Eldorado'));
+    h('button', { class: 'x-srch', onclick: () => searchSimilar(p) }, 'Search on Eldorado'));
 
   const totalPets = (scan.bases || []).reduce((n, b) => n + (b.pets || []).length, 0);
   const best = allPets[0];
@@ -592,7 +593,7 @@ PAGES.delivery = async root => {
       h('button', { class: 'btn sm', onclick: async () => { const ok = await run(() => M.call('delivery:talk')); toast(ok ? 'Chat listener connected' : 'Chat listener failed', ok ? 'good' : 'error'); M.call('app:info').then(i => { S.info = i; render(); }); } }, 'Reconnect chat'),
       h('button', { class: 'btn sm', title: 'Run a fake order through the buyer chat + real trade', onclick: () => openOrderSimulator() }, '🧪 Simulate order'),
       h('span', { class: 'mx-led ' + (cfg.enabled ? 'on' : '') }),
-      sw(cfg.enabled, v => saveSettings({ delivery: { enabled: v } }).then(render))));
+      sw(cfg.enabled, v => toggleAutoexec('delivery', v))));
   const tabs = h('div', { class: 'mx-tabs' }, [['activity', 'Deliver Activity'], ['trades', 'Trade Log'], ['messages', 'Automatic Messages'], ['tutorial', 'Tutorial']].map(([k, l]) => h('button', { class: 'mx-tab' + (DV.tab === k ? ' on' : ''), onclick: () => { DV.tab = k; render(); } }, l)));
 
   // ---------- trade log: every pet that left a stock account (permanent) ----------
@@ -725,6 +726,44 @@ PAGES.delivery = async root => {
 
   root.append(h('div', { class: 'mx-narrow wide' }, head, tabs, DV.tab === 'activity' ? activity : DV.tab === 'trades' ? trades : DV.tab === 'messages' ? messages : tut));
 };
+
+// ============================== AUTOEXEC SWITCHES ==========================
+// Auto Delivery and Auto Scanner each put their script in every executor autoexec folder Zotac
+// knows (Auto Delivery page > Autoexec card) when switched on, and remove it when switched off.
+// Both ask first in a popup that names the folders; cancelling leaves everything as it was.
+async function toggleAutoexec(kind, on) {
+  const info = {
+    delivery: { title: 'Auto Delivery', file: 'zotac_delivery.lua',
+      on: 'Zotac answers every new order in the buyer chat and trades the pets from your stock accounts (opening them in your private server when needed).',
+      off: 'New orders are no longer answered or delivered by Zotac. Orders already being delivered keep going.' },
+    scanner: { title: 'Auto Scanner', file: 'zotac_scanner.lua',
+      on: 'Every account Zotac opens scans its own base and keeps its pets synced every 30 s. Auto Scan needs this.',
+      off: 'Opened accounts no longer scan their base: pet lists stop updating and Auto Scan can not run.' }
+  }[kind];
+  let plan = null;
+  try { plan = await M.call('autoexec:plan', kind); } catch (e) { toast(e.message, 'error'); return render(); }
+  const dirs = plan.dirs || [];
+  const body = h('div', { class: 'grid' },
+    h('p', null, on ? info.on : info.off),
+    h('div', { class: 'x-panel', style: { padding: '10px 12px' } },
+      h('b', null, (on ? 'Adds ' : 'Removes ') + info.file + (on ? ' to' : ' from') + ':'),
+      dirs.length ? dirs.map(d => h('div', { class: 'mono muted', style: { fontSize: '11px', marginTop: '4px' } }, (plan.present.includes(d) ? '● ' : '○ ') + d))
+        : h('div', { class: 'muted', style: { marginTop: '4px' } }, plan.test ? 'test copy: autoexec is never touched' : 'no executor autoexec folder found — add yours on Auto Delivery > Autoexec')),
+    h('small', { class: 'muted' }, on ? 'Roblox games that are already open get it the next time they start.' : 'Roblox games that are already open keep running their copy until they close.'));
+  const go = await new Promise(res => modal((on ? 'Turn on ' : 'Turn off ') + info.title + '?', body, [
+    { label: t('cancel'), fn: () => res(false) },
+    { label: on ? 'Turn on' : 'Turn off', cls: on ? 'primary' : 'danger', fn: () => res(true) }]));
+  if (!go) return render();   // the switch goes back to how it was
+  const r = await run(() => M.call('autoexec:set', kind, on));
+  if (r) {
+    S.settings = r.settings;
+    if (kind === 'delivery') { DV.autoexec = undefined; }
+    const n = on ? r.installed.length : r.removed.length;
+    toast(on ? `${info.title} on — ${info.file} in ${n} autoexec folder${n === 1 ? '' : 's'}` : `${info.title} off — ${info.file} removed from ${n} folder${n === 1 ? '' : 's'}`,
+      on && !n ? 'error' : 'good', 7000);
+  }
+  render();
+}
 
 // ============================== VIDEO PROOF ===============================
 const VP = { list: null, rec: null, recOrder: null, started: 0, deliv: null, sel: null, q: '', status: 'all', play: false, dir: '' };
