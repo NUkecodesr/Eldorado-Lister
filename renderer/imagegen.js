@@ -5,7 +5,7 @@
 const MUTATION_COLORS = {
   none: ['#3a3022', '#15110c'], gold: ['#f6c343', '#6b4a06'], diamond: ['#8fe3ff', '#164a63'], rainbow: null,
   lava: ['#ff7a2f', '#5a1405'], galaxy: ['#9b6bff', '#1a0d4a'], candy: ['#ff8fd0', '#6a1a4a'], bloodrot: ['#d3243a', '#3a0509'],
-  cyber: ['#33e6ff', '#062f3d'], cursed: ['#8a3dff', '#16052e'], divine: ['#ffe9a6', '#7a5a12'], radioactive: ['#9dff3a', '#1f3d05'],
+  cyber: ['#33e6ff', '#062f3d'], cursed: ['#e0262a', '#3a0505'], divine: ['#ffe9a6', '#7a5a12'], radioactive: ['#9dff3a', '#1f3d05'],
   'yin-yang': ['#f2f2f2', '#111111'], phantom: ['#7f8ea8', '#161c27'], crystal: ['#b6f4ff', '#25546a'], eclipse: ['#5b4dbb', '#07061a']
 };
 const RARITY_COLORS = { Secret: '#f2f2f2', OG: '#ff4d6d', 'Brainrot God': '#ffcf3a', Mythic: '#ff5ad1', Legendary: '#ffb02e', Epic: '#a66bff', Rare: '#4fa3f7', Common: '#9aa0a6', Admin: '#ff3b3b' };
@@ -258,18 +258,21 @@ function pill(g, x, y, w, hgt, fill, stroke) {
   g.fillStyle = fill; g.fill(); g.lineWidth = 2; g.strokeStyle = stroke; g.stroke();
 }
 
-// Mutation recolour, made to look like the game's mutated brainrots:
-//  - palette: taken from the mutation's own game icon (dark -> light colours), else the
-//    fallback MUTATION_COLORS pair
-//  - gradient map: every pixel's brightness picks a colour from that palette, so shading and
-//    detail stay but the whole brainrot takes the mutation's colours (like the game recolour)
-//  - per-mutation extras (MUTATION_FX): rainbow sweep, stars, sparkles, stripes, glow, see-through
+// Mutation recolour, matched to the game's own mutated brainrots:
+//  - MUTATION_LUTS: brightness -> colour maps (24 stops, dark -> light) learned from the wiki's
+//    in-game pictures of the same brainrot plain and in every mutation (Mutations page), so a
+//    pixel gets the colour that brightness has on a real mutated brainrot
+//  - icon palette / MUTATION_COLORS: fallback for mutations without a learned map
+//  - MUTATION_FX: what the game adds on top, as seen in those pictures: Radioactive hatch,
+//    Cursed black blotches, Candy dots, Eclipse glowing dots, Divine gold marks, sparkles,
+//    Phantom/Crystal see-through, Yin Yang one half dark, Rainbow colour sweep
+const MUTATION_LUTS = {"gold":[[87,63,15],[87,63,15],[95,70,17],[102,74,18],[105,77,19],[106,89,21],[120,89,24],[122,91,26],[167,134,45],[169,134,45],[194,135,40],[222,135,39],[222,136,39],[197,150,49],[197,155,49],[211,165,44],[223,179,44],[242,199,47],[242,200,47],[244,201,49],[244,203,59],[247,213,124],[247,213,124],[247,213,124]],"diamond":[[19,67,94],[19,67,94],[20,75,104],[20,81,110],[21,86,116],[26,101,134],[29,102,135],[30,104,138],[47,160,222],[47,161,223],[47,161,224],[47,162,224],[48,164,216],[53,187,216],[53,187,216],[54,187,216],[61,189,219],[61,207,230],[61,207,230],[72,209,231],[86,212,232],[159,222,239],[159,223,239],[160,223,240]],"bloodrot":[[40,12,13],[40,12,13],[45,13,13],[49,13,13],[49,13,13],[50,14,14],[53,14,15],[57,15,15],[69,16,16],[69,16,16],[69,16,17],[87,17,20],[112,19,24],[132,22,29],[133,22,29],[133,22,29],[140,22,32],[161,23,34],[161,23,36],[161,40,60],[172,48,63],[187,119,136],[187,119,136],[187,119,136]],"candy":[[108,28,111],[108,28,111],[121,28,124],[128,28,133],[131,28,137],[197,28,191],[210,28,208],[226,29,220],[240,29,230],[240,41,230],[199,77,194],[182,119,177],[182,132,177],[194,141,184],[218,142,201],[247,142,216],[255,151,226],[255,203,245],[255,207,251],[255,209,252],[255,221,255],[255,223,255],[255,225,255],[255,227,255]],"lava":[[98,36,15],[98,36,15],[111,38,16],[116,42,17],[120,43,18],[137,45,23],[139,46,24],[141,47,25],[225,47,33],[226,47,34],[227,48,34],[227,54,34],[227,70,35],[229,83,40],[230,84,40],[231,85,41],[232,86,41],[233,117,42],[254,128,43],[254,129,44],[255,146,45],[255,146,45],[255,146,45],[255,146,45]],"galaxy":[[27,14,71],[27,14,71],[27,14,73],[28,15,75],[28,15,76],[30,15,83],[32,15,91],[33,16,96],[37,17,106],[37,17,111],[40,17,113],[43,17,124],[44,17,126],[47,18,133],[47,18,134],[48,18,135],[48,19,136],[183,46,217],[252,46,239],[253,46,243],[255,63,243],[255,63,243],[255,63,243],[255,79,243]],"yin-yang":[[19,19,19],[19,19,19],[26,26,26],[32,32,32],[38,38,38],[44,44,44],[51,51,51],[57,57,57],[70,70,70],[89,89,89],[108,108,108],[128,128,128],[147,147,147],[167,167,167],[186,186,186],[205,205,205],[218,218,218],[222,222,222],[228,228,228],[232,232,232],[238,238,238],[242,242,242],[248,248,248],[252,252,252]],"radioactive":[[10,40,7],[14,52,8],[18,64,10],[22,76,11],[26,88,13],[30,100,14],[34,112,16],[38,124,17],[45,136,19],[55,149,22],[65,161,24],[75,174,27],[85,186,29],[95,199,32],[105,211,34],[115,224,37],[125,232,41],[136,235,46],[147,238,51],[157,241,56],[168,244,62],[178,247,67],[189,250,72],[200,253,77]],"cursed":[[57,7,7],[71,8,8],[84,10,10],[98,11,11],[112,13,13],[126,14,14],[139,16,16],[153,17,17],[164,19,19],[173,20,20],[181,22,22],[190,23,23],[198,25,25],[207,26,26],[215,28,28],[224,29,29],[230,34,34],[233,42,41],[236,50,49],[240,58,56],[243,67,64],[247,75,71],[250,83,79],[253,91,86]],"divine":[[164,136,61],[164,136,61],[173,147,74],[183,157,88],[192,168,102],[202,178,116],[211,189,129],[220,200,143],[226,207,155],[229,212,164],[231,216,173],[234,220,183],[236,225,192],[239,229,202],[241,233,211],[244,238,220],[246,241,227],[247,243,230],[248,245,233],[249,247,237],[251,248,240],[252,250,244],[253,252,247],[254,254,250]],"cyber":[[13,13,14],[13,13,14],[13,13,14],[13,14,14],[13,14,15],[13,14,16],[13,15,16],[13,15,16],[14,20,24],[14,20,25],[14,21,26],[15,21,27],[15,21,27],[15,21,27],[15,21,27],[15,21,27],[15,21,27],[16,25,37],[16,25,37],[18,28,37],[24,36,49],[87,98,114],[87,99,115],[91,102,117]],"phantom":[[12,12,12],[12,12,12],[12,12,12],[12,12,12],[12,12,12],[12,12,12],[12,12,12],[12,12,12],[13,13,13],[13,13,13],[13,13,13],[13,13,13],[13,13,13],[13,13,13],[13,13,13],[13,13,13],[13,13,13],[15,15,15],[21,23,24],[27,33,35],[58,60,64],[104,153,165],[113,160,169],[130,170,183]],"crystal":[[113,131,204],[113,131,204],[113,131,204],[113,131,205],[114,131,205],[115,132,205],[116,132,205],[119,132,205],[143,139,209],[144,140,210],[146,141,211],[151,143,212],[155,144,212],[166,156,217],[168,158,219],[171,161,221],[186,176,228],[211,204,238],[231,217,243],[245,228,245],[252,233,252],[255,247,255],[255,248,255],[255,250,255]],"eclipse":[[4,3,9],[6,4,10],[6,5,12],[8,6,13],[8,6,15],[10,7,16],[10,8,18],[12,9,19],[13,10,22],[15,11,24],[17,13,28],[19,15,30],[21,16,34],[23,18,36],[25,20,40],[27,21,42],[31,24,48],[36,29,55],[41,33,63],[46,38,70],[52,42,78],[57,47,85],[62,51,93],[67,56,100]]};
 const MUTATION_FX = {
-  gold: { shine: 0.35, sparkle: 6 }, diamond: { sparkle: 10, shine: 0.3 }, crystal: { sparkle: 8, alpha: 0.9 },
-  rainbow: { rainbow: true }, galaxy: { stars: 70 }, lava: { glow: 'rgba(255,110,30,.75)' },
-  radioactive: { glow: 'rgba(140,255,60,.8)' }, divine: { glow: 'rgba(255,233,160,.9)', sparkle: 6 },
-  cyber: { glow: 'rgba(51,230,255,.7)', scan: true }, candy: { stripes: true }, cursed: { glow: 'rgba(138,61,255,.6)' },
-  bloodrot: { glow: 'rgba(211,36,58,.55)' }, phantom: { alpha: 0.72 }, eclipse: { glow: 'rgba(91,77,187,.55)' },
+  gold: { shine: 0.3, sparkle: 5 }, diamond: { sparkle: 8, shine: 0.25 }, crystal: { sparkle: 9, alpha: 0.88 },
+  rainbow: { rainbow: true }, galaxy: {}, lava: { glow: 'rgba(255,110,30,.45)' },
+  radioactive: { hatch: 'rgba(20,70,14,.45)' }, divine: { glow: 'rgba(255,233,160,.6)', marks: 'rgba(214,170,40,.85)' },
+  cyber: { scan: true }, candy: { dots: 'rgba(214,28,190,.9)' }, cursed: { blotches: 'rgba(10,4,4,.95)' },
+  bloodrot: {}, phantom: { alpha: 0.85 }, eclipse: { glow: 'rgba(120,96,200,.35)', glowdots: 'rgba(255,236,150,1)' },
   'yin-yang': { split: true }
 };
 const ICON_PALETTE = new WeakMap();
@@ -301,10 +304,10 @@ function tintPicture(img, w, hgt, pal, mkey, icon) {
   const g = c.getContext('2d');
   g.drawImage(img, 0, 0, c.width, c.height);
   const fx = MUTATION_FX[mkey] || {};
-  // palette stops, dark -> light
-  let stops = iconPalette(icon);
+  // palette stops, dark -> light: the learned in-game map first
+  const learned = MUTATION_LUTS[mkey] || null;
+  let stops = learned || iconPalette(icon);
   if (!stops && pal) { const lo = hexRgb(pal[1]), hi = hexRgb(pal[0]); stops = [lo, hexRgb(mixHex(pal[1], pal[0], 0.45)), hi, hexRgb(mixHex(pal[0], '#ffffff', 0.55))]; }
-  if (mkey === 'yin-yang') stops = [[18, 18, 18], [70, 70, 70], [200, 200, 200], [250, 250, 250]];
   const id = g.getImageData(0, 0, c.width, c.height), d = id.data, W = c.width, H = c.height;
   const lerp = (a, b, t) => a + (b - a) * t;
   const map = l => {   // l 0..1 through the 4 stops
@@ -316,13 +319,13 @@ function tintPicture(img, w, hgt, pal, mkey, icon) {
     const i = (y * W + x) * 4;
     if (!d[i + 3]) continue;
     let l = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) / 255;
-    l = Math.min(1, Math.max(0, (l - 0.5) * 1.15 + 0.52));   // a little more contrast, like the game's shading
+    if (!learned) l = Math.min(1, Math.max(0, (l - 0.5) * 1.15 + 0.52));   // learned maps already carry the game's contrast
     let rgb;
     if (fx.rainbow) rgb = hsl(((x + y) / (W + H)) * 360 * 1.4 % 360, 0.85, 0.25 + l * 0.55);
-    else if (fx.split) rgb = map(x < W / 2 ? l : 1 - l);   // yin-yang: one half inverted
+    else if (fx.split) { const c = v => Math.min(1, Math.max(0, (v - 0.5) * 2.2 + 0.5)); rgb = map(x < W / 2 ? c(1 - l) * 0.9 : 0.25 + c(l) * 0.75); }   // yin-yang: one half black with white features, one half white
     else if (stops) rgb = map(l);
     else continue;
-    const k = 0.9;   // keep a touch of the original colour for detail
+    const k = learned ? 1 : 0.9;   // learned maps replace the colour fully, like the game
     d[i] = lerp(d[i], rgb[0], k); d[i + 1] = lerp(d[i + 1], rgb[1], k); d[i + 2] = lerp(d[i + 2], rgb[2], k);
   }
   g.putImageData(id, 0, 0);
@@ -336,6 +339,34 @@ function tintPicture(img, w, hgt, pal, mkey, icon) {
   }
   if (fx.stars) for (let n = 0; n < fx.stars; n++) { const r = rnd() * 1.8 + 0.6; g.fillStyle = `rgba(255,255,255,${0.5 + rnd() * 0.5})`; g.beginPath(); g.arc(rnd() * W, rnd() * H, r, 0, Math.PI * 2); g.fill(); }
   if (fx.stripes) { g.globalAlpha = 0.28; g.fillStyle = '#ffffff'; for (let x = -H; x < W; x += 22) { g.beginPath(); g.moveTo(x, H); g.lineTo(x + 10, H); g.lineTo(x + 10 + H, 0); g.lineTo(x + H, 0); g.fill(); } g.globalAlpha = 1; }
+  const u = Math.max(2, Math.round(Math.min(W, H) / 60));   // pattern size follows the picture size
+  if (fx.hatch) {   // Radioactive: dense diagonal hatch over the green
+    g.strokeStyle = fx.hatch; g.lineWidth = u * 0.9;
+    for (let x = -H; x < W + H; x += u * 2.4) { g.beginPath(); g.moveTo(x, H); g.lineTo(x + H, 0); g.stroke(); }
+  }
+  if (fx.blotches) {   // Cursed: black blotches with a red rim over the red body
+    for (let n = 0; n < 90; n++) {
+      const x = rnd() * W, y = rnd() * H, r = u * (1 + rnd() * 2.4);
+      g.fillStyle = 'rgba(150,10,10,.55)'; g.beginPath(); g.arc(x, y, r * 1.25, 0, Math.PI * 2); g.fill();
+      g.fillStyle = fx.blotches; g.beginPath(); g.ellipse(x, y, r, r * (0.6 + rnd() * 0.5), rnd() * Math.PI, 0, Math.PI * 2); g.fill();
+    }
+  }
+  if (fx.dots) {   // Candy: small magenta sprinkles
+    g.fillStyle = fx.dots;
+    for (let n = 0; n < 70; n++) { const x = rnd() * W, y = rnd() * H; g.save(); g.translate(x, y); g.rotate(rnd() * Math.PI); g.fillRect(-u * 0.5, -u * 1.4, u, u * 2.8); g.restore(); }
+  }
+  if (fx.marks) {   // Divine: dense gold coins with a bright centre
+    for (let n = 0; n < 130; n++) {
+      const x = rnd() * W, y = rnd() * H, r = u * (0.8 + rnd() * 1.1);
+      g.fillStyle = fx.marks; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+      g.fillStyle = 'rgba(255,240,170,.95)'; g.beginPath(); g.arc(x, y, r * 0.45, 0, Math.PI * 2); g.fill();
+    }
+  }
+  if (fx.glowdots) {   // Eclipse: glowing yellow dots on the dark body
+    g.shadowColor = 'rgba(255,220,120,.95)'; g.shadowBlur = u * 3; g.fillStyle = fx.glowdots;
+    for (let n = 0; n < 80; n++) { const x = rnd() * W, y = rnd() * H; g.fillRect(x, y, u * 1.3, u * 1.3); }
+    g.shadowBlur = 0;
+  }
   if (fx.scan) { g.fillStyle = 'rgba(0,0,0,.18)'; for (let y = 0; y < H; y += 4) g.fillRect(0, y, W, 1.5); }
   g.restore();
   if (fx.sparkle) {   // 4-point sparkles on top (may poke out of the outline, like the game's shine)
