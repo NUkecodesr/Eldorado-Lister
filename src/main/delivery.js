@@ -83,6 +83,19 @@ async function historyInPage(cfg) {
   })).reverse();
 }
 
+// Injected into the eldorado.gg bridge page: sends a text message into a TalkJS conversation, the
+// way Eldorado's own chat (and Meowl) does it. Same session as the pictures, which do arrive.
+async function sendTextInPage(cfg) {
+  const s = window.__zotacTalk;
+  if (!s) throw new Error('chat listener not connected');
+  const core = Object.values(s).find(v => v && typeof v.conversation === 'function' && typeof v.uploadImage === 'function');
+  let ref = core ? core.conversation(cfg.conversationId) : null;
+  if (!ref || typeof ref.send !== 'function') { try { ref = typeof s.conversation === 'function' ? s.conversation(cfg.conversationId) : null; } catch { ref = null; } }
+  if (!ref || typeof ref.send !== 'function') throw new Error('TalkJS cannot send in this conversation');
+  await ref.send(cfg.text);
+  return 'sent';
+}
+
 function decodeJwt(t) {
   try { return JSON.parse(Buffer.from(String(t).split('.')[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8')); } catch { return null; }
 }
@@ -113,18 +126,57 @@ class Delivery extends EventEmitter {
     const tpl = (this.cfg.steps || {})[key] || '';
     return tpl.replace(/\{(\w+)\}/g, (m, k) => (vars[k] !== undefined ? vars[k] : m));
   }
+  // Chat text goes through TalkJS (conversation.send), like Eldorado's own chat and the buyer
+  // pictures; Eldorado's quick-reply endpoint is only the fallback (it did not deliver custom text).
+  // Messages of one order are queued so they arrive in the order they were written.
+  queue(orderId, fn) {
+    this.chains = this.chains || new Map();
+    const prev = this.chains.get(orderId) || Promise.resolve();
+    const run = prev.then(fn, fn);
+    this.chains.set(orderId, run.then(() => {}, () => {}));
+    return run;
+  }
+  async postText(orderId, conversationId, text) {
+    return this.queue(orderId, async () => {
+      let convId = conversationId;
+      if (!convId) { try { convId = await this.conversationOf(orderId); } catch { convId = null; } }
+      if (convId) {
+        try {
+          if (!await this.ensureTalk()) throw new Error(this.talkError || 'chat not connected');
+          const run = this.bridge.exec(`(${sendTextInPage.toString()})(${JSON.stringify({ conversationId: convId, text })})`);
+          await Promise.race([run, new Promise((_, rej) => setTimeout(() => rej(new Error('TalkJS send timed out (20 s)')), 20000))]);
+          return 'talkjs';
+        } catch (e) {
+          // a timed-out send may still arrive: no second copy through quick reply
+          if (/timed out/.test(e.message)) throw e;
+          this.log('warn', `chat ${orderId}: TalkJS send failed (${e.message}) - trying Eldorado quick reply`);
+        }
+      }
+      await this.eld.sendOrderMessage(orderId, text);
+      return 'quick-reply';
+    });
+  }
+  // any message to a buyer from the app (Chat page, Orders "Message buyer", auto message); the
+  // Chat page adds it to its own view
+  async chat(orderId, text) {
+    const d = this.map[orderId];
+    await this.postText(orderId, d && d.conversationId, String(text));
+    return true;
+  }
   async say(d, key, vars = {}, image = null) {
     const text = this.fill(key, { buyer: d.buyer || '', username: d.username || '', accounts: d.accounts.length, orderId: d.orderId, quantity: d.quantity || d.petIds.length || 1, ...vars });
     if (!text) return;
     if (d.sim) { d.log.push({ t: Date.now(), out: text, image }); this.store.save(); this.emit('update', d); return; }
-    // Eldorado's quick-reply endpoint is text only: the picture is kept for Zotac's own chat view
-    try { await this.eld.sendOrderMessage(d.orderId, text); d.log.push({ t: Date.now(), out: text, image }); }
+    try { await this.postText(d.orderId, d.conversationId, text); d.log.push({ t: Date.now(), out: text, image }); }
     catch (e) { this.log('error', `send ${key} → ${d.orderId}: ${e.message}`); d.log.push({ t: Date.now(), err: e.message }); }
     this.store.save(); this.emit('update', d);
   }
 
   // posts a picture (by URL) into the order chat; failures are logged, never block the flow
   async sendPicture(d, url, filename) {
+    return this.queue(d.orderId, () => this.sendPictureNow(d, url, filename));
+  }
+  async sendPictureNow(d, url, filename) {
     try {
       if (!d.conversationId) throw new Error('no conversation id for this order yet');
       await this.ensureTalk();
@@ -242,7 +294,7 @@ class Delivery extends EventEmitter {
   // a ready-made message (not one of the editable steps)
   async sayText(d, text) {
     if (d.sim) { d.log.push({ t: Date.now(), out: text }); this.store.save(); this.emit('update', d); return; }
-    try { await this.eld.sendOrderMessage(d.orderId, text); d.log.push({ t: Date.now(), out: text }); }
+    try { await this.postText(d.orderId, d.conversationId, text); d.log.push({ t: Date.now(), out: text }); }
     catch (e) { this.log('error', `send → ${d.orderId}: ${e.message}`); d.log.push({ t: Date.now(), err: e.message }); }
     this.store.save(); this.emit('update', d);
   }
@@ -1035,7 +1087,7 @@ class Delivery extends EventEmitter {
       if (this.cfg.recordProof) this.emit('proof', { action: 'stop', orderId });
       this.store.save(); this.emit('update', d); return;
     }
-    if (action === 'say') { await this.eld.sendOrderMessage(orderId, String(arg)); d.log.push({ t: Date.now(), out: String(arg) }); this.store.save(); this.emit('update', d); return; }
+    if (action === 'say') { await this.postText(orderId, d.conversationId, String(arg)); d.log.push({ t: Date.now(), out: String(arg) }); this.store.save(); this.emit('update', d); return; }
     if (action === 'resend') return this.say(d, arg);
     throw new Error('Unknown action ' + action);
   }

@@ -231,7 +231,7 @@ class Watcher extends EventEmitter {
     if (s.autoMessage.enabled && !s.delivery.enabled && !this.store.get('seen').autoMessaged[o.id]) {
       try {
         const text = s.autoMessage.text.replace(/\{buyer\}/g, o.buyer || '').replace(/\{item\}/g, o.title || '').replace(/\{orderId\}/g, o.id);
-        await this.eld.sendOrderMessage(o.id, text);
+        await (this.sendChat ? this.sendChat(o.id, text) : this.eld.sendOrderMessage(o.id, text));
         this.store.get('seen').autoMessaged[o.id] = Date.now();
         this.store.log('info', `[AutoMessage] sent to order ${o.id}`);
       } catch (e) { this.store.log('error', '[AutoMessage] ' + e.message); }

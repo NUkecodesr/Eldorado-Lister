@@ -438,6 +438,7 @@ function wire() {
   delivery.on('petsChanged', () => send('pets:changed'));
   delivery.on('trade', e => send('trade', e));
   delivery.on('message', m => send('talk:message', m));
+  watcher.sendChat = (orderId, text) => delivery.chat(orderId, text);
   // public picture URL of a brainrot (SAB wiki) for Discord cards
   delivery.petImageUrl = async name => ((await wiki.index()) || {})[sab.norm(name)] || null;
   delivery.on('proof', p => send('proof', p));
@@ -750,7 +751,7 @@ function ipc() {
   handle('eld:attrs', async () => { await eld.library(); return { attrs: eld.cache.attrs, game: store.get('settings').game }; });
   handle('eld:reloadLibrary', () => eld.library(true).then(() => eld.itemList()));
   handle('eld:raw', (method, p, body, query) => bridge.request(method, p, { body, query }));
-  handle('eld:message', (orderId, text) => eld.sendOrderMessage(orderId, text));
+  handle('eld:message', (orderId, text) => delivery.chat(orderId, text));
   handle('chat:history', (orderId, conversationId) => delivery.history(orderId, conversationId));
   handle('chat:buyerRoblox', async orderId => { try { const v = await eld.deliveryDetail(orderId); return typeof v === 'string' ? v : (v && (v.value || v.username)) || null; } catch { return null; } });
   handle('eld:profile', u => eld.publicProfile(u));

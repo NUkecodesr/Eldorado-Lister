@@ -221,17 +221,37 @@ local function wanted(job)
     return not (r and r.status and r.status ~= "running")
 end
 
+local function textShown(under, pattern)
+    for _, d in ipairs(under and under:GetDescendants() or {}) do
+        if d:IsA("TextLabel") and shown(d) and string.find(d.Text:gsub("<[^>]->", ""), pattern) then return true end
+    end
+    return false
+end
+
 local function readyAndAccept(root, who, reReady)
     task.wait(0.4)
-    local readyAt = os.clock()
-    local readied = false
-    while os.clock() - readyAt < 12 and tradeRoot() do
+    -- READY is a toggle. When the buyer readied first, our press starts the "Xs Left" countdown
+    -- straight away (no ACCEPT button yet), and pressing READY again un-readies us, so the trade
+    -- fell apart. Proof of being ready: our Ready mark, the countdown, ACCEPT, Confirmed!, or the
+    -- READY button gone. READY is pressed once; a second press only after 6 s with no proof at all.
+    local function isReady()
         local yr = root:FindFirstChild("Your") and root.Your:FindFirstChild("Ready")
-        if yr and yr.Visible then readied = true break end
+        if yr and yr:IsA("GuiObject") and shown(yr) then return true end
+        if textShown(root, "%d+%s*s%s+Left") or textShown(root, "^%s*Confirmed") then return true end
+        if buttonWithText(root, "ACCEPT", "CONFIRM") then return true end
+        return false
+    end
+    local readyAt, presses, lastPress, readied = os.clock(), 0, -99, false
+    while os.clock() - readyAt < 15 and tradeRoot() do
+        if isReady() then readied = true break end
         local b = buttonWithText(root, "READY")
-        if not b and buttonWithText(root, "ACCEPT", "CONFIRM") then readied = true break end
-        if b then fire(b.Activated, nil, 1) end
-        task.wait(1.2)
+        if b and presses < 2 and os.clock() - lastPress > 6 then
+            presses += 1; lastPress = os.clock()
+            fire(b.Activated, nil, 1)
+        elseif not b and presses > 0 then
+            readied = true break   -- pressed and the READY button is gone: the game took it
+        end
+        task.wait(0.2)
     end
     if not tradeRoot() then return false, who .. " closed the trade", true end
     if not readied then cancelTrade(); return false, "could not press READY" end
@@ -240,12 +260,6 @@ local function readyAndAccept(root, who, reReady)
     -- once both sides are ready the game shows a short "Xs Left" countdown with ACCEPT greyed out
     -- (presses are ignored), then ACCEPT works; pressing it shows "Confirmed!" on your offer
     -- (proof video 2026-10-16). Press only after the countdown, until Confirmed!, never after.
-    local function textShown(under, pattern)
-        for _, d in ipairs(under and under:GetDescendants() or {}) do
-            if d:IsA("TextLabel") and shown(d) and string.find(d.Text:gsub("<[^>]->", ""), pattern) then return true end
-        end
-        return false
-    end
     local acceptT0, presses, readies, lastPress, countdownSince = os.clock(), 0, 0, -99, nil
     while tradeRoot() and os.clock() - acceptT0 < ACCEPT_TIMEOUT do
         local confirmed = textShown(root:FindFirstChild("Your"), "^%s*Confirmed")
