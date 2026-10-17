@@ -224,7 +224,6 @@ PAGES.wallet = async root => {
       h('div', { class: 'mx-stat' }, h('div', { class: 'k' }, 'PENDING SALES'), h('div', { class: 'v' }, money(pend)), h('div', { class: 's' }, 'Funds from pending orders')),
       h('div', { class: 'mx-stat' }, h('div', { class: 'k' }, 'COMPLETED SALES'), h('div', { class: 'v' }, String(completed.length)), h('div', { class: 's' }, money(sum(completed)) + ' (last 50)')),
       h('div', { class: 'mx-stat' }, h('div', { class: 'k' }, 'DELIVERED'), h('div', { class: 'v' }, String(delivered.length))),
-      h('div', { class: 'mx-stat' }, h('div', { class: 'k' }, 'PURCHASES'), h('div', { class: 'v' }, '—')),
       h('div', { class: 'mx-stat' }, h('div', { class: 'k' }, 'CANCELED ORDERS'), h('div', { class: 'v' }, String(canceled.length)))),
     h('h3', { class: 'mx-h3' }, 'Transaction History', fallback ? h('small', null, 'wallet returned no transaction list — showing your 50 latest orders') : null),
     table(rows, cols, { empty: WL.loading ? 'Loading…' : 'No transactions yet.', maxHeight: 'calc(100vh - 400px)' }),
@@ -237,14 +236,15 @@ PAGES.analytics = async root => {
   const now = new Date(); now.setHours(0, 0, 0, 0);
   const buckets = [];
   for (let i = days - 1; i >= 0; i--) { const d = new Date(now); d.setDate(d.getDate() - i); buckets.push({ key: d.toDateString(), label: `${d.getMonth() + 1}/${d.getDate()}`, value: 0, count: 0 }); }
-  for (const s of S.sales) { const k = new Date(s.date).toDateString(); const b = buckets.find(x => x.key === k); if (b) { b.value += Number(s.price) || 0; b.count++; } }
+  const okSales = S.sales.filter(s => !/cancel|refund/i.test(s.state || ''));
+  for (const s of okSales) { const k = new Date(s.date).toDateString(); const b = buckets.find(x => x.key === k); if (b) { b.value += Number(s.price) || 0; b.count++; } }
   const rev30 = buckets.reduce((a, b) => a + b.value, 0);
   const cnt30 = buckets.reduce((a, b) => a + b.count, 0);
   const listed = S.pets.filter(p => p.status === 'listed').length;
   const sold = S.pets.filter(p => p.status === 'sold');
   const avgDays = sold.filter(p => p.listedAt && p.soldAt).map(p => (p.soldAt - p.listedAt) / 864e5);
   const byPet = {};
-  for (const s of S.sales) { const k = (s.title || '').split('|')[0].trim().slice(0, 40) || '—'; byPet[k] = byPet[k] || { name: k, n: 0, rev: 0 }; byPet[k].n++; byPet[k].rev += Number(s.price) || 0; }
+  for (const s of okSales) { const k = (s.title || '').split('|')[0].trim().slice(0, 40) || '—'; byPet[k] = byPet[k] || { name: k, n: 0, rev: 0 }; byPet[k].n++; byPet[k].rev += Number(s.price) || 0; }
   const top = Object.values(byPet).sort((a, b) => b.rev - a.rev).slice(0, 10);
   const byMut = {};
   for (const p of sold) { const k = p.mutation || 'None'; byMut[k] = (byMut[k] || 0) + (p.soldPrice || 0); }
@@ -380,7 +380,7 @@ const STEP_META = [
   ['STEP 1 - GREETING', 'Order received, asking the buyer for their username', 'gold', [
     ['greeting', 'Greeting', 'new order without a Roblox username: asks for it', '{buyer} {orderId}'],
     ['greetingKnownUser', 'Greeting (username given at checkout)', 'the buyer is only asked to confirm it', '{buyer} {username}'],
-    ['multiAccount', 'Multi-account order', 'only when pets span accounts', '{accounts}']]],
+    ['multiAccount', 'Multi-account order', 'pets on several accounts and gathering is off or failed (more than one trade)', '{accounts}']]],
   ['STEP 2 - USERNAME CHECK', "Validating and confirming the buyer's Roblox username", 'purple', [
     ['confirmUsername', 'Username confirmation', 'Yes/No prompt', '{username}'],
     ['invalidReply', 'Invalid confirmation reply', 'buyer typed something other than 1 or 2', ''],
@@ -390,29 +390,30 @@ const STEP_META = [
     ['deliveryStarting', 'Delivery starting', 'username confirmed, launching delivery', '{username}'],
     ['gathering', 'Gathering onto one account', 'quantity order spread over accounts: moving it to one account first', '{quantity} {accounts} {mother}'],
     ['deliveryAccountStep', 'Account step', 'multi-account orders when gathering is off or failed, before each account', '{step} {accounts} {account}'],
+    ['buyerCancelled', 'Buyer cancelled the trade', 'the trade is sent again at once (up to 2 more times)', '{round}'],
     ['deliveryFailed', 'Delivery failed (retrying)', 'agent reported a failed trade', '{reason}'],
     ['deliverySuccess', 'Delivery success', 'all trades done', '{username}'],
-    ['manualFallback', 'Manual fallback', 'after 3 failures when cancelling is off', ''],
+    ['manualFallback', 'Manual fallback', 'when Zotac needs you: 3 failures with cancelling off, or pets it can not match', ''],
     ['orderCancelled', 'Order cancelled', 'after 3 failures: the order is cancelled and refunded', '{reason} {attempts}']]]
 ];
 const TUTORIAL = {
   setup: [
     ['Connect Eldorado', ['Open ', ['Account'], ' and log in with the browser, a manual cookie or the Zotac extension. Auto Delivery needs a live Eldorado session to read orders and chat with buyers.']],
-    ['Add your Roblox accounts', ['In ', ['Roblox Accounts'], ' add every ', ['stock account'], ' that holds pets, then import their pets so listings can be matched to orders.']],
+    ['Add your Roblox accounts', ['In ', ['Roblox Accounts'], ' log in every ', ['stock account'], ' (cookie or browser login) and set your private server. Zotac opens them by itself and the scanner syncs their pets.']],
     ['List your pets', ['Use ', ['Auto List'], ' so each Eldorado offer is linked to a pet. When an order arrives, Zotac matches the offer to the listed pets it has to deliver.']],
-    ['Run the delivery script', ['Copy the ', ['Script'], ' from the Deliver Activity tab and run it (or save it in your executor autoexec folder) on the seller account. It polls Zotac on localhost for trade jobs and reports the result.']],
+    ['Delivery script', ['Zotac installs ', ['zotac_delivery.lua'], ' in your executor\'s autoexec (see the Autoexec card), so it runs in every account Zotac opens. Other executors: add their autoexec folder there.']],
     ['Review your messages', ['Open the ', ['Automatic Messages'], ' tab and adjust the greeting, confirmation and failure texts that the buyer receives.']],
     ['Turn Auto Delivery on', ['Flip the switch at the ', ['top-right'], ' of this page. The dot turns green when it is enabled. Keep the app running.']]
   ],
   how: [
     ['A buyer pays', ['the order enters the ', ['Delivery Queue'], ' and Zotac greets them in the order chat.']],
     ['The buyer sends their Roblox username', ['Zotac looks it up and asks them to confirm with 1 (yes) or 2 (no).']],
-    ['A trade job is created', ['your script on the seller account picks it up and sends the trade to the buyer.']],
-    ['Done', ['when the script reports success, Zotac tells the buyer, optionally marks the order as delivered and records proof video. After 3 failures it falls back to ', ['manual'], '.']]
+    ['Pets on several accounts', ['they are first ', ['gathered'], ' onto the account holding the most (one account at a time, max 2 games open), so the buyer gets one trade.']],
+    ['A trade job is created', ['the account is opened if needed and its script sends the trade to the buyer. If the buyer cancels, it is sent again.']],
+    ['Done', ['when the script reports success, Zotac tells the buyer, optionally marks the order as delivered and records the trade on video. After 3 failed tries the order is ', ['cancelled'], ' on Eldorado (or left to you if that is switched off).']]
   ]
 };
 const richText = parts => parts.map(p => Array.isArray(p) ? h('b', null, p[0]) : p);
-const dvDefaultScript = () => `-- Zotac delivery agent (run on each stock account)\nlocal BASE  = "http://127.0.0.1:${S.settings.localPort}/agent"\nlocal TOKEN = "${S.settings.agentToken}"\n\n-- poll   GET  BASE.."/jobs?account=<RobloxUsername>&token="..TOKEN\n--        -> { job = { id, buyerUsername, buyerUserId, pets = {{name,mutation,gen,traits}} } | null }\n-- report POST BASE.."/jobs/<id>"  body {"token":TOKEN,"status":"done"|"failed","reason":"..."}\n-- log    POST BASE.."/log"        body {"token":TOKEN,"message":"..."}\n`;
 
 // ---------- order simulator ----------
 // A fake Eldorado order: the bot's messages are the real Automatic Messages flow, you type the
@@ -422,8 +423,6 @@ async function openOrderSimulator() {
   const avail = S.pets.filter(p => p.status !== 'sold' && !p.delivered);   // delivered pets left the base
   if (!avail.length) return toast('No pets to sell', 'error');
   const petSel = h('select', null, avail.map(p => h('option', { value: p.id }, `${p.name}${p.mutation && p.mutation !== 'None' ? ' · ' + p.mutation : ''} · ${formatGen(p.gen)} · @${(S.accounts.find(a => a.id === p.accountId) || {}).username || '?'}`)));
-  const pre = avail.find(p => /rubrikiko/i.test(p.name));
-  if (pre) petSel.value = pre.id;
   const buyerIn = h('input', { type: 'text', value: 'EldoradoBuyer', placeholder: 'Eldorado buyer name' });
   // quantity: how many identical copies (same name, mutation, gen/s, traits) the buyer bought;
   // copies on other accounts are gathered onto one account first, like a real order
@@ -457,10 +456,9 @@ async function openOrderSimulator() {
   const send = async text => { text = String(text || input.value).trim(); if (!text) return; input.value = ''; await M.call('delivery:simSay', orderId, text); };
   input.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
   const quick = h('div', { class: 'sim-quick' },
-    h('button', { class: 'btn sm', onclick: async () => { const u = await promptBox('Buyer', 'Roblox username the buyer sends', 'yeet34421'); if (u) send(u); } }, 'Send username…'),
+    h('button', { class: 'btn sm', onclick: async () => { const u = await promptBox('Buyer', 'Roblox username the buyer sends', ''); if (u) send(u); } }, 'Send username…'),
     h('button', { class: 'btn sm', onclick: () => send('1') }, '1 (yes)'),
-    h('button', { class: 'btn sm', onclick: () => send('2') }, '2 (no)'),
-    h('button', { class: 'btn sm', onclick: () => send('SEND') }, 'SEND'));
+    h('button', { class: 'btn sm', onclick: () => send('2') }, '2 (no)'));
   const draw = async () => {
     const cur = await M.call('delivery:simState', orderId);
     if (!cur) return;
@@ -510,7 +508,7 @@ PAGES.server = async root => {
   if (!scan) {
     root.append(head, h('div', { class: 'card empty' },
       h('b', null, 'No server scan yet'),
-      h('p', { class: 'muted' }, 'Run the scanner script (Roblox Accounts → Scanner script) in a Steal a Brainrot server. Besides your own base it reports every base in the server, every 30 seconds.')));
+      h('p', { class: 'muted' }, 'Open an account with Zotac (the scanner runs from autoexec) or run the scanner from Auto List in a Steal a Brainrot server. Besides your own base it reports every base in the server, every 30 seconds.')));
     return;
   }
   const q = SV.q.toLowerCase();
@@ -581,7 +579,7 @@ PAGES.delivery = async root => {
     queue: queue.filter(d => d.state !== 'manual').length,
     trading: dels.filter(d => d.state === 'delivering').length,
     done: dels.filter(d => d.state === 'done').length,
-    failed: dels.filter(d => d.state === 'manual').length
+    failed: dels.filter(d => d.state === 'manual' || (d.state === 'cancelled' && d.failReason && !/stopped by the seller|cancelled on Eldorado/.test(d.failReason))).length
   };
   const reload = async () => { DV.data = await M.call('delivery:list'); render(); };
   const online = !!S.info.agentOnline;
@@ -595,7 +593,35 @@ PAGES.delivery = async root => {
       h('button', { class: 'btn sm', title: 'Run a fake order through the buyer chat + real trade', onclick: () => openOrderSimulator() }, '🧪 Simulate order'),
       h('span', { class: 'mx-led ' + (cfg.enabled ? 'on' : '') }),
       sw(cfg.enabled, v => saveSettings({ delivery: { enabled: v } }).then(render))));
-  const tabs = h('div', { class: 'mx-tabs' }, [['activity', 'Deliver Activity'], ['messages', 'Automatic Messages'], ['tutorial', 'Tutorial']].map(([k, l]) => h('button', { class: 'mx-tab' + (DV.tab === k ? ' on' : ''), onclick: () => { DV.tab = k; render(); } }, l)));
+  const tabs = h('div', { class: 'mx-tabs' }, [['activity', 'Deliver Activity'], ['trades', 'Trade Log'], ['messages', 'Automatic Messages'], ['tutorial', 'Tutorial']].map(([k, l]) => h('button', { class: 'mx-tab' + (DV.tab === k ? ' on' : ''), onclick: () => { DV.tab = k; render(); } }, l)));
+
+  // ---------- trade log: every pet that left a stock account (permanent) ----------
+  if (DV.tab === 'trades' && !DV.trades) { DV.trades = []; M.call('trades:list').then(t => { DV.trades = t; if (S.page === 'delivery') render(); }); }
+  const tl = DV.tl || (DV.tl = { acct: '', kind: 'all', q: '' });
+  const petTxt = p => `${p.mutation && !/^(none|normal)$/i.test(p.mutation) ? p.mutation + ' ' : ''}${p.name} · ${formatGen(p.gen)}${(p.traits || []).length ? ' · ' + p.traits.join(', ') : ''}`;
+  const tAll = (DV.trades || []).slice().reverse();
+  const tAccts = [...new Set(tAll.flatMap(e => [e.from, e.kind === 'gather' ? e.to : null]).filter(Boolean))].sort();
+  const tShown = tAll.filter(e => (tl.kind === 'all' || e.kind === tl.kind) && (!tl.acct || e.from === tl.acct || (e.kind === 'gather' && e.to === tl.acct))
+    && (!tl.q || `${e.from} ${e.to} ${e.orderId} ${e.pets.map(petTxt).join(' ')}`.toLowerCase().includes(tl.q.toLowerCase())));
+  const kindPill = k => h('span', { class: 'pill ' + ({ delivered: 'good', gather: 'purple', gone: 'warn' }[k] || '') }, { delivered: 'traded to buyer', gather: 'moved to mother', gone: 'gone (not by Zotac)' }[k] || k);
+  const trades = h('div', null,
+    h('p', { class: 'muted' }, 'Every pet that left one of your accounts: traded to a buyer, moved onto a mother account for a gathered order, or gone from the base without a Zotac trade (seen on a full rescan). The pet comes off that account in Zotac at once; this list keeps it for good.'),
+    h('div', { class: 'row', style: { margin: '8px 0' } },
+      sel([['', 'All accounts'], ...tAccts.map(a => [a, '@' + a])], tl.acct, v => { tl.acct = v; render(); }),
+      sel([['all', 'Everything'], ['delivered', 'Traded to buyer'], ['gather', 'Moved to mother'], ['gone', 'Gone (not by Zotac)']], tl.kind, v => { tl.kind = v; render(); }),
+      h('input', { type: 'search', placeholder: 'Search pet, account, order…', value: tl.q, onchange: e => { tl.q = e.target.value; render(); } }),
+      h('div', { class: 'grow' }),
+      h('span', { class: 'muted' }, `${tShown.length} of ${tAll.length}`),
+      h('button', { class: 'btn sm', onclick: async () => { DV.trades = await M.call('trades:list'); render(); } }, 'Refresh')),
+    table(tShown.slice(0, 500), [
+      { label: 'When', render: e => h('span', { title: fmtDate(e.t) }, ago(e.t)) },
+      { label: 'What', render: e => h('div', null, kindPill(e.kind), e.sim ? h('span', { class: 'pill', style: { marginLeft: '6px' } }, 'test') : null) },
+      { label: 'Pets', render: e => h('div', null, e.pets.map(p => h('div', { class: 'pet-name' }, petTxt(p)))) },
+      { label: 'From', render: e => e.from ? '@' + e.from : '—' },
+      { label: 'To', render: e => e.to ? '@' + e.to : '—' },
+      { label: 'Order', render: e => e.orderId ? h('small', { class: 'mono' }, e.orderId) : h('small', { class: 'muted' }, e.note || '—') },
+      { label: 'Proof', render: e => (e.proofs || []).length ? h('div', { class: 'row', style: { flexWrap: 'nowrap' } }, e.proofs.map((pf, i) => h('button', { class: 'btn sm', title: pf, onclick: async () => M.call('open:path', (await M.call('proof:dir')) + '/' + pf) }, '▶ ' + (i + 1)))) : h('span', { class: 'muted' }, '—') }
+    ], { empty: 'Nothing traded away yet.', maxHeight: 'calc(100vh - 330px)' }));
 
   // ---------- messages ----------
   const steps = { ...cfg.steps };
@@ -620,43 +646,44 @@ PAGES.delivery = async root => {
     TUTORIAL.how.map(([title, body], i) => h('div', { class: 'mx-step sm' }, h('span', { class: 'num' }, String(i + 1)), h('div', null, h('b', null, title), ' — ', h('span', { class: 'ink2' }, richText(body))))));
 
   // ---------- activity ----------
-  const account = S.accounts.find(a => jobs.some(j => j.account && a.username && j.account.toLowerCase() === a.username.toLowerCase())) || S.accounts[0];
+  if (!DV.lst || Date.now() - DV.lstAt > 10000) { DV.lstAt = Date.now(); M.call('launcher:status').then(l => { DV.lst = Object.fromEntries((l || []).map(x => [x.id, x])); if (S.page === 'delivery') soft(); }).catch(() => {}); }
   if (DV.autoexec === undefined) { DV.autoexec = null; M.call('agent:autoexecStatus').then(r => { DV.autoexec = r || []; if (S.page === 'delivery') soft(); }).catch(() => { DV.autoexec = []; }); }
-  const scriptKey = 'zotac.deliveryScript';
-  // Default = the bundled delivery agent (does the trade) with this install's port + token.
-  const scriptBox = h('textarea', { class: 'mx-code', spellcheck: 'false', value: lsGet(scriptKey, '') || '-- loading delivery script…', onchange: e => lsSet(scriptKey, e.target.value) });
-  if (!lsGet(scriptKey, '')) M.call('scanner:script', 'delivery').then(s => { if (!lsGet(scriptKey, '')) scriptBox.value = s; }).catch(() => { scriptBox.value = dvDefaultScript(); });
+  // the bundled delivery agent with this install's port + token (read-only: autoexec always uses
+  // the bundled file, an edited copy here did nothing)
+  const scriptBox = h('textarea', { class: 'mx-code', spellcheck: 'false', readonly: true, value: '-- loading delivery script…' });
+  M.call('scanner:script', 'delivery').then(s => { scriptBox.value = s; }).catch(() => { scriptBox.value = '-- could not load the delivery script'; });
 
   const rowActions = d => h('div', { class: 'row', style: { flexWrap: 'nowrap' } },
     d.state === 'awaitConfirm' || d.state === 'awaitUsername' ? h('button', { class: 'btn sm', onclick: async () => { const u = await promptBox('Set username', 'Roblox username', d.username || ''); if (u) run(() => M.call('delivery:manual', d.orderId, 'setUsername', u)); } }, 'Set user') : null,
     d.state === 'awaitConfirm' ? h('button', { class: 'btn sm', onclick: () => run(() => M.call('delivery:manual', d.orderId, 'confirm')) }, 'Confirm') : null,
     h('button', { class: 'btn sm', onclick: async () => { const m = await promptBox('Message buyer', 'Message', '', true); if (m) run(() => M.call('delivery:manual', d.orderId, 'say', m), 'Sent'); } }, 'Msg'),
-    !['done', 'cancelled'].includes(d.state) ? h('button', { class: 'btn sm', onclick: () => run(() => M.call('delivery:manual', d.orderId, 'done'), 'Marked done') }, 'Done') : null,
-    !['done', 'cancelled'].includes(d.state) ? h('button', { class: 'btn sm danger', onclick: () => run(() => M.call('delivery:manual', d.orderId, 'cancel')) }, '✕') : null,
+    !['done', 'cancelled'].includes(d.state) ? h('button', { class: 'btn sm', title: 'You delivered it yourself', onclick: async () => { if (await confirmBox('Mark this order delivered? The buyer is told "Delivered!"' + (d.sim ? '' : ', the Eldorado order is marked delivered') + ' and its pets come off your accounts.')) run(() => M.call('delivery:manual', d.orderId, 'done'), 'Marked done'); } }, 'Done') : null,
+    !['done', 'cancelled'].includes(d.state) ? h('button', { class: 'btn sm danger', title: 'Stop (local only)', onclick: async () => { if (await confirmBox('Stop Zotac working on this order? Only Zotac stops: the Eldorado order is NOT cancelled and the buyer is not messaged. Its pets go back in stock.')) run(() => M.call('delivery:manual', d.orderId, 'cancel'), 'Stopped'); } }, '✕') : null,
     h('button', { class: 'btn sm ghost', onclick: () => modal('Conversation', h('div', { class: 'log', style: { maxHeight: '60vh' } }, d.log.map(l => h('div', { class: l.err ? 'l-error' : 'l-info' }, `${new Date(l.t).toLocaleTimeString()} ${l.in ? '◀ ' + l.in : l.out ? '▶ ' + l.out : '✕ ' + l.err}`))), [{ label: t('close') }]) }, 'Log'));
   const thumb = d => h('div', { class: 'mx-dthumb' }, String(d.title || d.orderId || '?').trim()[0] || '?');
   const stateCls = { done: 'good', manual: 'bad', delivering: 'gold', cancelled: '' };
 
-  const logs = (S.logs || []).filter(l => /\[(Delivery|Proof|Agent)\]/.test(l.msg) && l.t > DV.clearedAt).slice(-150);
+  const logs = (S.logs || []).filter(l => /\[(Delivery|Proof|Agent|Launcher|Sale)\]/.test(l.msg) && l.t > DV.clearedAt).slice(-150);
   const hist = dels.filter(d => ['done', 'manual', 'cancelled'].includes(d.state)).sort((a, b) => (b.finishedAt || b.createdAt) - (a.finishedAt || a.createdAt))
     .filter(d => DV.hist === 'all' || (DV.hist === 'ok') === (d.state === 'done'));
 
   const activity = h('div', { class: 'mx-stack' },
     h('div', { class: 'mx-tiles4' },
       [['IN QUEUE', stats.queue, ''], ['TRADING', stats.trading, 'gold'], ['COMPLETED', stats.done, 'good'], ['FAILED', stats.failed, 'bad']].map(([k, v, c]) => h('div', { class: 'mx-stat' }, h('div', { class: 'k' }, k), h('div', { class: 'v ' + c }, String(v))))),
-    mxCard(mxIco('delivery', 'green'), 'Delivery Settings', 'Each stock account trades its own pets to the buyer', null,
+    mxCard(mxIco('delivery', 'green'), 'Delivery Settings', 'How orders are delivered from your stock accounts', null,
       h('div', { class: 'mx-rows' },
         setting('Mark order delivered', 'Calls Eldorado "deliver" after all trades succeed', sw(cfg.markDelivered, v => saveSettings({ delivery: { markDelivered: v } }))),
         setting('Cancel order if delivery fails', 'After 3 failed attempts: tell the buyer why and cancel the order on Eldorado (refund). Off = manual fallback', sw(cfg.cancelOnFail !== false, v => saveSettings({ delivery: { cancelOnFail: v } }))),
         setting('Gather onto one account', 'Order spread over several accounts: the others trade their pets to the account holding the most (then close), and that account does ONE trade to the buyer. Off = one trade per account', sw(cfg.consolidate !== false, v => saveSettings({ delivery: { consolidate: v } }))),
         setting('Record video proof', 'Records the Roblox window during delivery (Video Proof page)', sw(cfg.recordProof, v => saveSettings({ delivery: { recordProof: v } }))),
-        setting('Agent timeout', 'Seconds before a job counts as failed', num(cfg.agentTimeoutSec, v => saveSettings({ delivery: { agentTimeoutSec: v } }))))),
-    mxCard(mxIco('user', 'purple'), 'Script Account', 'Stock account — runs the delivery script', h('span', { class: 'mx-badge ' + (online ? 'good' : 'bad') }, online ? 'CONNECTED' : 'OFFLINE'),
-      account ? h('div', { class: 'mx-acct' },
-        h('div', { class: 'av' }, (account.username || '?')[0].toUpperCase(), h('span', { class: 'led ' + (online ? 'on' : '') })),
-        h('div', null, h('b', null, account.username), h('div', { class: 'row', style: { marginTop: '6px', gap: '6px' } }, h('span', { class: 'mx-badge gold' }, 'SCRIPT MODE'),
-          h('button', { class: 'mx-badge bad btn-like', title: 'Rotates the agent token; the script must be updated afterwards', onclick: async () => { if (await confirmBox('Disconnect the script? This rotates the agent token, so the running script is rejected until you copy the new script.')) { await M.call('settings:regenToken', 'agentToken'); S.settings = await M.call('settings:get'); lsSet(scriptKey, ''); render(); } } }, 'Disconnect'))))
-        : h('div', { class: 'mx-empty' }, 'Add a Roblox account on the Roblox Accounts page.')),
+        setting('Script connect timeout', 'Seconds a queued trade waits for the account\'s delivery script to connect (a running trade gets 7–10 min)', num(cfg.agentTimeoutSec, v => saveSettings({ delivery: { agentTimeoutSec: v } }))))),
+    mxCard(mxIco('user', 'purple'), 'Stock Accounts', 'Every logged-in account can deliver; Zotac opens the one an order needs', h('span', { class: 'mx-badge ' + (online ? 'good' : '') }, online ? 'SCRIPT CONNECTED' : 'NO SCRIPT ONLINE'),
+      S.accounts.filter(a => a.hasCookie).length ? h('div', { class: 'mx-rows' }, S.accounts.filter(a => a.hasCookie).map(a => {
+        const st = (DV.lst || {})[a.id] || {};
+        return h('div', { class: 'mx-acct' },
+          h('div', { class: 'av' }, (a.username || '?')[0].toUpperCase(), h('span', { class: 'led ' + (st.online ? 'on' : '') })),
+          h('div', null, h('b', null, a.username), h('div', { class: 'muted', style: { fontSize: '11px' } }, st.online ? 'in game, delivery script connected' : 'not in game — opened when an order needs it')));
+      })) : h('div', { class: 'mx-empty' }, 'Log in your Roblox accounts on the Roblox Accounts page.')),
     mxCard(mxIco('code'), 'Autoexec', 'The delivery script must run by itself when Roblox opens', h('span', { class: 'mx-badge ' + ((DV.autoexec || []).length ? 'good' : 'bad') }, (DV.autoexec || []).length ? 'INSTALLED' : 'NOT INSTALLED'),
       h('p', { class: 'ink2', style: { marginTop: 0 } }, 'Zotac copies zotac_delivery.lua into your executor\'s autoexec folder. Synapse Z and executors in AppData are found by themselves; for any other executor add its autoexec folder here. Without it Roblox opens but nothing trades.'),
       (DV.autoexec || []).length ? h('div', { class: 'mx-rows' }, DV.autoexec.map(f => h('div', { class: 'muted mono', style: { fontSize: '11px' } }, '✓ ' + f))) : h('div', { class: 'mx-empty' }, 'No executor autoexec folder found yet.'),
@@ -668,7 +695,7 @@ PAGES.delivery = async root => {
           await saveSettings({ delivery: { autoexecDirs: [...new Set([...(cfg.autoexecDirs || []), dir])] } });
           DV.autoexec = await run(() => M.call('agent:syncAutoexec')); render(); toast('Delivery script installed', 'good');
         } }, '+ Add autoexec folder'))),
-    mxCard(mxIco('code'), 'Script', 'Execute in your executor on the script account', null,
+    mxCard(mxIco('code'), 'Script', 'Only to run by hand: Zotac already installs it in autoexec', null,
       h('div', { class: 'mx-script' }, scriptBox, h('div', { class: 'col' }, h('button', { class: 'btn sm', onclick: () => { navigator.clipboard.writeText(scriptBox.value); toast('Script copied', 'good'); } }, 'Copy')))),
     mxCard(mxIco('clip', 'blue'), 'Delivery Queue', 'Pending trades awaiting execution',
       h('div', { class: 'row' }, h('span', { class: 'mx-count' }, queue.length + ' items'), h('button', { class: 'btn sm', onclick: reload }, mxSvg('refresh', 12))),
@@ -682,7 +709,7 @@ PAGES.delivery = async root => {
       h('div', { class: 'mx-pills sm' }, [['all', 'All'], ['ok', '✓'], ['bad', '✗']].map(([k, l]) => h('button', { class: 'mx-pill' + (DV.hist === k ? ' on' : ''), onclick: () => { DV.hist = k; render(); } }, l))),
       hist.length ? h('div', { class: 'mx-dlist scroll' }, hist.map(d => h('div', { class: 'mx-drow', onclick: () => modal('Conversation', h('div', { class: 'log', style: { maxHeight: '60vh' } }, d.log.map(l => h('div', { class: l.err ? 'l-error' : 'l-info' }, `${new Date(l.t).toLocaleTimeString()} ${l.in ? '◀ ' + l.in : l.out ? '▶ ' + l.out : '✕ ' + l.err}`))), [{ label: t('close') }]) }, thumb(d),
         h('div', { class: 'grow' }, h('div', null, h('b', null, d.title || d.orderId), ' ', h('small', { class: 'muted' }, (d.username || '') + '  ' + fmtDate(d.finishedAt || d.createdAt))),
-          h('div', { class: d.state === 'done' ? 'mx-ok' : d.state === 'cancelled' ? 'muted' : 'mx-fail' }, d.state === 'done' ? '✓ Delivered' : d.state === 'cancelled' ? 'Cancelled' : '✗ Failed (manual)')))))
+          h('div', { class: d.state === 'done' ? 'mx-ok' : d.state === 'cancelled' ? 'muted' : 'mx-fail' }, d.state === 'done' ? '✓ Delivered' : d.state === 'cancelled' ? (d.failReason ? 'Cancelled — ' + d.failReason : 'Cancelled') : '✗ Needs you — ' + (d.failReason || 'manual'))))))
         : mxEmpty('clock', 'No history yet')),
     h('details', null, h('summary', null, 'Agent jobs & API'),
       table(jobs, [
@@ -694,44 +721,106 @@ PAGES.delivery = async root => {
         { label: 'Reason', render: j => j.reason || '' }, { label: 'Created', render: j => ago(j.createdAt) }], { empty: 'No jobs.' }),
       h('div', { class: 'row', style: { marginTop: '10px' } },
         h('button', { class: 'btn sm', onclick: () => { navigator.clipboard.writeText(S.settings.agentToken); toast('Agent token copied', 'good'); } }, 'Copy token'),
-        h('button', { class: 'btn sm', onclick: async () => { await M.call('settings:regenToken', 'agentToken'); S.settings = await M.call('settings:get'); lsSet(scriptKey, ''); render(); } }, 'New token'))));
+        h('button', { class: 'btn sm', onclick: async () => { if (!await confirmBox('Make a new agent token? Scripts already running in game are rejected until those games are reopened (autoexec gets the new token by itself).')) return; await M.call('settings:regenToken', 'agentToken'); S.settings = await M.call('settings:get'); render(); } }, 'Rotate token'))));
 
-  root.append(h('div', { class: 'mx-narrow wide' }, head, tabs, DV.tab === 'activity' ? activity : DV.tab === 'messages' ? messages : tut));
+  root.append(h('div', { class: 'mx-narrow wide' }, head, tabs, DV.tab === 'activity' ? activity : DV.tab === 'trades' ? trades : DV.tab === 'messages' ? messages : tut));
 };
 
 // ============================== VIDEO PROOF ===============================
 const VP = { list: null, rec: null, recOrder: null, started: 0, deliv: null, sel: null, q: '', status: 'all', play: false, dir: '' };
-async function startProof(orderId) {
-  if (VP.rec) return;
+// Recorder per Roblox window (key = order|account): normally one clip, the trade to the buyer
+// (an order split over accounts that could not be gathered gets one per buyer trade). Every frame
+// goes through a canvas that stamps order, account, what is happening and the local time onto the
+// video, so a clip shows on its own when and what was traded. Each clip gets a .json sidecar and is
+// linked in the Trade Log.
+const RECS = new Map();
+let recQueue = Promise.resolve();   // main points getDisplayMedia at one window per call: one at a time
+const STAMP = 36;
+function startProof(orderId, account, label) {
+  const key = (orderId || 'manual') + '|' + (account || '');
+  const cur = RECS.get(key);
+  if (cur) { if (label) cur.label = label; cur.stopAfter = false; return recQueue; }
+  RECS.set(key, { pending: true, orderId: orderId || 'manual', account: account || null, label: label || '' });
+  recQueue = recQueue.then(() => openRec(key)).catch(() => {});
+  if (S.page === 'proof') render();
+  return recQueue;
+}
+async function openRec(key) {
+  const r = RECS.get(key);
+  if (!r) return;
   try {
-    // tell main which account's Roblox window to capture (the mother's, for a gathered order)
-    try { await M.call('proof:target', orderId || null); } catch { /* old main: first Roblox window */ }
-    const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
+    const target = await M.call('proof:target', r.orderId, r.account).catch(() => null);
+    const src = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
+    const v = document.createElement('video'); v.muted = true; v.srcObject = src;
+    await v.play();
+    const vw = v.videoWidth || 1280, vh = v.videoHeight || 720;
+    const W = Math.min(1280, vw) & ~1, H = Math.round(W * vh / vw) & ~1;
+    const c = document.createElement('canvas'); c.width = W; c.height = H + STAMP;
+    const g = c.getContext('2d');
+    const started = Date.now();
+    const draw = () => {
+      g.fillStyle = '#000'; g.fillRect(0, 0, W, STAMP);
+      try { g.drawImage(v, 0, STAMP, W, H); } catch { /* frame not ready */ }
+      const secs = Math.round((Date.now() - started) / 1000);
+      g.fillStyle = '#f2b631'; g.font = '700 15px Segoe UI'; g.textBaseline = 'middle';
+      g.fillText('ZOTAC PROOF', 10, STAMP / 2);
+      g.fillStyle = '#fff'; g.font = '13px Segoe UI';
+      const who = r.account ? '@' + r.account : 'screen';
+      g.fillText(`${r.orderId}  ·  ${who}  ·  ${r.label || ''}`.slice(0, 140), 120, STAMP / 2);
+      const clock = new Date().toLocaleString() + '  +' + Math.floor(secs / 60) + ':' + String(secs % 60).padStart(2, '0');
+      g.textAlign = 'right'; g.fillText(clock, W - 10, STAMP / 2); g.textAlign = 'left';
+    };
+    draw();
+    const tick = setInterval(draw, 1000 / 30);
+    const rec = new MediaRecorder(c.captureStream(30), { mimeType: 'video/webm;codecs=vp9', videoBitsPerSecond: 2_000_000 });
     const chunks = [];
-    const rec = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9', videoBitsPerSecond: 2_500_000 });
     rec.ondataavailable = e => e.data.size && chunks.push(e.data);
     rec.onstop = async () => {
-      stream.getTracks().forEach(tr => tr.stop());
+      clearInterval(tick); clearTimeout(r.cap);
+      src.getTracks().forEach(tr => tr.stop());
       const buf = await new Blob(chunks, { type: 'video/webm' }).arrayBuffer();
       let bin = ''; const bytes = new Uint8Array(buf);
       for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-      await M.call('proof:save', VP.recOrder, btoa(bin));
-      VP.rec = null; VP.list = null; toast('Proof video saved', 'good');
+      try {
+        await M.call('proof:save', r.orderId, btoa(bin), { account: r.account, labels: r.labels, startedAt: started, endedAt: Date.now(), window: target && target.hwnd ? 'account window' : 'first Roblox window / screen' });
+        toast('Proof video saved' + (r.account ? ' (@' + r.account + ')' : ''), 'good');
+      } catch (e) { toast('Saving proof failed: ' + e.message, 'error'); }
+      RECS.delete(key); VP.list = null; VP.deliv = null;   // reload both, or a new clip shows as unlinked
       if (S.page === 'proof') render();
     };
+    src.getVideoTracks()[0].onended = () => stopProofKey(key);   // the Roblox window closed
+    Object.assign(r, { pending: false, rec, started, labels: [r.label].filter(Boolean) });
+    r.cap = setTimeout(() => stopProofKey(key), 15 * 60 * 1000);
     rec.start(1000);
-    VP.rec = rec; VP.recOrder = orderId || 'manual'; VP.started = Date.now();
-    setTimeout(() => { if (VP.rec === rec) stopProof(); }, 10 * 60 * 1000);
+    if (r.stopAfter) stopProofKey(key, 3000);
     if (S.page === 'proof') render();
-  } catch (e) { toast('Recording failed: ' + e.message, 'error'); }
+  } catch (e) {
+    RECS.delete(key);
+    toast('Recording failed: ' + e.message, 'error');
+  }
 }
-function stopProof() { if (VP.rec && VP.rec.state !== 'inactive') VP.rec.stop(); }
+function proofLabel(orderId, account, label) {
+  const r = RECS.get((orderId || 'manual') + '|' + (account || ''));
+  if (r && label && r.label !== label) { r.label = label; (r.labels || (r.labels = [])).push(label); }
+}
+function stopProofKey(key, delay = 0) {
+  setTimeout(() => {
+    const r = RECS.get(key);
+    if (!r) return;
+    if (r.pending) { r.stopAfter = true; return; }
+    if (r.rec && r.rec.state !== 'inactive') r.rec.stop();
+  }, delay);
+}
+// no order = stop everything (the Video Proof page's Stop button)
+function stopProof(orderId, account, delay = 0) {
+  for (const [k, r] of RECS) if ((!orderId || r.orderId === orderId) && (account === undefined || r.account === account)) stopProofKey(k, delay);
+}
 PAGES.proof = async root => {
   if (!VP.list) { VP.list = []; M.call('proof:list').then(l => { VP.list = l; if (S.page === 'proof') render(); }); }
   if (!VP.deliv) { VP.deliv = {}; M.call('delivery:list').then(r => { VP.deliv = Object.fromEntries((r.deliveries || []).map(d => [d.orderId, d])); if (S.page === 'proof') render(); }); }
   if (!VP.dir) { VP.dir = ' '; M.call('proof:dir').then(d => { VP.dir = d; if (S.page === 'proof') render(); }); }
   const files = VP.list;
-  const orderOf = f => f.name.replace(/-\d{10,}\.webm$/, '');
+  const orderOf = f => f.name.replace(/(__[\w]+)?-\d{10,}\.webm$/, '');
   const info = f => {
     const o = orderOf(f), d = VP.deliv[o];
     const buyer = d ? (d.username || d.title || o) : o;
@@ -751,7 +840,17 @@ PAGES.proof = async root => {
   const cur = all.find(x => x.f.name === VP.sel);
   const dir = VP.dir.trim();
 
-  const video = cur ? h('video', { class: 'mx-video', controls: true, autoplay: VP.play, src: 'file:///' + cur.f.path.replace(/\\/g, '/') }) : null;
+  // one player element per clip, kept across the page's live refreshes: a new <video> every 5 s
+  // stopped playback after a few seconds and threw away the scrub position
+  let video = null;
+  if (cur) {
+    const src = 'file:///' + cur.f.path.replace(/\\/g, '/');
+    if (!VP.player || VP.player.dataset.src !== src) {
+      VP.player = h('video', { class: 'mx-video', controls: true, autoplay: VP.play, preload: 'auto', src });
+      VP.player.dataset.src = src;
+    }
+    video = VP.player;
+  } else VP.player = null;
   VP.play = false;
   const icon = x => h('div', { class: 'pic ' + (x.st === 'ok' ? 'good' : x.st === 'failed' ? 'bad' : '') }, mxSvg(x.st === 'ok' ? 'check' : x.st === 'failed' ? 'x' : 'play', 14));
 
@@ -764,12 +863,11 @@ PAGES.proof = async root => {
     h('div', { class: 'row mx-filters' },
       h('input', { type: 'search', class: 'grow', placeholder: 'Search by buyer, date or status…', value: VP.q, onchange: e => { VP.q = e.target.value; render(); } }),
       sel([['all', 'All statuses'], ['ok', 'OK'], ['failed', 'Failed'], ['other', 'Other']], VP.status, v => { VP.status = v; render(); }),
-      VP.rec ? h('button', { class: 'btn danger', onclick: stopProof }, `Stop recording (${VP.recOrder})`) : h('button', { class: 'btn', onclick: () => startProof('manual') }, 'Record now'),
+      RECS.size ? h('button', { class: 'btn danger', onclick: () => stopProof() }, `Stop recording (${[...RECS.values()].map(r => r.account ? '@' + r.account : r.orderId).join(', ')})`) : h('button', { class: 'btn', onclick: () => startProof('manual', null, 'manual recording') }, 'Record now'),
       h('button', { class: 'btn', onclick: () => M.call('open:path', dir) }, mxSvg('folder', 13), 'Folder'),
       h('button', { class: 'btn primary', onclick: () => { VP.list = null; VP.deliv = null; render(); } }, mxSvg('refresh', 13), 'Refresh')),
     h('div', { class: 'mx-folder' }, mxSvg('folder', 13), h('span', { class: 'muted' }, 'Saving to: '), h('span', { class: 'mono grow' }, dir, ' (default)'),
-      h('button', { class: 'btn sm', disabled: true, title: 'The recordings folder is fixed to the app data folder in this build' }, 'Change folder…'),
-      h('button', { class: 'btn sm', disabled: true }, 'Reset')),
+      h('span', { class: 'muted' }, 'Record buyer trades'), sw(!!(S.settings.delivery || {}).recordProof, v => saveSettings({ delivery: { recordProof: v } }).then(render))),
     h('div', { class: 'mx-vsplit' },
       h('div', { class: 'mx-vlist' },
         h('div', { class: 'mx-vlist-h' }, h('span', null, `${shown.length} videos`), h('span', { class: 'muted' }, 'Click to play')),
@@ -813,8 +911,8 @@ PAGES.settings = async root => {
         h('label', { class: 'f' }, 'Webhook URL', urlIn),
         h('label', { class: 'f', style: { marginTop: '8px' } }, 'Ping', pingIn),
         h('div', { class: 'row', style: { margin: '12px 0' } },
-          chk('Ping on new sale', s.notifySales, v => saveSettings({ notifySales: v })),
-          chk('Ping on dispute', s.notifyDisputes, v => saveSettings({ notifyDisputes: v })),
+          chk('Send new-sale card', s.notifySales, v => saveSettings({ notifySales: v })),
+          chk('Send dispute card', s.notifyDisputes, v => saveSettings({ notifyDisputes: v })),
           chk('Forward chat notifications', s.notifyMessages, v => saveSettings({ notifyMessages: v }))),
         h('div', { class: 'row' },
           h('button', { class: 'btn primary', onclick: async () => { await run(() => saveSettings({ webhookUrl: urlIn.value.trim(), webhookPing: pingIn.value.trim() }), 'Saved'); } }, 'Save'),
@@ -872,11 +970,23 @@ PAGES.settings = async root => {
         h('div', { class: 'row', style: { marginTop: '10px' } },
           h('button', { class: 'btn', onclick: () => M.call('open:path', S.info.extensionPath) }, 'Open extension folder'),
           h('button', { class: 'btn', onclick: async () => { await M.call('settings:regenToken', 'extensionToken'); S.settings = await M.call('settings:get'); render(); } }, 'New extension token')),
-        h('small', { class: 'muted' }, 'Chrome › Extensions › Developer mode › Load unpacked › pick the folder. Port changes apply after restart.')),
+        h('small', { class: 'muted' }, 'Chrome › Extensions › Developer mode › Load unpacked › pick the folder.')),
       mxCard('folder', 'Data', 'Backup, restore or reset local data', null,
         h('div', { class: 'row' },
           h('button', { class: 'btn', onclick: () => run(() => M.call('data:export'), 'Backup saved') }, 'Backup all data'),
-          h('button', { class: 'btn', onclick: async () => { if (await run(() => M.call('data:import'))) { await refreshData(); toast('Restored', 'good'); render(); } } }, 'Restore backup'),
-          h('button', { class: 'btn danger', onclick: async () => { if (await confirmBox('Delete ALL pets, accounts, sales and logs? Settings are kept.')) { await M.call('data:reset'); await refreshData(); render(); } } }, 'Reset data')),
-        h('small', { class: 'muted', style: { display: 'block', marginTop: '8px' } }, 'Data folder: ' + (S.info.userData || ''))))));
+          h('button', { class: 'btn', onclick: async () => { if (!await confirmBox('Restore a backup? Everything in it replaces what Zotac has now, settings and tokens included.')) return; if (await run(() => M.call('data:import'))) { S.settings = await M.call('settings:get'); await refreshData(); toast('Restored', 'good'); render(); } } }, 'Restore backup'),
+          h('button', { class: 'btn danger', onclick: async () => { if (await confirmBox('Delete ALL pets, accounts (with their saved Roblox cookies), sales, deliveries, the trade log, templates, expenses and logs? Only settings are kept.')) { await M.call('data:reset'); await refreshData(); render(); } } }, 'Reset data')),
+        h('small', { class: 'muted', style: { display: 'block', marginTop: '8px' } }, 'Data folder: ' + (S.info.userData || ''))), settingsLogs())));
 };
+
+// every log line Zotac keeps (Launcher, Sale, Scanner, Watcher, Updates... not only delivery)
+const SL = { area: 'all', level: 'all' };
+function settingsLogs() {
+  const areas = [...new Set((S.logs || []).map(l => (l.msg.match(/^\[([^\]]+)\]/) || [])[1]).filter(Boolean))].sort();
+  const rows = (S.logs || []).filter(l => (SL.level === 'all' || l.level === SL.level) && (SL.area === 'all' || l.msg.startsWith('[' + SL.area + ']'))).slice(-300).reverse();
+  return mxCard('pulse', 'Logs', 'Everything Zotac logged lately, newest first', h('button', { class: 'btn sm', onclick: async () => { S.logs = await M.call('logs:get'); render(); } }, 'Refresh'),
+    h('div', { class: 'row', style: { marginBottom: '8px' } },
+      sel([['all', 'All areas'], ...areas.map(a => [a, a])], SL.area, v => { SL.area = v; render(); }),
+      sel([['all', 'All levels'], ['info', 'Info'], ['warn', 'Warnings'], ['error', 'Errors']], SL.level, v => { SL.level = v; render(); })),
+    h('div', { class: 'log', style: { maxHeight: '360px' } }, rows.length ? rows.map(l => h('div', { class: 'l-' + l.level }, new Date(l.t).toLocaleString() + '  ' + l.msg)) : h('span', { class: 'muted' }, 'No log lines.')));
+}

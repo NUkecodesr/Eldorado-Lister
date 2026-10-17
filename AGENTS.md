@@ -30,6 +30,12 @@ Read this whole file before changing anything. The "Rules" section is not option
    `ZOTAC_NO_AUTOEXEC=1` (otherwise `syncAutoexec` overwrites the user's real
    `Synapse Z\autoexec` scripts with the test port/token).
 7. Write commit messages that describe what actually changed.
+8. **No account is special.** Every stock account is an alt; none is "main". Never pick or treat
+   an account by its name or its position in a list: choose by state (logged in, in game, pets it
+   holds, recent failures). Never hard-code account or buyer usernames in code, defaults or texts.
+9. **A trade that happened is always booked.** A job result that arrives late (order stopped,
+   cancelled, done by hand) still moves/marks the pets it traded, but never messages the buyer,
+   marks the Eldorado order or queues more trades.
 
 ---
 
@@ -97,8 +103,9 @@ npx electron-builder --win nsis    # -> dist\Zotac Lister Setup <version>.exe
   **session-only**: removed on restart unless listed/sold or used.
 - **Listings** (`pages.js`): Active / Paused / Closed tabs (Eldorado states are `Active, Paused,
   Closed, Inactive, PendingReview`; "Expired" is rejected), per-state error box, repricer.
-- **Roblox Accounts** (`pages.js`): by default only logged-in accounts (saved cookie) with unsold
-  pets; "Show others" for the rest. Headshots fetched in batches (`refreshAvatars` in `main.js`).
+- **Roblox Accounts** (`pages.js`): every logged-in account (saved cookie), also with 0 pets;
+  "Show others" for accounts without a cookie. Removing an account is refused while it has listed
+  or sold-not-delivered pets; its unlisted pets go with it. Headshots fetched in batches (`refreshAvatars` in `main.js`).
   Account Settings: private server link (required), executable, auto-launch, multi-instance,
   close after delivery.
 - **Auto Scan** (`openAutoScan` in `pages.js`, `autoScan` in `main.js`): choose logged-in
@@ -111,7 +118,16 @@ npx electron-builder --win nsis    # -> dist\Zotac Lister Setup <version>.exe
 - **Auto Delivery** (`delivery.js`, `pages2.js`): see the flow below. Autoexec card shows/adds
   executor autoexec folders. Order simulator for testing without Eldorado.
 - **Shop online/offline**: click the sidebar status box (`renderFooter` in `app.js`).
-- **Video Proof**: records the Roblox window during deliveries.
+- **Video Proof**: ONE clip per buyer trade (never the hops between stock accounts), from that
+  account's own Roblox window (`proof:target` -> HWND of the process Zotac launched). Each frame is
+  stamped (order, account, what is happening, clock). On save main writes the WebM duration
+  (`src/main/webmfix.js`) and, when ffmpeg is installed, remuxes it for a seek index; `.json`
+  sidecar next to each clip; clips are linked in the Trade Log. The page keeps one `<video>`
+  element across live refreshes and skips refreshes while it plays.
+- **Trade Log** (Auto Delivery tab, `trades` in the store, `delivery.record`): permanent ledger of
+  every pet that left an account: `delivered` (to a buyer, test trades too), `gather` (feeder ->
+  mother), `gone` (a complete rescan no longer shows it and Zotac did not trade it). The pet comes
+  off the account in Zotac at once (`delivered` + sold, or `accountId` = mother).
 - **Updates**: Settings -> Updates (see below).
 
 ---
@@ -131,7 +147,22 @@ npx electron-builder --win nsis    # -> dist\Zotac Lister Setup <version>.exe
 5. Success: buyer told, order marked delivered (optional), Discord card. Failure: 3 tries, then the
    order is cancelled on Eldorado with the reason (or manual fallback if that is switched off).
 
-Tested live on 2026-10-16 (BloxBeast35594 -> Kawafiu, Cacto Hipopotamo): every step above worked.
+Tested live on 2026-10-16 (single-account trade, and three gathered quantity orders of 3-4 pets over
+3 accounts with each account once as mother): every step above worked.
+
+- The agent pastes the buyer's name into the trade search box on screen every time (also when the
+  row is already listed), so the clip shows who the trade went to.
+- Buyer cancels / closes the trade window: the agent re-sends and re-adds by itself, up to 2 more
+  rounds per job (`deliverOnce` + `deliver` loop), and posts `/agent/jobs/<id>/event`
+  (`buyer_cancelled`): the buyer gets the `buyerCancelled` message and the job timer restarts. Not
+  counted as a failed attempt. The mother's `receive` does the same (waits for the re-sent request).
+- Right after joining, the agent waits up to 30 s for its base to fill before saying "only 0 in base".
+- Eldorado shows an order cancelled/refunded (`Watcher.syncSaleState` -> `orderCancelled`): the
+  delivery stops and its undelivered pets go back to listed/available (`releasePets`). Zotac's own
+  cancel after 3 failures and the seller's Stop do the same. Listed pets whose offer is no longer on
+  Eldorado (Active + Paused) go back to available (`reconcileListed`, at login + every 15 min).
+- Orders page "Start auto delivery" = `delivery.startFromOrder`: pets already booked to the order,
+  else the bought quantity from the offer's listed pets; never the whole offer's stock.
 
 ### Quantity orders and the mother account (gather)
 
@@ -139,26 +170,31 @@ Tested live on 2026-10-16 (BloxBeast35594 -> Kawafiu, Cacto Hipopotamo): every s
   as possible (`pickFewestAccounts` in `services.js`); identical unlisted pets (`sab.petKey`) fill a
   gap. Still short -> `delivery.onSale` stops for the seller (`manual`), it never trades fewer.
 - Pets of one order on several accounts (Settings "Gather onto one account", `delivery.consolidate`,
-  default on): `startGather` picks the **mother** = account holding most of the order's pets (tie:
-  game already open, then has a cookie). Each other account (feeder) gets a pair of jobs:
+  default on): `startGather` picks the **mother** by state, never by name: must be able to run (in
+  game or has a cookie), then most of the order's pets, then already in game, then fewest failed
+  jobs in the last 2 h, then least recently mother. Each other account (feeder) gets a pair of jobs:
   `receive` on the mother (accept the incoming request, wait until the feeder's offer holds the
   pets, READY, ACCEPT, check they arrived) and `transfer` on the feeder (normal send with the mother
   as "buyer", `inviteTimeout` 240 s, `closeWhenIdle` = feeder's game closes afterwards). A transfer
   is only handed out once its receive job is running. Either side seeing the pets move counts;
   moved pets get `accountId = mother` (`gatheredFrom` = old). Then ONE `deliver` job from the mother
-  to the buyer. 3 failed hops -> `gatherFallback` = one trade per account (old flow).
+  to the buyer. Feeders go one at a time: the next one is only queued (= launched) after the
+  previous hop ended and its game closed, so at most 2 games are open (user rule). A feeder whose
+  hop fails 3 times, or a full mother base ("Your Offer n/cap" with n > cap -> "mother base full"),
+  trades the buyer itself after the mother; `gatherFallback` (one trade per account) only when no
+  mother can be used.
 - A failed side asks the other to stop (`cancelRequested`, agent polls `GET /agent/jobs/<id>` and
   only obeys before a trade window opens); retry waits until both sides reported.
 - Incoming trade request on the mother's screen = PlayerGui `DuelsMachinePrompt` (ACCEPT button,
   names the sender). After both READY the game shows "Xs Left" with ACCEPT greyed out (presses
   ignored), then ACCEPT works and your side shows "Confirmed!"; the agent presses only after the
   countdown and stops once Confirmed! (proof video 2026-10-16).
-- Recording (Video Proof) of a gathered order = the mother's window (`proof:target` finds the HWND
-  of the process Zotac launched for it), from the receive job to the end of the buyer trade.
 - Launcher maps each launched Roblox process by the launch's `browsertrackerid` in its command line
   (two accounts launched together used to get the same pid).
-- Rescans (`importPets`) never re-add or drop pets of a running delivery or sold-not-delivered pets;
-  a pet id missing mid-delivery stops the order for the seller (`needsYou`), never "delivered".
+- Rescans (`importPets`) keep an unlisted pet's id and everything set on it (price, lock, Quick
+  Fill text, card) when the scan still shows the exact same pet (`sab.petKey`); they never re-add or
+  drop pets of a running delivery or sold-not-delivered pets; a pet id missing mid-delivery stops the
+  order for the seller (`needsYou`), never "delivered". Jobs always belong to an account.
 Failure reasons the agent reports are listed in its `deliver()` returns; the app adds "the
 delivery script never connected from @account" when nobody picked a job up.
 

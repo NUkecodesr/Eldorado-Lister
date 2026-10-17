@@ -72,6 +72,14 @@ class Repricer extends EventEmitter {
       const offers = await this.eld.myOffersAll('Active');
       const pets = this.store.get('pets');
       const chosen = rp.scope === 'chosen' ? new Set(rp.offerIds || []) : null;
+      const blocked = new Set([...(rp.blockedTraits || []), ...((settings.autolist || {}).specialTraits || [])].map(t => String(t).toLowerCase()));
+      const traitsOf = (o, pet) => {
+        if (pet.traits && pet.traits.length) return pet.traits;
+        const t = (o.attributes || []).find(a => a.id === settings.game.traitsAttr);
+        return t ? (t.values || (t.value ? [t.value] : [])).map(v => v.name || v) : [];
+      };
+      // floor = % of the first price Zotac saw for that offer (kept per offer, also untracked ones)
+      const bases = this.store.data.repricerBase || (this.store.data.repricerBase = {});
       for (const o of offers) {
         if (onlyIds && !onlyIds.includes(o.id)) continue;
         if (!onlyIds && chosen && !chosen.has(o.id)) continue;   // only the listings picked for auto repricing
@@ -85,11 +93,13 @@ class Repricer extends EventEmitter {
           gen: num ? Number(num.value) : 0, traits: []
         };
         const current = (o.pricePerUnit || {}).amount;
+        if (blocked.size && traitsOf(o, pet).some(t => blocked.has(String(t).toLowerCase()))) { out.skipped = (out.skipped || 0) + 1; continue; }
+        if (current && !bases[o.id]) bases[o.id] = pet.basePrice || current;
         const tmp = { ...settings, autolist: { ...settings.autolist, undercut: rp.undercut } };
         const sp = await smartPrice(this.eld, pet, tmp, me.id || me.userId);
         out.checked++;
         if (!sp.price || !current) continue;
-        const base = pet.basePrice || current;
+        const base = bases[o.id] || pet.basePrice || current;
         const floor = Math.max(settings.autolist.minPrice || 0, base * (rp.floorPct || 0) / 100);
         let target = Math.max(floor, sp.price);
         target = round2(target);
@@ -109,6 +119,25 @@ class Repricer extends EventEmitter {
     this.emit('done', out);
     return out;
   }
+}
+
+// Pets stay 'listed' until Zotac deletes their offer; offers that end on Eldorado (closed,
+// expired, deleted there) would leave them listed for ever. Compares with Active + Paused offers.
+// Careful by design: needs both lists, ignores pets listed in the last 10 min (not indexed yet)
+// and does nothing when Eldorado returns no offers at all while pets are listed.
+async function reconcileListed(eld, store) {
+  const [active, paused] = await Promise.all([eld.myOffersAll('Active'), eld.myOffersAll('Paused')]);
+  if (!Array.isArray(active) || !Array.isArray(paused)) return 0;
+  const live = new Set([...active, ...paused].map(o => o.id));
+  const listed = store.get('pets').filter(p => p.status === 'listed' && p.offerId);
+  if (!live.size && listed.length) return 0;
+  let n = 0;
+  for (const p of listed) {
+    if (live.has(p.offerId) || Date.now() - (p.listedAt || 0) < 600000) continue;
+    p.status = 'available'; p.offerId = null; p.offerGoneAt = Date.now(); n++;
+  }
+  if (n) { store.log('info', `[Listings] ${n} pet(s) back to available: their offer is no longer on Eldorado`); store.save(); }
+  return n;
 }
 
 // --- Order / notification watcher --------------------------------------
@@ -219,8 +248,11 @@ class Watcher extends EventEmitter {
 
   syncSaleState(o) {
     const sale = this.store.get('sales').find(s => s.orderId === o.id);
-    if (sale && sale.state !== o.state) { sale.state = o.state; this.store.save(); }
+    if (sale && sale.state !== o.state) {
+      sale.state = o.state; this.store.save();
+      if (/cancel|refund/i.test(o.state)) this.emit('orderCancelled', o);
+    }
   }
 }
 
-module.exports = { discord, robloxUser, robloxAvatar, Repricer, Watcher, pickFewestAccounts };
+module.exports = { discord, robloxUser, robloxAvatar, Repricer, Watcher, pickFewestAccounts, reconcileListed };

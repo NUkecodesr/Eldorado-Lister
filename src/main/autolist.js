@@ -72,10 +72,12 @@ class AutoLister extends EventEmitter {
         // 1. price
         let price = pet.price;
         let basis = 'manual';
+        const confirmed = opts.prices && Number(opts.prices[pet.id]) > 0 ? Number(opts.prices[pet.id]) : null;
         const special = (al.specialTraits || []).map(t => String(t).toLowerCase());
         const review = special.length && (pet.traits || []).some(t => special.includes(String(t).toLowerCase()));
         if (review && !(pet.price > 0)) throw new Error('Manual review (special trait): set a price first');
         if (review) basis = 'manual (special trait)';
+        else if (confirmed) { price = confirmed; basis = 'confirmed'; }
         else if (!price || al.priceMode === 'auto' && !pet.priceLocked) {
           if (al.priceMode === 'fixed') { price = al.fixedPrice; basis = 'fixed'; }
           else {

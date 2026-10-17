@@ -161,6 +161,8 @@ function xFill(tpl, p) {
     .replace(/ {2,}/g, ' ').replace(/^ +| +$/gm, '')
     .replace(/([ \t]*\|)+[ \t]*$/gm, '').replace(/^[ \t]*\|[ \t]*/gm, '').trim();
 }
+// pets Zotac can deliver: their account is logged in (saved cookie)
+const xDeliverable = p => { const a = S.accounts.find(x => x.id === p.accountId); return !!(a && a.hasCookie); };
 const xSpecial = () => new Set(((S.settings.autolist || {}).specialTraits || []).map(x => String(x).toLowerCase()));
 const xIsReview = (p, set) => (p.traits || []).some(t => set.has(String(t).toLowerCase()));
 function xMutBlock(m) {
@@ -244,7 +246,7 @@ PAGES.autolist = async root => {
       [{ label: 'Use this price', cls: 'primary', fn: async () => { await M.call('pets:update', [pet.id], { price: r.price, priceBasis: r.basis }); await refreshData(); render(); } }, { label: t('close') }]);
   };
 
-  const markSold = async p => { const pr = await promptBox('Mark as sold', 'Sale price $', p.price || ''); if (pr === null) return; await M.call('pets:markSold', [p.id], pr); AL.selected.delete(p.id); await refreshData(); render(); };
+  const markSold = async p => { const pr = await promptBox('Mark as sold (sold outside Zotac)', `Sale price $${p.offerId ? ' — the Eldorado offer stays live, delete it there if needed' : ''}`, p.price || ''); if (pr === null) return; await M.call('pets:markSold', [p.id], pr); AL.selected.delete(p.id); await refreshData(); render(); };
   const delPet = async p => { if (!await confirmBox(`Delete ${p.name} from the app? (Eldorado offers are not touched)`)) return; await M.call('pets:delete', [p.id]); AL.selected.delete(p.id); await refreshData(); render(); };
   // open our Searcher prefilled with this brainrot and run the search
   const searchEldorado = async p => {
@@ -253,12 +255,10 @@ PAGES.autolist = async root => {
     SR.res = await run(() => M.call('eld:search', { ...SR.q, pageSize: 30 })); SR.loading = false; render();
   };
 
-  // ---- scanner script panel (editable, persisted locally) ----
-  const scriptArea = h('textarea', { class: 'x-script mono', spellcheck: 'false', placeholder: 'Paste your scanner script here…' });
-  // Default = the bundled scanner with this install's port + token filled in.
-  scriptArea.value = xLs.get('zotac.scannerScript', '');
-  if (!scriptArea.value.trim()) M.call('scanner:script').then(s => { if (!scriptArea.value.trim()) scriptArea.value = s; }).catch(() => {});
-  scriptArea.addEventListener('input', () => xLs.set('zotac.scannerScript', scriptArea.value));
+  // ---- scanner script panel: read-only, always the bundled scanner with this install's port +
+  // token (an edited copy did nothing for autoexec and kept an old token after a token change) ----
+  const scriptArea = h('textarea', { class: 'x-script mono', spellcheck: 'false', readonly: true, placeholder: 'Loading the scanner…' });
+  M.call('scanner:script').then(s => { scriptArea.value = s; }).catch(() => { scriptArea.value = '-- could not load the scanner script'; });
   const jsonArea = h('textarea', { class: 'x-json mono', placeholder: 'Paste JSON from Zotac Lister Scanner here...', spellcheck: 'false' });
   jsonArea.value = AL.json;
   const countEl = h('span', { class: 'x-count' }, String(xJsonCount(AL.json)));
@@ -266,10 +266,9 @@ PAGES.autolist = async root => {
 
   const scriptPanel = h('section', { class: 'x-panel' },
     h('div', { class: 'x-ptitle' }, h('span', { class: 'x-glyph' }, '</>'), 'PLOT SCANNER SCRIPT'),
-    h('p', { class: 'x-ptext' }, 'Run this script in your executor (or put it in autoexec) on each account in Steal a Brainrot. It scans ', h('b', null, 'your base'), ', sends the pets straight to Zotac and keeps them synced every 30s. It also copies the JSON to your clipboard, so you can paste it below if the app was closed.'),
+    h('p', { class: 'x-ptext' }, 'Zotac already puts the scanner in your executor\'s autoexec, so every account it opens scans ', h('b', null, 'its own base'), ' and keeps it synced every 30 s. Copy it only to run it by hand (this copy shows an in-game window and also puts the JSON on your clipboard, to paste below if Zotac was closed).'),
     h('div', { class: 'x-code' }, scriptArea,
       h('div', { class: 'row x-code-btns' },
-        h('button', { class: 'btn sm', title: 'Reload the bundled scanner (with your current token)', onclick: async () => { xLs.set('zotac.scannerScript', ''); scriptArea.value = await M.call('scanner:script'); toast('Default scanner loaded', 'good'); } }, 'Reset'),
         h('button', { class: 'btn sm', onclick: () => { if (!scriptArea.value.trim()) return toast('Nothing to copy yet', 'error'); xCopy(scriptArea.value, 'Script copied'); } }, 'Copy'))),
     h('div', { class: 'x-steps' },
       h('span', null, h('i', null, '1'), h('b', null, 'Join'), ' Steal a Brainrot'), h('em', null),
@@ -284,8 +283,7 @@ PAGES.autolist = async root => {
       h('button', { class: 'btn sm', onclick: async () => { try { AL.json = await navigator.clipboard.readText(); render(); } catch { toast('Clipboard not available — paste with Ctrl+V', 'error'); } } }, '⎘ Paste'),
       h('button', { class: 'btn sm primary', onclick: () => { if (!AL.json.trim()) return toast('Paste the scanner JSON first', 'error'); importJson(AL.json); } }, '✓ Parse & Edit'),
       h('div', { class: 'grow' }),
-      h('button', { class: 'btn sm ghost', onclick: addPet }, '+ Pet'),
-      h('button', { class: 'btn sm ghost', onclick: async () => importJson(await readFileText()) }, 'Import JSON file')));
+      h('button', { class: 'btn sm ghost', onclick: addPet }, '+ Pet')));
 
   // ---- selection bar ----
   const allChecked = pets.length && pets.every(p => AL.selected.has(p.id));
@@ -294,12 +292,16 @@ PAGES.autolist = async root => {
     h('span', null, `${AL.selected.size} selected of ${pets.length} pets`),
     h('div', { class: 'grow' }),
     pets.some(p => p.status === 'available') ? h('button', { class: 'btn sm ghost danger', title: 'Delete every pet that is not listed or sold', onclick: async () => {
-      const ids = S.pets.filter(p => p.status === 'available').map(p => p.id);
-      if (!await confirmBox(`Clear ${ids.length} unlisted pets from the app? (listed and sold pets stay, Eldorado is not touched)`)) return;
+      const ids = pets.filter(p => p.status === 'available').map(p => p.id);
+      if (!await confirmBox(`Clear the ${ids.length} unlisted pets shown here from the app? (listed and sold pets stay, Eldorado is not touched)`)) return;
       await M.call('pets:delete', ids); AL.selected.clear(); await refreshData(); render();
     } }, 'Clear unlisted') : null,
     AL.selected.size ? [
-      h('button', { class: 'btn sm ghost', onclick: async () => { const ids = [...AL.selected]; await M.call('pets:update', ids, { status: 'available', offerId: null }); await refreshData(); render(); } }, 'Reset to available'),
+      h('button', { class: 'btn sm ghost', title: 'For listed pets whose Eldorado offer is gone', onclick: async () => {
+        const ids = [...AL.selected].filter(id => { const p = S.pets.find(x => x.id === id); return p && p.status === 'listed'; });
+        if (!ids.length) return toast('Only listed pets can be reset (sold ones belong to an order)', 'error');
+        if (!await confirmBox(`Put ${ids.length} listed pet(s) back to available? Their Eldorado offer is NOT deleted: only do this when the offer is already gone.`)) return;
+        await M.call('pets:update', ids, { status: 'available', offerId: null }); await refreshData(); render(); } }, 'Reset to available'),
       h('button', { class: 'btn sm ghost danger', onclick: async () => { const ids = [...AL.selected]; if (!await confirmBox(`Delete ${ids.length} pets from the app? (Eldorado offers are not touched)`)) return; await M.call('pets:delete', ids); AL.selected.clear(); await refreshData(); render(); } }, t('delete'))] : null);
 
   // collapsible card (open state remembered per card)
@@ -310,7 +312,7 @@ PAGES.autolist = async root => {
         h('span', { class: 'x-glyph' }, glyph), title, h('div', { class: 'grow' }), h('span', { class: 'x-caret' }, open ? '⌄' : '›')),
       open ? body : null);
   };
-  const live = pets.filter(p => p.status !== 'sold');
+  const live = pets.filter(p => p.status === 'available');   // bulk Quick Fill / Price / Generate: not-yet-listed pets only
   const selIds = () => [...AL.selected];
 
   // ---- QUICK FILL ----
@@ -473,8 +475,7 @@ PAGES.autolist = async root => {
         h('button', { title: 'Smart price & competitors', onclick: () => showComps(p) }, '$'),
         h('button', { title: 'Preview image', onclick: () => previewImage(p) }, 'Img'),
         p.offerId ? h('button', { title: 'Open offer', onclick: () => M.call('open:external', offerUrl({ id: p.offerId })) }, '↗') : null,
-        p.status !== 'sold' ? h('button', { title: 'Mark as sold', onclick: () => markSold(p) }, '✓') : null,
-        h('button', { class: 'del', title: 'Delete from the app', onclick: () => delPet(p) }, '✕')),
+        p.status !== 'sold' ? h('button', { title: 'Mark as sold (sold outside Zotac)', onclick: () => markSold(p) }, '✓') : null),
       rev ? h('span', { class: 'x-review' }, 'REVIEW') : null,
       xMutBlock(p.mutation),
       traits.length ? h('span', { class: 'x-trp' }, traits.slice(0, 8).map(tr => ART_THUMBS.traits[tr] ? h('img', { src: ART_THUMBS.traits[tr], title: tr, alt: tr }) : h('em', { title: tr }, String(tr).slice(0, 3)))) : null,
@@ -496,11 +497,13 @@ PAGES.autolist = async root => {
   const startBtn = S.listerRunning
     ? h('button', { class: 'btn danger', onclick: () => M.call('autolist:stop') }, 'Stop')
     : h('button', { class: 'btn primary', onclick: async () => {
-      const ids = [...AL.selected].filter(id => (S.pets.find(p => p.id === id) || {}).status === 'available');
-      if (!ids.length) return toast('Select available pets to list', 'error');
+      const chosen = [...AL.selected].map(id => S.pets.find(p => p.id === id)).filter(p => p && p.status === 'available');
+      const ids = chosen.filter(xDeliverable).map(p => p.id);
+      if (chosen.length > ids.length) toast(`${chosen.length - ids.length} pet(s) skipped: their account is not logged in, so Zotac could not deliver them`, 'error', 8000);
+      if (!ids.length) return toast('Select available pets of logged-in accounts to list', 'error');
       if (!S.me) return toast('Log in to Eldorado first (Account page)', 'error');
-      if (!await confirmAutoList(ids)) return;
-      await run(() => M.call('autolist:start', ids)); S.listerRunning = true; render();
+      const ok = await confirmAutoList(ids); if (!ok) return;
+      await run(() => M.call('autolist:start', ids, { prices: ok.prices })); S.listerRunning = true; render();
     } }, `Start Auto List (${AL.selected.size})`);
 
   root.append(
@@ -701,7 +704,6 @@ PAGES.listings = async root => {
       h('details', { class: 'x-fold' }, h('summary', null, 'Repricer settings & log'),
         h('div', { class: 'card', style: { marginTop: '10px' } },
           h('div', { class: 'grid g2' }, h('label', { class: 'f' }, 'Floor (% of first price)', num(rp.floorPct, v => saveSettings({ repricer: { floorPct: v } })))),
-          setting('Only lower when undercut', 'Never raises prices', sw(rp.onlyIfBeaten, v => saveSettings({ repricer: { onlyIfBeaten: v } }))),
           h('div', { class: 'log', style: { marginTop: '10px' } }, (S.logs || []).filter(l => /\[Repricer\]/.test(l.msg)).slice(-40).map(l => h('div', { class: 'l-' + l.level }, `${new Date(l.t).toLocaleTimeString()} ${l.msg.replace('[Repricer] ', '')}`)))))));
 };
 
@@ -1019,7 +1021,8 @@ function confirmAutoList(ids) {
     const prices = {};
     let done = false;
     const body = h('div', { class: 'x-cf' });
-    const listBtn = h('button', { class: 'btn primary x-cf-go', disabled: true, onclick: () => { done = true; close(); resolve(true); } }, '…');
+    // resolves with the prices shown, so the run lists exactly these (no second pricing pass)
+    const listBtn = h('button', { class: 'btn primary x-cf-go', disabled: true, onclick: () => { done = true; close(); resolve({ prices: { ...prices } }); } }, '…');
     const close = modal('', body, []);
     const root = body.closest('.modal');
     if (root) { root.classList.add('x-cf-modal'); const t = root.querySelector('h2'); if (t) t.remove(); const a = root.querySelector('.actions'); if (a) a.remove(); }
@@ -1027,10 +1030,11 @@ function confirmAutoList(ids) {
     if (bg) new MutationObserver((_, o) => { if (!bg.isConnected) { o.disconnect(); if (!done) resolve(false); } }).observe(document.body, { childList: true, subtree: true });
 
     const draw = (status) => {
-      // one row per listing: same name + mutation + gen/s
+      // one row per listing, grouped exactly like the run (name, mutation, gen/s, traits)
       const groups = new Map();
       for (const p of pets) {
-        const k = p.name + '|' + (p.mutation || 'None') + '|' + formatGen(p.gen);
+        const nk = x => String(x || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const k = [nk(p.name), nk(p.mutation || 'None'), Math.round(Number(p.gen) || 0), (p.traits || []).map(nk).sort().join(',')].join('|');
         if (!groups.has(k)) groups.set(k, { p, n: 0, price: null });
         const g = groups.get(k); g.n++;
         const pr = prices[p.id];
@@ -1119,10 +1123,11 @@ PAGES.accounts = async root => {
   const launch = async (a, force) => {
     const r = await run(() => M.call('accounts:launch', a.id, force));
     if (!r) return;
-    if (r.skipped) { if (await confirmBox(`${a.username}: ${r.skipped}. Launch another client anyway?`)) return launch(a, true); return; }
-    toast(`Launching ${a.username}${r.privateServer ? ' into your private server' : ' (no private server set)'}`, 'good');
+    if (r.skipped === 'already online') return toast(`${a.username} is already in game`, 'info');
+    if (r.skipped) { if (await confirmBox(`${a.username}: ${r.skipped}. Launch it again?`)) return launch(a, true); return; }
+    toast(`Launching ${a.username} into your private server`, 'good');
   };
-  if (RA.open === null) RA.open = new Set(S.accounts.length ? [S.accounts[0].id] : []);
+  if (RA.open === null) RA.open = new Set();
   const [rLo, rHi] = f.range ? f.range.split('-').map(Number) : [0, 0];
   const minG = Math.max(parseGen(f.min), rLo || 0), maxG = f.max ? parseGen(f.max) : 0, hiG = rHi || 0;
   const live = S.pets.filter(p => p.status !== 'sold');
@@ -1136,8 +1141,8 @@ PAGES.accounts = async root => {
 
   let accts = S.accounts.filter(a => !f.account || a.username.toLowerCase().includes(f.account.toLowerCase()));
   const countOf = a => live.filter(p => p.accountId === a.id).length;
-  // shown: accounts logged in (saved cookie) that hold unsold pets; the rest behind "Show hidden"
-  const shownAcct = a => a.hasCookie && S.pets.some(p => p.accountId === a.id && p.status !== 'sold');
+  // every logged-in account (saved cookie) shows, also with no stock left; the rest via Show others
+  const shownAcct = a => a.hasCookie;
   const emptyCount = accts.filter(a => !shownAcct(a)).length;
   if (!RA.showEmpty && !f.account) accts = accts.filter(shownAcct);
   if (RA.org === 'pets') accts = [...accts].sort((a, b) => countOf(b) - countOf(a));
@@ -1173,7 +1178,7 @@ PAGES.accounts = async root => {
     const amount = Number(await promptBox('Add expense', 'Amount $')); if (!amount) return;
     await M.call('expenses:save', { label, amount, date: new Date().toISOString() }); await refreshData(); render();
   };
-  const markSold = async p => { const pr = await promptBox('Mark as sold', 'Sale price $', p.price || ''); if (pr === null) return; await M.call('pets:markSold', [p.id], pr); await refreshData(); render(); };
+  const markSold = async p => { const pr = await promptBox('Mark as sold (sold outside Zotac)', `Sale price $${p.offerId ? ' — the Eldorado offer stays live, delete it there if needed' : ''}`, p.price || ''); if (pr === null) return; await M.call('pets:markSold', [p.id], pr); await refreshData(); render(); };
 
   // group identical pets when "Stock" is on
   const stack = list => {
@@ -1210,8 +1215,9 @@ PAGES.accounts = async root => {
     const ids = live.filter(p => p.accountId === a.id && p.status === 'available').map(p => p.id);
     if (!ids.length) return toast('No available pets on this account', 'error');
     if (!S.me) return toast('Log in to Eldorado first (Account page)', 'error');
-    if (!await confirmAutoList(ids)) return;
-    await run(() => M.call('autolist:start', ids)); S.listerRunning = true; toast('Auto List started', 'good');
+    if (!a.hasCookie) return toast(`${a.username} is not logged in: Zotac could not deliver its pets`, 'error');
+    const ok = await confirmAutoList(ids); if (!ok) return;
+    await run(() => M.call('autolist:start', ids, { prices: ok.prices })); S.listerRunning = true; toast('Auto List started', 'good');
   };
   const accountRow = a => {
     const mine = live.filter(p => p.accountId === a.id);
@@ -1227,18 +1233,17 @@ PAGES.accounts = async root => {
         h('div', { class: 'grow' }),
         h('span', { class: 'x-slot' + (full ? ' full' : '') }, h('i'), `${mine.length}/${XSLOT_CAP}`), h('small', { class: 'muted' }, `${mine.length} pets`),
         h('button', { class: 'x-ib', title: 'Copy username', onclick: e => { e.stopPropagation(); xCopy(a.username, 'Username copied'); } }, '⎘'),
-        h('button', { class: 'x-ab legit' + (a.legit ? ' on' : ''), title: 'Mark account as legit', onclick: async e => { e.stopPropagation(); await M.call('accounts:save', { id: a.id, legit: !a.legit }); await refreshData(); render(); } }, 'Legit'),
         h('button', { class: 'x-ab', title: 'List this account\'s available pets on Eldorado', onclick: e => { e.stopPropagation(); startAcct(a); } }, 'List'),
         h('button', { class: 'x-ab start', title: a.hasCookie ? 'Launch Roblox on this account (private server)' : 'Add the account cookie first (✎)', disabled: !a.hasCookie, onclick: e => { e.stopPropagation(); launch(a); } }, '▶ Start'),
         h('button', { class: 'x-ib', title: 'Edit', onclick: e => { e.stopPropagation(); editAcct(a); } }, '✎'),
-        h('button', { class: 'x-ib del', title: 'Remove account', onclick: async e => { e.stopPropagation(); if (await confirmBox(`Remove ${a.username}? Pets stay, unassigned.`)) { await M.call('accounts:delete', a.id, false); await refreshData(); render(); } } }, '🗑'),
+        h('button', { class: 'x-ib del', title: 'Remove account', onclick: async e => { e.stopPropagation(); if (await confirmBox(`Remove ${a.username} from Zotac? Its unlisted pets go with it. (Not possible while it has listed pets or sold pets not delivered yet.)`)) { if (await run(() => M.call('accounts:delete', a.id))) { await refreshData(); render(); } } } }, '🗑'),
         h('span', { class: 'x-caret' }, open ? '▴' : '▾')),
       open ? (shown.length ? grid(shown, a.id) : h('div', { class: 'x-empty sm' }, mine.length ? 'No pets match the filters.' : 'No pets on this account yet.')) : null);
   };
 
   // ---- Account Settings tab (money + account management) ----
   const settingsTab = () => {
-    const gross = S.sales.reduce((a, s) => a + (Number(s.price) || 0), 0), fee = gross * 0.15;
+    const gross = S.sales.filter(s => !/cancel|refund/i.test(s.state || '')).reduce((a, s) => a + (Number(s.price) || 0), 0), fee = gross * 0.15;
     const expenses = S.pets.reduce((a, p) => a + (Number(p.cost) || 0), 0) + S.expenses.reduce((a, e) => a + (Number(e.amount) || 0), 0);
     const net = gross - fee - expenses;
     const L = S.settings.launcher || {};
@@ -1285,10 +1290,10 @@ PAGES.accounts = async root => {
         h('button', { class: 'x-chip' + (RA.stock ? ' on' : ''), onclick: () => { RA.stock = !RA.stock; render(); } }, '◈ Stock'),
         h('button', { class: 'x-chip', onclick: () => { RA.open = new Set(); render(); } }, '⊟ Collapse'),
         h('button', { class: 'x-chip', onclick: () => { RA.open = new Set(S.accounts.map(a => a.id)); render(); } }, '⊞ Expand'),
-        emptyCount ? h('button', { class: 'x-chip' + (RA.showEmpty ? ' on' : ''), title: 'Accounts that are not logged in (no saved cookie) or have no pets in stock', onclick: () => { RA.showEmpty = !RA.showEmpty; render(); } }, RA.showEmpty ? `Hide others (${emptyCount})` : `Show others (${emptyCount})`) : null] : null),
+        emptyCount ? h('button', { class: 'x-chip' + (RA.showEmpty ? ' on' : ''), title: 'Accounts that are not logged in (no saved cookie)', onclick: () => { RA.showEmpty = !RA.showEmpty; render(); } }, RA.showEmpty ? `Hide others (${emptyCount})` : `Show others (${emptyCount})`) : null] : null),
     RA.view === 'all'
       ? (petsFiltered.length ? grid(petsFiltered, 'all') : h('div', { class: 'x-empty' }, 'No pets match.'))
-      : (accts.length ? accts.filter(a => !petFilterOn || petsFiltered.some(p => p.accountId === a.id)).map(accountRow) : h('div', { class: 'x-empty' }, S.accounts.length ? 'No logged-in account has pets in stock. Log in an account (✎ → cookie or browser login) and run the scanner on it, or use Show others.' : 'No accounts yet. Import a JSON or add one.')),
+      : (accts.length ? accts.filter(a => !petFilterOn || petsFiltered.some(p => p.accountId === a.id)).map(accountRow) : h('div', { class: 'x-empty' }, S.accounts.length ? 'No logged-in account yet. Log in an account (✎ → cookie or browser login), or use Show others.' : 'No accounts yet. Import a JSON or add one.')),
     (RA.view === 'account' && petsFiltered.some(p => !p.accountId)) ? h('div', { class: 'x-arow' }, h('div', { class: 'x-ahead' }, h('b', null, 'Unassigned'), h('small', { class: 'muted' }, 'pets without an account')), grid(petsFiltered.filter(p => !p.accountId), 'un')) : null);
 
   root.append(
@@ -1305,7 +1310,7 @@ PAGES.accounts = async root => {
             table(rows, [{ label: 'Account', render: r => '@' + r.a.username }, { label: 'Free', num: true, render: r => r.free }], { empty: 'All accounts are full.', maxHeight: '360px' })), [{ label: t('close') }]);
         } }, '▦ Free Slots'),
         h('button', { class: 'btn sm primary', onclick: () => openAutoScan() }, '⌕ Auto Scan'),
-        h('button', { class: 'btn sm', title: 'Launch every account that has a cookie and is not in game', onclick: async () => { toast('Launching accounts…', 'info'); const r = await run(() => M.call('accounts:launchAll')); if (r) toast(r.map(x => `${x.username}: ${x.error || x.skipped || 'launched'}`).join(' · ') || 'No accounts with cookies', 'good', 9000); } }, '▶ Launch All'),
+        h('button', { class: 'btn sm', title: 'Launch every account that has a cookie and is not in game', onclick: async () => { const n = S.accounts.filter(a => a.hasCookie).length; if (!n) return toast('No logged-in accounts', 'error'); if (!await confirmBox(`Open Roblox on all ${n} logged-in accounts (4 s apart, accounts already in game are skipped)?`)) return; toast('Launching accounts…', 'info'); const r = await run(() => M.call('accounts:launchAll')); if (r) toast(r.map(x => `${x.username}: ${x.error || x.skipped || 'launched'}`).join(' · ') || 'No accounts with cookies', 'good', 9000); } }, '▶ Launch All'),
         h('button', { class: 'btn sm', title: 'Restart the multi-instance helper (when a new client closes the old one)', onclick: () => run(() => M.call('launcher:fix'), 'Launcher reset') }, '⟳ Fix Launch'),
         h('button', { class: 'btn sm primary', title: 'Sign in to a stock account on roblox.com; the account and its cookie are added', onclick: async () => { const r = await run(() => M.call('accounts:loginBrowser', null)); if (r) { toast(`${r.created ? 'Added' : 'Updated'} @${r.username} — cookie saved`, 'good'); await refreshData(); render(); } } }, '⎆ Browser Login'),
         h('button', { class: 'btn sm primary', onclick: () => editAcct() }, '+ Account'),
@@ -1340,7 +1345,7 @@ PAGES.sales = async root => {
   const rows = numbered.filter(r => (!SH.name || (r.name + ' ' + r.mutation).toLowerCase().includes(SH.name.toLowerCase()))
     && (!minGen || r.gen >= minGen) && (!SH.owner || (r.owner || r.s.buyer || '').toLowerCase().includes(SH.owner.toLowerCase()))
     && (!minVal || r.value >= minVal) && (!from || r.ts >= from) && (!to || r.ts < to));
-  const gross = S.sales.reduce((a, s) => a + (Number(s.price) || 0), 0), fee = gross * 0.15;
+  const gross = S.sales.filter(s => !/cancel|refund/i.test(s.state || '')).reduce((a, s) => a + (Number(s.price) || 0), 0), fee = gross * 0.15;
   const expenses = S.pets.reduce((a, p) => a + (Number(p.cost) || 0), 0) + S.expenses.reduce((a, e) => a + (Number(e.amount) || 0), 0);
   const net = gross - fee - expenses;
   const dt = ts => { if (!ts) return '—'; const d = new Date(ts); const p2 = n => String(n).padStart(2, '0'); return `${p2(d.getDate())}/${p2(d.getMonth() + 1)}/${d.getFullYear()}, ${p2(d.getHours())}:${p2(d.getMinutes())}`; };
@@ -1437,7 +1442,11 @@ PAGES.orders = async root => {
         h('button', { class: 'btn', onclick: async () => { const m = await promptBox('Message buyer', 'Message', '', true); if (m) run(() => M.call('eld:message', o.id, m), 'Sent'); } }, 'Message buyer'),
         h('button', { class: 'btn', onclick: () => { CH.orderId = o.id; go('chat'); } }, 'Open chat'),
         /pending/i.test(o.state) ? h('button', { class: 'btn primary', onclick: async () => { if (await confirmBox('Mark this order as delivered?')) run(() => M.call('eld:deliver', o.id), 'Marked delivered'); } }, 'Mark delivered') : null,
-        S.settings.delivery.enabled ? h('button', { class: 'btn', onclick: () => run(() => M.call('delivery:manual', o.id, 'start', { buyer: o.buyer, title: o.title, petIds: S.pets.filter(p => p.offerId === o.offerId).map(p => p.id) }), 'Delivery flow started') }, 'Start auto delivery') : null),
+        S.settings.delivery.enabled ? h('button', { class: 'btn', onclick: async () => {
+          if (!await confirmBox(`Start auto delivery for this order (×${o.quantity || 1})? Zotac uses the pets booked to it, or ${o.quantity || 1} listed pet(s) of its offer.`)) return;
+          const r = await run(() => M.call('delivery:startFromOrder', { id: o.id, buyer: o.buyer, title: o.title, price: o.price, quantity: o.quantity, offerId: o.offerId, conversationId: o.conversationId }));
+          if (r) toast(r.pets < r.quantity ? `Only ${r.pets} of ${r.quantity} pets found: the order waits for you (Auto Delivery)` : 'Delivery flow started', r.pets < r.quantity ? 'error' : 'good', 8000);
+        } }, 'Start auto delivery') : null),
       jsonDetails('Raw order data', full || o.raw)), [{ label: t('close') }]);
   };
   const okState = s => !XSTATE.canceled(s) && !XSTATE.pending(s);
@@ -1450,7 +1459,7 @@ PAGES.orders = async root => {
   const ratingTxt = o => !o.rating ? '—' : typeof o.rating === 'object' ? (o.rating.rating || o.rating.type || 'Rated') : String(o.rating);
 
   root.append(
-    h('div', { class: 'x-head' }, h('div', { class: 'x-badge' }, '🛒'), h('div', { class: 'x-head-t' }, h('h1', null, 'Orders'), h('p', null, 'Sales history')), h('div', { class: 'grow' }),
+    h('div', { class: 'x-head' }, h('div', { class: 'x-badge' }, '🛒'), h('div', { class: 'x-head-t' }, h('h1', null, 'Orders'), h('p', null, 'Sold orders on Eldorado')), h('div', { class: 'grow' }),
       h('div', { class: 'row x-head-r' }, h('button', { class: 'btn sm ghost', onclick: load }, OR.loading ? 'Loading…' : '↻ Refresh'))),
     !S.me ? h('div', { class: 'card empty' }, 'Log in on the Account page to see orders.') : h('div', null,
       h('div', { class: 'x-tiles' },
@@ -1557,10 +1566,10 @@ PAGES.chat = async root => {
       h('div', { class: 'row x-head-r' }, h('button', { class: 'btn sm ghost', onclick: () => { CH.orders = null; CH.dl = null; if (CH.orderId) { delete CH.rbx[CH.orderId]; chLoadHistory(CH.orderId, true); } render(); } }, '↻ Refresh'), h('button', { class: 'btn sm', onclick: () => M.call('open:external', url) }, '✎ Eldorado'))),
     xPills([['all', 'All'], ['active', 'Active'], ['delivered', 'Delivered'], ['completed', 'Completed'], ['canceled', 'Canceled'], ['disputed', 'Disputed']], CH.filter, v => { CH.filter = v; render(); }),
     h('div', { class: 'x-bar x-am' }, h('span', { class: 'x-bar-k' }, '⚡ AUTO-MESSAGE'),
-      h('small', { class: 'muted grow', style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, CH.edit ? '' : am.text),
+      h('small', { class: 'muted grow', style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, S.settings.delivery && S.settings.delivery.enabled ? 'not sent while Auto Delivery is on (it greets the buyer itself)' : (CH.edit ? '' : am.text)),
       h('button', { class: 'btn sm ghost', onclick: () => { CH.edit = !CH.edit; render(); } }, CH.edit ? 'Close' : 'Edit text'),
       sw(!!am.enabled, v => saveSettings({ autoMessage: { enabled: v } }))),
-    CH.edit ? h('div', { class: 'x-panel' }, h('textarea', { value: am.text || '', onchange: e => saveSettings({ autoMessage: { text: e.target.value } }) }), h('small', { class: 'muted' }, 'Variables: {buyer} {item} {orderId}. Sent once to each new order while the app runs.')) : null,
+    CH.edit ? h('div', { class: 'x-panel' }, h('textarea', { value: am.text || '', onchange: e => saveSettings({ autoMessage: { text: e.target.value } }) }), h('small', { class: 'muted' }, 'Variables: {buyer} {item} {orderId}. Sent once to each new order while the app runs, only when Auto Delivery is off.')) : null,
     h('div', { class: 'x-chat' },
       h('div', { class: 'x-clist' },
         h('input', { type: 'search', placeholder: 'Search by buyer name...', value: CH.q, oninput: e => { CH.q = e.target.value; clearTimeout(CH.qt); CH.qt = setTimeout(render, 250); } }),

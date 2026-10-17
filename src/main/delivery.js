@@ -85,7 +85,7 @@ const CHAT_WORDS = new Set(('hi hey hello yo sup ok okay yes no yeah yep nope th
   'the a an and or to of in on for it its this that just bought buy buying order ordered got get paid pay user username roblox rbx ' +
   'here there sent send trade trading accept accepted ready online offline now when what where how why can you me your mine ' +
   'brainrot pet item delivery deliver steal sab game account acc is was are will would should could did do does done have has ' +
-  'with from friend add added join joining wait waiting sorry bro bruh lol lmao fast slow good great nice cool sure np gg rubrikiko').split(/\s+/));
+  'with from friend add added join joining wait waiting sorry bro bruh lol lmao fast slow good great nice cool sure np gg').split(/\s+/));
 
 class Delivery extends EventEmitter {
   constructor({ store, eld, bridge }) {
@@ -212,8 +212,7 @@ class Delivery extends EventEmitter {
     try { const v = await this.eld.deliveryDetail(order.id, 'RobloxUsername'); if (v && typeof v === 'string') preset = v.trim(); } catch { /* buyer will type it */ }
     const user = preset ? await this.lookupUser(preset) : null;
     if (user) {
-      const text = (this.cfg.steps || {}).greetingKnownUser ? null : `Hi ${d.buyer || ''}! Thanks for your order.\n\nYou entered ${user.name} as your Roblox username at checkout. Make sure you are online in Steal a Brainrot.`;
-      if (text) await this.sayText(d, text); else await this.say(d, 'greetingKnownUser', { username: user.name });
+      await this.say(d, 'greetingKnownUser', { username: user.name });
       await this.multiNote(d);
       await this.proposeUsername(d, user.name, user);
     } else {
@@ -308,13 +307,23 @@ class Delivery extends EventEmitter {
   // --- gather onto a mother account ----------------------------------------
   // Mother = the account holding most of the order's pets (fewest transfers); ties go to an
   // account whose game is already open, then one with a cookie (Zotac can launch it).
+  // No account is special: whichever is best right now. It must be able to run (game open, or a
+  // saved cookie so Zotac can launch it); then most of the order's pets (fewest hops), game already
+  // open, fewest failed jobs in the last 2 h, least recently used as mother (spreads the load).
   pickMother(d) {
     const pets = this.store.get('pets').filter(p => d.petIds.includes(p.id) && !p.delivered);
     const accts = this.store.get('accounts');
-    const online = id => { const a = accts.find(x => x.id === id); if (!a) return false; const n = String(a.username || '').toLowerCase();
-      const poll = Object.entries(this.lastAgentPoll).find(([k]) => k.toLowerCase() === n); return Date.now() - Math.max(poll ? poll[1] : 0, this.lastSeen[n] || 0) < 75000; };
-    const score = id => [pets.filter(p => p.accountId === id).length, online(id) ? 1 : 0, (accts.find(a => a.id === id) || {}).cookieEnc ? 1 : 0];
-    return [...d.accounts].sort((a, b) => { const x = score(a), y = score(b); return (y[0] - x[0]) || (y[1] - x[1]) || (y[2] - x[2]); })[0];
+    const jobs = this.store.get('jobs');
+    const since = Date.now() - 2 * 3600e3;
+    const lastMother = id => Math.max(0, ...Object.values(this.map).filter(x => x && x.mother === id).map(x => x.createdAt || 0));
+    const score = id => {
+      const a = accts.find(x => x.id === id) || {};
+      const online = this.accountOnline(id);
+      return [online || a.cookieEnc ? 1 : 0, pets.filter(p => p.accountId === id).length, online,
+        -jobs.filter(j => j.accountId === id && j.status === 'failed' && (j.finishedAt || 0) > since).length, -lastMother(id)];
+    };
+    const order = [...d.accounts].sort((a, b) => { const x = score(a), y = score(b); for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return y[i] - x[i]; return 0; });
+    return order[0];
   }
 
   async startGather(d) {
@@ -324,11 +333,40 @@ class Delivery extends EventEmitter {
     const mother = accts.find(a => a.id === d.mother) || {};
     if (!mother.username) { this.log('warn', `Order ${d.orderId}: mother account unknown — one trade per account instead`); return this.gatherFallback(d, 'mother account has no username'); }
     d.gather = d.gather || {};
-    const feeders = d.accounts.filter(id => id !== d.mother);
+    // feeders one after another (an open game first, then the one with most pets); the next one is
+    // queued, and so launched, only after the previous hop ended and its game closed (nextFeeder):
+    // never more than 2 games open (mother + one feeder), so a crash costs as little as possible
+    const petsOf = id => this.store.get('pets').filter(p => d.petIds.includes(p.id) && p.accountId === id).length;
+    const feeders = d.feeders = d.feeders || d.accounts.filter(id => id !== d.mother)
+      .sort((a, b) => (this.accountOnline(b) - this.accountOnline(a)) || (petsOf(b) - petsOf(a)));
     this.log('info', `Order ${d.orderId}: gathering ×${d.quantity || d.petIds.length} onto @${mother.username} from ${feeders.map(id => '@' + ((accts.find(a => a.id === id) || {}).username || '?')).join(', ')}`);
     await this.say(d, 'gathering', { mother: mother.username });
-    for (const f of feeders) this.queueTransfer(d, f);
+    this.nextFeeder(d);
     this.store.save(); this.emit('update', d);
+  }
+
+  accountOnline(id) {
+    const a = this.store.get('accounts').find(x => x.id === id);
+    if (!a) return 0;
+    const n = String(a.username || '').toLowerCase();
+    const poll = Object.entries(this.lastAgentPoll).find(([k]) => k.toLowerCase() === n);
+    return Date.now() - Math.max(poll ? poll[1] : 0, this.lastSeen[n] || 0) < 75000 ? 1 : 0;
+  }
+
+  // queue the next feeder once no hop is in progress and the previous feeder's game has closed
+  // (waits up to 45 s for that, then goes on anyway)
+  nextFeeder(d) {
+    if (!d || d.state !== 'delivering' || d.noGather || !d.feeders) return;
+    const g = d.gather || {};
+    if (d.feeders.some(id => g[id] && !g[id].done && !g[id].failed)) return;
+    const next = d.feeders.find(id => !g[id]);
+    if (!next) return;
+    const prevOpen = d.feeders.some(id => g[id] && this.accountOnline(id));
+    this.nfWait = this.nfWait || {};
+    const since = this.nfWait[d.orderId] = this.nfWait[d.orderId] || Date.now();
+    if (prevOpen && Date.now() - since < 45000) { setTimeout(() => this.nextFeeder(d), 3000); return; }
+    delete this.nfWait[d.orderId];
+    this.queueTransfer(d, next);
   }
 
   // one feeder -> mother hop = a pair of jobs: the feeder's agent sends the trade (pets added,
@@ -346,7 +384,7 @@ class Delivery extends EventEmitter {
       if (missing.length) return this.needsYou(d, `${missing.length} pet(s) of this order are no longer in Zotac's pet list (removed by a rescan or by hand) — deliver by hand`);
       g.done = true; return this.gatherCheck(d);
     }
-    g.tries++;
+    g.tries++; g.started = false;
     const list = pets.map(p => ({ id: p.id, name: p.name, mutation: p.mutation, gen: p.gen, traits: p.traits || [] }));
     const base = { orderId: d.orderId, status: 'pending', createdAt: Date.now(), attempt: g.tries - 1, pets: list, pair: feederId };
     const receive = { ...base, id: rid(6), kind: 'receive', accountId: mother.id, account: mother.username || null,
@@ -370,10 +408,13 @@ class Delivery extends EventEmitter {
     const g = d.gather[j.pair];
     if (!g || g.done || !(g.ids || []).includes(j.id)) return;
     const jobs = this.store.get('jobs');
+    const active = d.state === 'delivering';
     if (ok) {
       // any try's success counts (a late "done" from an earlier try still means the pets moved)
       g.done = true;
       for (const p of this.store.get('pets')) if (j.pets.some(x => x.id === p.id)) { p.gatheredFrom = p.accountId; p.accountId = d.mother; }
+      const accN = id => (this.store.get('accounts').find(a => a.id === id) || {}).username || null;
+      this.record('gather', { orderId: d.orderId, from: accN(j.pair), to: accN(d.mother), pets: j.pets, jobId: j.id, sim: d.sim, note: j.kind + ' side confirmed' });
       // the other side still pending never started: drop it. Running = it is in the same trade and
       // reports done/failed on its own (its result no longer changes anything)
       for (const x of jobs) if (g.ids.includes(x.id) && x.id !== j.id && x.status === 'pending') {
@@ -382,9 +423,12 @@ class Delivery extends EventEmitter {
       this.log('info', `Order ${d.orderId}: ${j.pets.length} pet(s) now on @${(this.store.get('accounts').find(a => a.id === d.mother) || {}).username}`);
       this.emit('petsChanged');
       this.store.save();
-      return this.gatherCheck(d);
+      return active ? this.gatherCheck(d) : undefined;
     }
+    if (!active) return;
     if (j.id !== g.receiveId && j.id !== g.transferId) return;   // an old try failing late changes nothing
+    // remembered: the side reporting second (usually 'cancelled by Zotac') must not hide it
+    if (/base (is )?full/i.test(String(reason))) g.baseFull = String(reason);
     const other = jobs.find(x => x.id === (j.id === g.receiveId ? g.transferId : g.receiveId));
     // the other side never started: drop it. Still running: ask it to stop (agents only honour that
     // BEFORE a trade window opens) and decide when it reports, so a trade in progress is never doubled.
@@ -396,16 +440,33 @@ class Delivery extends EventEmitter {
       return;
     }
     this.log('warn', `Order ${d.orderId}: transfer from @${j.kind === 'transfer' ? j.account : j.fromUsername} failed (${reason}), try ${g.tries}`);
-    if (g.tries >= 3) return this.gatherFallback(d, reason);
+    // the mother's base can't take more: stop gathering, the rest trade the buyer themselves
+    if (g.baseFull) {
+      reason = g.baseFull;
+      for (const id of d.feeders || []) { const x = d.gather[id]; if (!x) d.gather[id] = { tries: 0, failed: true, reason }; else if (!x.done) x.failed = true; }
+      for (const x of jobs) if (x.orderId === d.orderId && x.pair && x.status === 'pending') { x.status = 'cancelled'; x.reason = 'mother base full'; x.finishedAt = Date.now(); this.emit('job', x); }
+      this.log('warn', `Order ${d.orderId}: mother base full — remaining accounts trade the buyer directly`);
+      return this.gatherCheck(d);
+    }
+    // 3 tries: this feeder trades the buyer itself after the mother; other feeders keep gathering
+    if (g.tries >= 3) { g.failed = true; g.reason = reason; return this.gatherCheck(d); }
     this.store.save();
     setTimeout(() => { if (d.state === 'delivering' && !g.done && !d.noGather) this.queueTransfer(d, j.pair); }, 10000);
   }
 
   gatherCheck(d) {
     if (d.state !== 'delivering' || d.noGather) return;
-    if (Object.entries(d.gather || {}).some(([id, g]) => id !== d.mother && !g.done)) return;
-    if (d.accounts.some(id => id !== d.mother && !(d.gather || {})[id])) return;
-    d.accounts = [d.mother]; d.step = 0; d.attempts = 0;
+    const feeders = d.feeders || d.accounts.filter(id => id !== d.mother);
+    this.nextFeeder(d);
+    if (feeders.some(id => { const g = (d.gather || {})[id]; return !g || (!g.done && !g.failed); })) return;
+    // everything that could be gathered is on the mother: one trade from her, then one per
+    // feeder whose hop failed (their pets never moved)
+    const failed = feeders.filter(id => d.gather[id].failed);
+    d.accounts = [d.mother, ...failed]; d.step = 0; d.attempts = 0;
+    if (failed.length) {
+      this.log('warn', `Order ${d.orderId}: ${failed.length} account(s) could not be gathered — they trade the buyer after the mother`);
+      this.say(d, 'multiAccount');
+    }
     this.store.save();
     this.queueNext(d);
   }
@@ -422,12 +483,50 @@ class Delivery extends EventEmitter {
     this.queueNext(d);
   }
 
+  // pending jobs of the order are dropped; running ones are asked to stop (agents obey before a
+  // trade window opens; a trade already open finishes and is still booked)
+  stopJobs(d, reason) {
+    for (const j of this.store.get('jobs')) {
+      if (j.orderId !== d.orderId) continue;
+      if (j.status === 'pending') { j.status = 'cancelled'; j.reason = reason; j.finishedAt = Date.now(); this.emit('job', j); }
+      else if (j.status === 'running') j.cancelRequested = true;
+    }
+    this.store.save();
+  }
+
+  // the order ended without delivering some pets (cancelled here or on Eldorado): they are stock
+  // again, back on their offer when they had one (Listings / the repricer clean up offers that
+  // no longer exist)
+  releasePets(orderId) {
+    let n = 0;
+    for (const p of this.store.get('pets')) {
+      if (p.orderId !== orderId || p.delivered) continue;
+      p.status = p.offerId ? 'listed' : 'available';
+      p.orderId = null; p.soldAt = null; p.soldPrice = null;
+      n++;
+    }
+    if (n) { this.log('info', `Order ${orderId}: ${n} undelivered pet(s) back in stock`); this.emit('petsChanged'); this.store.save(); }
+    return n;
+  }
+
+  // Eldorado shows the order cancelled/refunded (buyer, support or seller): stop and restock
+  orderCancelledRemote(orderId) {
+    const d = this.map[orderId];
+    if (d && !['done', 'cancelled'].includes(d.state)) {
+      this.stopJobs(d, 'order cancelled on Eldorado');
+      d.state = 'cancelled'; d.finishedAt = Date.now(); d.failReason = d.failReason || 'cancelled on Eldorado';
+      if (this.cfg.recordProof) this.emit('proof', { action: 'stop', orderId });
+      this.emit('update', d);
+    }
+    return this.releasePets(orderId);
+  }
+
   // Zotac can't go on by itself (bookkeeping problem, not a failed trade): the order is never
   // cancelled for this, the seller gets pinged and the buyer told someone will deliver by hand
   async needsYou(d, reason) {
     if (['done', 'cancelled', 'manual'].includes(d.state)) return;
     d.state = 'manual'; d.failReason = reason; d.finishedAt = Date.now();
-    for (const j of this.store.get('jobs')) if (j.orderId === d.orderId && j.status === 'pending') { j.status = 'cancelled'; j.reason = 'needs the seller'; j.finishedAt = Date.now(); this.emit('job', j); }
+    this.stopJobs(d, 'needs the seller');
     this.log('warn', `Order ${d.orderId}: ${reason}`);
     await this.say(d, 'manualFallback');
     if (this.cfg.recordProof) this.emit('proof', { action: 'stop', orderId: d.orderId });
@@ -435,11 +534,40 @@ class Delivery extends EventEmitter {
     this.store.save(); this.emit('update', d);
   }
 
+  // in-game event from a running job. buyer_cancelled: the agent sends the trade again by itself;
+  // the buyer is told, and the job's run timer restarts so the re-offer isn't cut off
+  async jobEvent(id, body = {}) {
+    const j = this.store.get('jobs').find(x => x.id === id);
+    if (!j || j.status !== 'running') return false;
+    if (body.event === 'buyer_cancelled') {
+      j.startedAt = Date.now(); j.reoffers = (j.reoffers || 0) + 1;
+      this.store.save(); this.emit('job', j);
+      const d = this.map[j.orderId];
+      this.log('warn', `Job ${id}: @${j.buyerUsername} cancelled the trade (${body.reason || '?'}) — sending it again`);
+      if (d && !j.pair) await this.say(d, 'buyerCancelled', { round: body.round || j.reoffers });
+    }
+    return true;
+  }
+
   // agent asks whether its job is still wanted (a cancelled pair side stops waiting)
+  // permanent memory of pets that left a base: hop to the mother, delivered to a buyer, or (from
+  // importPets) gone without Zotac trading them. Kept even after the pets list forgets them.
+  record(kind, { orderId = null, from = null, to = null, toUserId = null, pets = [], jobId = null, sim = false, note = null } = {}) {
+    const list = this.store.get('trades') || this.store.set('trades', []);
+    const e = { id: rid(6), t: Date.now(), kind, orderId, sim: !!sim, from, to, toUserId, jobId, note, proofs: [],
+      pets: pets.map(p => ({ id: p.id, name: p.name, mutation: p.mutation || 'None', gen: Number(p.gen) || 0, traits: p.traits || [] })) };
+    list.push(e);
+    if (list.length > 5000) list.splice(0, list.length - 5000);
+    this.store.save(); this.emit('trade', e);
+    return e;
+  }
+
   jobStatus(id) { const j = this.store.get('jobs').find(x => x.id === id); return !j ? 'gone' : j.cancelRequested ? 'cancelled' : j.status; }
 
   queueNext(d) {
-    const accounts = d.accounts.length ? d.accounts : [null];
+    if (d.state !== 'delivering') return;
+    if (!d.accounts.length) return this.needsYou(d, "the order's pets have no Roblox account in Zotac — deliver by hand");
+    const accounts = d.accounts;
     if (d.step >= accounts.length) return this.finish(d);
     const accountId = accounts[d.step];
     const acct = this.store.get('accounts').find(a => a.id === accountId) || {};
@@ -474,7 +602,7 @@ class Delivery extends EventEmitter {
     const jobs = this.store.get('jobs');
     // a transfer is only handed to the feeder once the mother's agent is waiting for it
     const ready = x => x.kind !== 'transfer' || (jobs.find(y => y.id === x.receiveId) || {}).status === 'running';
-    const j = jobs.find(x => x.status === 'pending' && (!account || !x.account || x.account.toLowerCase() === String(account).toLowerCase()) && ready(x));
+    const j = account ? jobs.find(x => x.status === 'pending' && x.account && x.account.toLowerCase() === String(account).toLowerCase() && ready(x)) : null;
     if (!j) return null;
     j.status = 'running'; j.startedAt = Date.now();
     this.store.save(); this.emit('job', j);
@@ -487,8 +615,16 @@ class Delivery extends EventEmitter {
     j.status = ok ? 'done' : 'failed'; j.finishedAt = Date.now(); j.reason = reason || null;
     this.store.save(); this.emit('job', j);
     const d = this.map[j.orderId];
+    // a pet really left for a buyer (agent checked the base): remembered for good, test trades too
+    if (ok && !j.pair) {
+      // off that account's inventory right away (test deliveries have no order but the pet is gone too)
+      for (const p of this.store.get('pets')) if (j.pets.some(x => x.id === p.id)) { p.delivered = true; p.tradedTo = j.buyerUsername || null; p.tradedAt = Date.now(); if (p.status !== 'sold') { p.status = 'sold'; p.soldAt = p.soldAt || Date.now(); } }
+      this.emit('petsChanged');
+    }
+    if (ok && !j.pair) this.record('delivered', { orderId: j.orderId, from: j.account, to: j.buyerUsername, toUserId: j.buyerUserId, pets: j.pets, jobId: j.id, sim: (d && d.sim) || !!j.test, note: j.test ? 'test delivery' : (j.gathered ? 'gathered order' : null) });
     if (!d) return true;
     if (j.pair) { await this.pairResult(j, ok, reason); return true; }   // feeder -> mother hop, not a delivery
+    if (d.state !== 'delivering') { this.log('info', `Job ${j.id} ${ok ? 'done' : 'failed'} after order ${d.orderId} ended (${d.state}) — nothing more sent`); this.store.save(); return true; }
     if (ok) {
       // the pet really left the base (the agent checked): it is sold, no longer available
       for (const p of this.store.get('pets')) if (j.pets.some(x => x.id === p.id)) { p.delivered = true; if (p.status !== 'sold') { p.status = 'sold'; p.soldAt = p.soldAt || Date.now(); } }
@@ -566,6 +702,7 @@ class Delivery extends EventEmitter {
 
   async finish(d) {
     d.state = 'done'; d.finishedAt = Date.now();
+    this.stopJobs(d, 'order finished');
     await this.say(d, 'deliverySuccess');
     if (this.cfg.markDelivered && !d.sim) {
       try { await this.eld.deliverOrder(d.orderId); this.log('info', `Order ${d.orderId} marked delivered`); }
@@ -580,9 +717,10 @@ class Delivery extends EventEmitter {
   // then the old manual fallback
   async fail(d, reason) {
     d.finishedAt = Date.now(); d.failReason = reason || 'unknown';
-    for (const j of this.store.get('jobs')) if (j.orderId === d.orderId && j.status === 'pending') { j.status = 'cancelled'; j.reason = 'order failed'; }
+    this.stopJobs(d, 'order failed');
     if (this.cfg.cancelOnFail !== false) {
       d.state = 'cancelled';
+      this.releasePets(d.orderId);
       await this.say(d, 'orderCancelled', { reason: reason || 'unknown', attempts: d.attempts || 3 });
       let how = 'cancelled';
       if (!d.sim) {
@@ -631,12 +769,44 @@ class Delivery extends EventEmitter {
     if (!d) throw new Error('No delivery for order');
     if (action === 'confirm') return this.startDelivery(d);
     if (action === 'setUsername') return this.proposeUsername(d, arg);
-    if (action === 'done') { d.step = d.accounts.length || 1; return this.finish(d); }
-    if (action === 'cancel') { d.state = 'cancelled'; for (const j of this.store.get('jobs')) if (j.orderId === orderId && j.status === 'pending') j.status = 'cancelled'; this.store.save(); this.emit('update', d); return; }
+    if (action === 'done') {
+      // delivered by hand: the pets are gone from the stock accounts
+      for (const p of this.store.get('pets')) if (d.petIds.includes(p.id) && !p.delivered) { p.delivered = true; p.tradedTo = d.username || null; p.tradedAt = Date.now(); if (p.status !== 'sold') { p.status = 'sold'; p.soldAt = p.soldAt || Date.now(); } }
+      const left = this.store.get('pets').filter(p => d.petIds.includes(p.id));
+      if (left.length) this.record('delivered', { orderId, to: d.username, pets: left, sim: d.sim, note: 'marked done by hand' });
+      this.emit('petsChanged');
+      d.step = d.accounts.length || 1; return this.finish(d);
+    }
+    if (action === 'cancel') {
+      // stops Zotac only: the Eldorado order is not cancelled and the buyer is not messaged
+      this.stopJobs(d, 'stopped by the seller');
+      d.state = 'cancelled'; d.finishedAt = Date.now(); d.failReason = d.failReason || 'stopped by the seller';
+      this.releasePets(orderId);
+      if (this.cfg.recordProof) this.emit('proof', { action: 'stop', orderId });
+      this.store.save(); this.emit('update', d); return;
+    }
     if (action === 'say') { await this.eld.sendOrderMessage(orderId, String(arg)); d.log.push({ t: Date.now(), out: String(arg) }); this.store.save(); this.emit('update', d); return; }
     if (action === 'resend') return this.say(d, arg);
-    if (action === 'start') return this.onSale({ id: orderId, buyer: arg && arg.buyer, title: arg && arg.title }, this.store.get('pets').filter(p => (arg && arg.petIds || []).includes(p.id)));
     throw new Error('Unknown action ' + action);
+  }
+
+  // Orders page "Start auto delivery" for an order the watcher did not start (e.g. Auto Delivery
+  // was off). Pets: the ones already booked to this order at the sale, else the offer's listed
+  // pets for the bought quantity, matched exactly like a new sale. Never the whole offer's stock.
+  async startFromOrder(o) {
+    if (!o || !o.id) throw new Error('No order');
+    if (this.map[o.id]) throw new Error('This order already has a delivery (Auto Delivery → activity)');
+    const qty = Math.max(1, Number(o.quantity) || 1);
+    const all = this.store.get('pets');
+    let pets = all.filter(p => p.orderId === o.id && !p.delivered);
+    if (!pets.length) {
+      if (!o.offerId) throw new Error('This order has no offer id: pick the pets by hand');
+      pets = pickFewestAccounts(all.filter(p => p.offerId === o.offerId && p.status === 'listed' && !p.delivered), qty);
+      for (const p of pets) Object.assign(p, { status: 'sold', soldAt: Date.now(), orderId: o.id });
+      this.store.save(); this.emit('petsChanged');
+    }
+    const d = await this.onSale({ id: o.id, buyer: o.buyer, title: o.title, price: o.price, quantity: qty, conversationId: o.conversationId }, pets.slice(0, qty));
+    return { started: !!d || !!this.map[o.id], pets: Math.min(pets.length, qty), quantity: qty };
   }
 
   // Test delivery: queues a real agent job for one pet to a Roblox username, with no Eldorado

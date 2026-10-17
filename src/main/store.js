@@ -18,6 +18,7 @@ const DEFAULT_DELIVERY_STEPS = {
   gathering: 'Your {quantity} brainrots are on {accounts} of our accounts. We are moving them onto one account so you get everything in a single trade. This takes about a minute, please stay online.',
   deliverySuccess: 'Delivered! Please check your inventory and mark the order as received. Thanks for buying!',
   deliveryFailed: "The trade didn't go through ({reason}). We'll retry shortly — please stay online.",
+  buyerCancelled: 'It looks like the trade was cancelled. Sending it again now, please accept it in Steal a Brainrot.',
   manualFallback: 'Automatic delivery is unavailable right now. A seller will contact you shortly to deliver manually.',
   orderCancelled: 'Your order has been cancelled after {attempts} delivery attempts were unsuccessful ({reason}). Eldorado will refund you. Please contact support if you believe this is a mistake.'
 };
@@ -87,6 +88,7 @@ const DEFAULTS = {
   sales: [],             // { id, orderId, title, price, buyer, date, petIds[], source }
   deliveries: {},        // orderId -> conversation state
   jobs: [],              // agent jobs
+  trades: [],            // permanent ledger: every pet Zotac traded away or saw disappear (newest last)
   seen: { orders: {}, notifications: {}, disputes: {}, autoMessaged: {} },
   art: { pets: {}, traits: {}, mutations: {} },   // Roblox asset ids from the scanner: name -> id
   logs: []

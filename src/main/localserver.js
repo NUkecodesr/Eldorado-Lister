@@ -100,6 +100,8 @@ function startLocalServer({ store, bridge, delivery, importScan, onServerScan, o
         const m = url.pathname.match(/^\/agent\/jobs\/(\w+)$/);
         // agent checks its job is still wanted while it waits (cancelled = stop before trading)
         if (m && req.method === 'GET') return send(200, { status: delivery.jobStatus(m[1]) });
+        const ev = url.pathname.match(/^\/agent\/jobs\/(\w+)\/event$/);
+        if (ev && req.method === 'POST') return send(200, { ok: await delivery.jobEvent(ev[1], body) });
         if (m && req.method === 'POST') {
           const ok = await delivery.jobResult(m[1], body.status === 'done' || body.ok === true, body.reason || body.message);
           return send(ok ? 200 : 404, { ok });

@@ -8,10 +8,11 @@ const { Eldorado, listOf } = require('./src/main/eldorado');
 const sab = require('./src/main/sab');
 const { smartPrice } = require('./src/main/pricing');
 const { AutoLister } = require('./src/main/autolist');
-const { Repricer, Watcher, discord, robloxUser, robloxAvatar } = require('./src/main/services');
+const { Repricer, Watcher, reconcileListed, discord, robloxUser, robloxAvatar } = require('./src/main/services');
 const { Delivery } = require('./src/main/delivery');
 const { startLocalServer } = require('./src/main/localserver');
 const { checkUpdate, installUpdate } = require('./src/main/updater');
+const webmfix = require('./src/main/webmfix');
 const { Launcher, decryptCookie } = require('./src/main/launcher');
 const { Art } = require('./src/main/art');
 const { Wiki } = require('./src/main/wiki');
@@ -36,6 +37,7 @@ if (!SMOKE) {
 if (!SMOKE && !app.requestSingleInstanceLock()) app.quit();
 
 let win = null;
+let appInfoRate;   // % of the last 200 Eldorado requests that succeeded (footer)
 let store, bridge, eld, lister, repricer, watcher, delivery, launcher, art, wiki;
 const proofDir = () => { const d = path.join(app.getPath('userData'), 'proofs'); fs.mkdirSync(d, { recursive: true }); return d; };
 
@@ -130,7 +132,9 @@ const autoScan = {
     const r = await result;
     if (r.ok) { this.done++; this.say(`@${a.username}: scanned (${r.count} pets)`); }
     else { this.failed++; this.say(`@${a.username}: ${r.why}`, 'warn'); }
-    if (!already) setTimeout(() => launcher.closeGame(a.username).catch(() => {}), 1500);   // only the windows Auto Scan opened
+    // only the windows Auto Scan opened, and never one that is busy with a delivery job
+    const busy = () => store.get('jobs').some(j => j.accountId === a.id && ['pending', 'running'].includes(j.status));
+    if (!already) setTimeout(() => { if (!busy()) launcher.closeGame(a.username).catch(() => {}); else this.say(`@${a.username}: kept open, it has a delivery job`); }, 1500);
   },
   stop() { this.stopFlag = true; for (const k of Object.keys(this.waiters)) { const w = this.waiters[k]; delete this.waiters[k]; w({ ok: false, why: 'stopped' }); } this.say('Stopping...'); return this.state(); }
 };
@@ -246,12 +250,15 @@ function wire() {
   launcher.on('launchBlocked', ({ reason }) => send('toast', { text: reason, kind: 'error' }));
 
   bridge.on('state', s => send('bridge:state', s));
+  const reqs = [];
+  bridge.on('request', r => { reqs.push(r.status >= 200 && r.status < 300 ? 1 : 0); if (reqs.length > 200) reqs.shift(); appInfoRate = reqs.length ? 100 * reqs.reduce((a, b) => a + b, 0) / reqs.length : undefined; });
   for (const em of [lister, repricer, delivery, launcher]) em.on('log', e => send('log', e));
   lister.on('progress', p => send('autolist:progress', p));
   lister.on('pets', () => send('pets:changed'));
   lister.on('finished', p => discord(store, { title: '📦 Auto List finished', description: `${p.ok} listed, ${p.failed} failed` }));
   repricer.on('done', r => send('repricer:done', r));
   watcher.on('sale', ({ order, pets }) => { send('sale', order); send('pets:changed'); delivery.onSale(order, pets); });
+  watcher.on('orderCancelled', o => { if (delivery.orderCancelledRemote(o.id)) send('pets:changed'); });
   watcher.on('dispute', o => send('dispute', o));
   watcher.on('notification', n => send('notification', n));
   watcher.on('unread', (n) => send('unread', n));
@@ -259,6 +266,7 @@ function wire() {
   delivery.on('update', d => send('delivery:update', d));
   delivery.on('job', j => send('delivery:job', j));
   delivery.on('petsChanged', () => send('pets:changed'));
+  delivery.on('trade', e => send('trade', e));
   delivery.on('message', m => send('talk:message', m));
   // public picture URL of a brainrot (SAB wiki) for Discord cards
   delivery.petImageUrl = async name => ((await wiki.index()) || {})[sab.norm(name)] || null;
@@ -275,6 +283,8 @@ async function afterLogin() {
     send('auth:changed');
     watcher.start();
     repricer.schedule();
+    const recon = () => reconcileListed(eld, store).then(n => { if (n) send('pets:changed'); }).catch(e => store.log('warn', '[Listings] offer check: ' + e.message));
+    clearInterval(afterLogin.recon); afterLogin.recon = setInterval(recon, 15 * 60000); setTimeout(recon, 20000);
     if (store.get('settings').delivery.enabled) delivery.ensureTalk();
   } catch { /* not logged in yet */ }
 }
@@ -301,6 +311,7 @@ function importPets(json, accountId, { replace = false } = {}) {
   const items = sab.normalizePetImport(raw, fixed ? fixed.username : '');
   const added = [];
   let removed = 0;
+  let dropped = [];      // unlisted pets of the scanned accounts, re-matched below
   // pets of deliveries still running or waiting for the seller
   const inDelivery = new Set();
   for (const d of Object.values(store.get('deliveries') || {})) if (d && !['done', 'cancelled'].includes(d.state)) for (const id of d.petIds || []) inDelivery.add(id);
@@ -318,6 +329,7 @@ function importPets(json, accountId, { replace = false } = {}) {
         if ((!it.traits || !it.traits.length) && q && q.length) it.traits = q.shift();
       }
     }
+    dropped = store.get('pets').filter(p => ids.has(p.accountId) && p.status === 'available' && !inDelivery.has(p.id));
     store.set('pets', store.get('pets').filter(p => !(ids.has(p.accountId) && p.status === 'available' && !inDelivery.has(p.id))));
     removed = before - store.get('pets').length;
   }
@@ -336,12 +348,36 @@ function importPets(json, accountId, { replace = false } = {}) {
     if (replace && acct) {
       const i = listedLeft.findIndex(p => p.accountId === acct.id && sab.norm(p.name) === sab.norm(it.name) && sab.norm(p.mutation) === sab.norm(it.mutation || 'None'));
       if (i >= 0) { listedLeft.splice(i, 1); continue; }
+      // the exact same pet as an unlisted one Zotac already had: keep that one (same id, price,
+      // title, card...) instead of a fresh copy
+      const key = sab.petKey({ ...it, mutation: it.mutation || 'None' });
+      const j = dropped.findIndex(p => !p._kept && p.accountId === acct.id && sab.petKey(p) === key);
+      if (j >= 0) { const old = dropped[j]; old._kept = true; if (it.rarity) old.rarity = it.rarity; store.get('pets').push(old); continue; }
     }
     const pet = { id: rid(6), accountId: acct ? acct.id : null, name: it.name, mutation: it.mutation || 'None', gen: it.gen || 0, traits: it.traits || [], rarity: it.rarity || '', cost: it.cost || 0, status: it.offerId ? 'listed' : 'available', offerId: it.offerId || null, price: it.price || null, createdAt: Date.now() };
     store.get('pets').push(pet); added.push(pet);
   }
+  const kept = dropped.filter(p => p._kept);
+  for (const p of kept) delete p._kept;
+  removed -= kept.length;
+  // what the scan no longer shows left the base without a Zotac trade (sold/traded by hand, stolen,
+  // fused): remembered in the ledger. Only when the scan is complete (count matches the game's own),
+  // so a half-loaded base never reports pets as gone; a pet that only changed (same name and
+  // mutation, gen/s within ~1k) is not "gone".
+  const complete = replace && raw && Array.isArray(raw.pets) && raw.expected != null && raw.pets.length >= raw.expected;
+  const lost = dropped.filter(p => !kept.includes(p));
+  if (complete && lost.length) {
+    const k = p => sab.norm(p.name) + '|' + sab.norm(p.mutation || 'None') + '|' + Math.round((Number(p.gen) || 0) / 1000);
+    const still = {};
+    for (const p of added) still[k(p)] = (still[k(p)] || 0) + 1;
+    const gone = lost.filter(p => { if (still[k(p)] > 0) { still[k(p)]--; return false; } return true; });
+    const uname = id => (accounts.find(a => a.id === id) || {}).username || null;
+    for (const [acc, list] of Object.entries(gone.reduce((m, p) => ((m[p.accountId] ||= []).push(p), m), {}))) {
+      delivery.record('gone', { from: uname(acc), pets: list, note: 'no longer in the base (not traded by Zotac)' });
+    }
+  }
   store.save(); send('pets:changed');
-  return { added: added.length, removed, accounts: accounts.length };
+  return { added: added.length, removed, kept: kept.length, accounts: accounts.length };
 }
 
 function scannerScript(which = 'scanner') {
@@ -404,7 +440,7 @@ function ipc() {
   handle('app:info', async () => ({
     version: app.getVersion(), bridge: bridge.state, lastOk: bridge.lastOk, talk: delivery.talkState, talkError: delivery.talkError,
     agentOnline: delivery.agentOnline(), userData: app.getPath('userData'), lister: lister.progress, listerRunning: lister.running,
-    repricerLast: repricer.lastRun, watcherLast: watcher.lastPoll,
+    repricerLast: repricer.lastRun, watcherLast: watcher.lastPoll, successRate: appInfoRate,
     extensionPath: fs.existsSync(path.join(__dirname, 'extension')) ? path.join(__dirname, 'extension') : path.join(process.resourcesPath, 'extension')
   }));
   handle('win', a => { if (!win) return; if (a === 'min') win.minimize(); else if (a === 'max') win.isMaximized() ? win.unmaximize() : win.maximize(); else if (a === 'close') win.close(); });
@@ -596,10 +632,13 @@ function ipc() {
     }
     store.save(); return publicAccount(acct);
   });
-  handle('accounts:delete', (id, withPets) => {
+  handle('accounts:delete', id => {
+    const mine = store.get('pets').filter(p => p.accountId === id);
+    const busy = mine.filter(p => p.status === 'listed' || (p.status === 'sold' && !p.delivered));
+    if (busy.length) throw new Error(`This account still has ${busy.length} pet(s) listed or sold but not delivered — delete those offers or finish the orders first`);
+    if (store.get('jobs').some(j => j.accountId === id && ['pending', 'running'].includes(j.status))) throw new Error('This account has a delivery job running');
     store.set('accounts', store.get('accounts').filter(a => a.id !== id));
-    if (withPets) store.set('pets', store.get('pets').filter(p => p.accountId !== id));
-    else for (const p of store.get('pets')) if (p.accountId === id) p.accountId = null;
+    store.set('pets', store.get('pets').filter(p => !(p.accountId === id && p.status === 'available')));
     store.save(); send('pets:changed'); return true;
   });
   handle('accounts:export', () => JSON.stringify({ format: 'zotac-accounts', version: 1, accounts: store.get('accounts').map(a => ({ ...publicAccount(a), pets: store.get('pets').filter(p => p.accountId === a.id) })) }, null, 2));
@@ -611,7 +650,15 @@ function ipc() {
       const list = store.get('accounts');
       let acct = list.find(x => x.username && a.username && x.username.toLowerCase() === a.username.toLowerCase());
       if (!acct) { acct = { id: rid(6), username: a.username || a.name || 'account', note: a.note || '', robloxUserId: a.robloxUserId || null, avatar: a.avatar || null, createdAt: Date.now() }; list.push(acct); na++; }
-      for (const p of a.pets || []) { store.get('pets').push({ ...p, id: rid(6), accountId: acct.id, gen: sab.parseGen(p.gen) }); np++; }
+      const have = {};
+      for (const p of store.get('pets')) if (p.accountId === acct.id && !p.delivered && p.status !== 'sold') have[sab.petKey(p)] = (have[sab.petKey(p)] || 0) + 1;
+      for (const p of a.pets || []) {
+        if (p.delivered || p.status === 'sold') continue;                   // gone from that base
+        const q = { ...p, gen: sab.parseGen(p.gen) }, k = sab.petKey(q);
+        if (have[k] > 0) { have[k]--; continue; }                           // already have it
+        store.get('pets').push({ id: rid(6), accountId: acct.id, name: q.name, mutation: q.mutation || 'None', gen: q.gen, traits: q.traits || [], rarity: q.rarity || '', cost: q.cost || 0, status: 'available', offerId: null, createdAt: Date.now() });
+        np++;
+      }
     }
     store.save(); send('pets:changed'); return { accounts: na, pets: np };
   });
@@ -635,6 +682,8 @@ function ipc() {
   handle('delivery:list', () => ({ deliveries: Object.values(store.get('deliveries')).sort((a, b) => b.createdAt - a.createdAt), jobs: store.get('jobs').slice(-100).reverse() }));
   handle('delivery:manual', (orderId, action, arg) => delivery.manual(orderId, action, arg));
   handle('delivery:testJob', (petId, buyer) => delivery.testJob(petId, buyer));
+  handle('trades:list', () => store.get('trades') || []);
+  handle('delivery:startFromOrder', o => delivery.startFromOrder(o));
   handle('delivery:simulate', (petIds, buyer, quantity) => delivery.simulate(petIds, buyer, quantity));
   handle('delivery:simSay', (orderId, text) => delivery.simSay(orderId, text));
   handle('delivery:simState', orderId => delivery.simState(orderId));
@@ -670,17 +719,17 @@ function ipc() {
     if (!store.get('settings').webhookUrl) throw new Error('Set a webhook URL first');
     const pet = { name: 'Burguro And Fryuro', mutation: 'Rainbow', gen: 1.5e9, traits: ['Taco', 'Fire'] };
     const now = Date.now();
-    const d = { orderId: 'TEST-' + rid(6), buyer: 'PlushLace-kp0t', username: 'Ckind122', robloxId: 1, price: 2.55, petIds: [], samplePets: [pet], sampleAccounts: ['BloxBeast35594'],
+    const d = { orderId: 'TEST-' + rid(6), buyer: 'EldoradoBuyer', username: 'BuyerRoblox', robloxId: 1, price: 2.55, petIds: [], samplePets: [pet], sampleAccounts: ['StockAlt1'],
       createdAt: now - 106000, finishedAt: now, attempts: 0, sim: true };
     if (kind === 'delivered') return delivery.reportCard({ ...d, state: 'done' }, 'done');
     if (kind === 'cancelled') return delivery.reportCard({ ...d, state: 'cancelled', attempts: 3, price: 24.99 }, 'cancelled', 'Buyer did not accept the trade in time');
-    if (kind === 'failed') return delivery.reportCard({ ...d, state: 'manual', attempts: 3 }, 'manual', 'the delivery script never connected from @BloxBeast35594');
+    if (kind === 'failed') return delivery.reportCard({ ...d, state: 'manual', attempts: 3 }, 'manual', 'the delivery script never connected from @StockAlt1');
     const T = '[TEST] ';
     if (kind === 'sale') return discord(store, { title: T + '💰 New sale!', color: 0x22c55e, description: '**Rainbow Burguro And Fryuro | 1.5B/s**', fields: [
-      { name: 'Price', value: '$2.55', inline: true }, { name: 'Qty', value: '1', inline: true }, { name: 'Buyer', value: 'PlushLace-kp0t', inline: true },
-      { name: 'Accounts', value: 'BloxBeast35594', inline: false }, { name: 'Order', value: d.orderId, inline: false }] });
-    if (kind === 'dispute') return discord(store, { title: T + '⚠️ Dispute opened', color: 0xef4444, description: `**Rainbow Burguro And Fryuro | 1.5B/s**\nBuyer: PlushLace-kp0t\nOrder: ${d.orderId}` });
-    if (kind === 'chat') return discord(store, { title: T + '💬 New message', description: 'PlushLace-kp0t: is my order coming?' });
+      { name: 'Price', value: '$2.55', inline: true }, { name: 'Qty', value: '1', inline: true }, { name: 'Buyer', value: 'EldoradoBuyer', inline: true },
+      { name: 'Accounts', value: 'StockAlt1', inline: false }, { name: 'Order', value: d.orderId, inline: false }] });
+    if (kind === 'dispute') return discord(store, { title: T + '⚠️ Dispute opened', color: 0xef4444, description: `**Rainbow Burguro And Fryuro | 1.5B/s**\nBuyer: EldoradoBuyer\nOrder: ${d.orderId}` });
+    if (kind === 'chat') return discord(store, { title: T + '💬 New message', description: 'EldoradoBuyer: is my order coming?' });
     if (kind === 'autolist') return discord(store, { title: T + '📦 Auto List finished', description: '5 listed, 1 failed' });
     return discord(store, { title: T + '🐾 Zotac Lister test', description: 'Webhook works!' });
   });
@@ -697,7 +746,9 @@ function ipc() {
     if (r.canceled) return null;
     const j = JSON.parse(fs.readFileSync(r.filePaths[0], 'utf8'));
     for (const k of Object.keys(j)) if (k in store.data) store.data[k] = j[k];
-    store.save(); send('pets:changed'); return true;
+    store.save(); send('pets:changed');
+    try { syncAutoexec(); } catch (e) { store.log('warn', 'autoexec after restore: ' + e.message); }
+    return true;
   });
   handle('data:reset', () => { store.reset(); send('pets:changed'); return true; });
   handle('dialog:folder', async () => { const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'] }); return r.canceled ? null : r.filePaths[0]; });
@@ -705,26 +756,45 @@ function ipc() {
   handle('update:install', info => installUpdate(info, updateHooks));
 
   // video proof
-  handle('proof:target', async orderId => {
+  // which Roblox window the next recording captures: the named account's (the process Zotac
+  // launched for it), else the order's mother / running job's account
+  handle('proof:target', async (orderId, account) => {
     captureHwnd = null;
     const d = orderId && store.get('deliveries')[orderId];
+    const byName = account && store.get('accounts').find(a => String(a.username).toLowerCase() === String(account).toLowerCase());
     const job = store.get('jobs').filter(j => j.orderId === orderId && j.status === 'running' && j.kind !== 'transfer').pop();
-    const acctId = (d && d.mother && !d.noGather) ? d.mother : job ? job.accountId : null;
+    const acctId = byName ? byName.id : (d && d.mother && !d.noGather) ? d.mother : job ? job.accountId : null;
     const pid = acctId && launcher.pids[acctId];
     if (pid) captureHwnd = await windowOfPid(pid);
     return { account: acctId, hwnd: captureHwnd };
   });
-  handle('proof:save', (orderId, b64) => {
-    const f = path.join(proofDir(), `${String(orderId || 'manual').replace(/[^\w-]/g, '')}-${Date.now()}.webm`);
+  // <order>__<account>-<ms>.webm + .json sidecar; the clip is linked to the ledger entries of that
+  // order and account made while it recorded
+  handle('proof:save', async (orderId, b64, meta = {}) => {
+    const acct = meta && meta.account ? '__' + String(meta.account).replace(/[^\w]/g, '') : '';
+    const name = `${String(orderId || 'manual').replace(/[^\w-]/g, '')}${acct}-${Date.now()}.webm`;
+    const f = path.join(proofDir(), name);
     fs.writeFileSync(f, Buffer.from(b64, 'base64'));
-    store.log('info', '[Proof] saved ' + path.basename(f));
+    // MediaRecorder leaves out the duration and the seek index: without them the player shows
+    // 0:00 and can't scrub. Duration written here; ffmpeg (if installed) adds the seek index.
+    try { if (meta.startedAt && meta.endedAt) webmfix.fixDuration(f, meta.endedAt - meta.startedAt); } catch (e) { store.log('warn', '[Proof] duration fix: ' + e.message); }
+    if (await webmfix.remux(f).catch(() => false)) meta.seekIndex = true;
+    try { fs.writeFileSync(f.replace(/\.webm$/, '.json'), JSON.stringify({ orderId, ...meta, file: name }, null, 1)); } catch { /* sidecar optional */ }
+    const from = (meta.startedAt || Date.now()) - 120000, to = (meta.endedAt || Date.now()) + 120000;
+    for (const e of store.get('trades') || []) {
+      if (e.orderId === orderId && e.t >= from && e.t <= to && (!meta.account || [e.from, e.to].some(x => x && x.toLowerCase() === String(meta.account).toLowerCase()))) {
+        (e.proofs || (e.proofs = [])).includes(name) || e.proofs.push(name);
+      }
+    }
+    store.save();
+    store.log('info', '[Proof] saved ' + name);
     return f;
   });
   handle('proof:list', () => fs.readdirSync(proofDir()).filter(f => f.endsWith('.webm')).map(f => {
     const st = fs.statSync(path.join(proofDir(), f));
     return { name: f, path: path.join(proofDir(), f), size: st.size, date: st.mtimeMs };
   }).sort((a, b) => b.date - a.date));
-  handle('proof:delete', f => { const p = path.join(proofDir(), path.basename(f)); fs.unlinkSync(p); return true; });
+  handle('proof:delete', f => { const p = path.join(proofDir(), path.basename(f)); fs.unlinkSync(p); try { fs.unlinkSync(p.replace(/\.webm$/, '.json')); } catch { /* no sidecar */ } return true; });
   handle('proof:dir', () => proofDir());
 }
 
