@@ -227,7 +227,14 @@ class Eldorado {
     return { total: r && (r.recordCount || r.totalCount), pages: r && r.totalPages, rows: listOf(r).map(normalizeOrder) };
   }
   order(id) { return this.b.get(`orders/me/${id}`); }
-  deliverOrder(id) { return this.b.post(`orders/me/${id}/deliver`); }
+  // seller "Item delivered" = PUT (Eldorado's own frontend, sellerItemDelivered); POST is rejected
+  async deliverOrder(id) {
+    try { return await this.b.put(`orders/me/${id}/deliver`); }
+    catch (e) {
+      if (e.status !== 404 && e.status !== 405) throw e;
+      return this.b.post(`orders/me/${id}/deliver`);
+    }
+  }
   // seller cancel (Eldorado's own "Cancel order" button); the reason is shown to the buyer
   async cancelOrder(id, reason) {
     const text = String(reason || 'Delivery failed').slice(0, 450);

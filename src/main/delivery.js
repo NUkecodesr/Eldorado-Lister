@@ -973,8 +973,13 @@ class Delivery extends EventEmitter {
     this.stopJobs(d, 'order finished');
     await this.say(d, 'deliverySuccess');
     if (this.cfg.markDelivered && !d.sim) {
-      try { await this.eld.deliverOrder(d.orderId); this.log('info', `Order ${d.orderId} marked delivered`); }
-      catch (e) { this.log('error', `Mark delivered failed: ${e.message}`); }
+      let err = null;
+      for (let i = 0; i < 2; i++) {
+        try { await this.eld.deliverOrder(d.orderId); err = null; break; }
+        catch (e) { err = e; await new Promise(r => setTimeout(r, 3000)); }
+      }
+      if (err) { this.log('error', `Order ${d.orderId}: could not mark it delivered on Eldorado (${err.message}) - use "Mark delivered" in Chat`); d.markDeliveredError = err.message; }
+      else { this.log('info', `Order ${d.orderId} marked delivered on Eldorado`); d.markedDelivered = Date.now(); delete d.markDeliveredError; }
     }
     if (this.cfg.recordProof) this.emit('proof', { action: 'stop', orderId: d.orderId });
     this.report(d, 'done');

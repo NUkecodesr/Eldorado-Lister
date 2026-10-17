@@ -1686,7 +1686,18 @@ PAGES.chat = async root => {
       cur ? xOrderAva(cur, 36) : null,
       h('div', { class: 'grow' }, h('b', null, cur ? (cur.buyer || 'Unknown buyer') : 'Order ' + CH.orderId),
         h('small', { class: 'muted' }, cur ? `${cur.title || 'Order'}   ·   #${String(CH.orderId).slice(0, 18)}` : '')),
-      cur ? xStatePill(cur.state) : null),
+      cur ? xStatePill(cur.state) : null,
+      // the seller's two order buttons, right in the chat (same calls as Eldorado's order page)
+      cur && !XSTATE.canceled(cur.state) && !XSTATE.delivered(cur.state) && !XSTATE.completed(cur.state) ? [
+        h('button', { class: 'btn sm primary', title: 'Tell Eldorado the item was delivered', onclick: async () => {
+          if (!await confirmBox(`Mark the order of ${cur.buyer || 'this buyer'} as delivered?`)) return;
+          if (await run(async () => { await M.call('eld:deliver', cur.id); return true; }, 'Marked delivered')) { cur.state = 'Delivered'; render(); setTimeout(() => { CH.orders = null; render(); }, 2500); }
+        } }, '✓ Mark delivered'),
+        h('button', { class: 'btn sm danger', title: 'Cancel the order on Eldorado (the buyer is refunded)', onclick: async () => {
+          const why = await promptBox('Cancel order', 'Reason (the buyer sees it)', 'Sorry, we could not deliver this order.', true);
+          if (!why) return;
+          if (await run(async () => { await M.call('eld:cancelOrder', cur.id, why); return true; }, 'Order cancelled')) { cur.state = 'Cancelled'; render(); setTimeout(() => { CH.orders = null; render(); }, 2500); }
+        } }, '✕ Cancel order')] : null),
     h('div', { class: 'x-tuser' }, h('span', { class: 'muted' }, 'Roblox username: '), h('b', null, rbxName ? '@' + rbxName : CH.rbx[CH.orderId] === undefined && !(d && d.username) ? 'loading…' : '—'),
       h('div', { class: 'grow' }),
       rbxName ? h('button', { class: 'btn sm ghost', onclick: () => xCopy(rbxName, 'Username copied') }, '⎘ Copy') : null,

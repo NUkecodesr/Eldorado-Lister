@@ -137,6 +137,7 @@ local function buttonWithText(root, ...)
         if d:IsA("GuiButton") and shown(d) then
             local lbl = d:FindFirstChildWhichIsA("TextLabel", true)
             local txt = string.upper((lbl and lbl.Text) or (d:IsA("TextButton") and d.Text) or "")
+            txt = (txt:gsub("<[^>]->", ""):gsub("^%s+", ""):gsub("%s+$", ""))
             if want[txt] then return d end
         end
     end
@@ -228,39 +229,74 @@ local function textShown(under, pattern)
     return false
 end
 
+-- what the trade window shows (for the log when READY / ACCEPT does not go through)
+local function tradeSnap(root)
+    local yr = root:FindFirstChild("Your") and root.Your:FindFirstChild("Ready")
+    local out = {"YourReady=" .. (yr and (yr:IsA("GuiObject") and tostring(shown(yr)) or yr.ClassName) or "none")}
+    for _, d in ipairs(root:GetDescendants()) do
+        if d:IsA("GuiButton") and shown(d) then
+            local lbl = d:FindFirstChildWhichIsA("TextLabel", true)
+            local txt = ((lbl and lbl.Text) or (d:IsA("TextButton") and d.Text) or ""):gsub("<[^>]->", "")
+            if txt ~= "" then table.insert(out, "btn " .. d.Parent.Name .. "/" .. d.Name .. "='" .. txt .. "'") end
+        elseif d:IsA("TextLabel") and shown(d) then
+            local t = d.Text:gsub("<[^>]->", "")
+            if string.find(string.lower(t), "left") or string.find(string.lower(t), "ready") or string.find(string.lower(t), "confirm") or string.find(string.lower(t), "accept") then
+                table.insert(out, "txt " .. d.Parent.Name .. "/" .. d.Name .. "='" .. t .. "'")
+            end
+        end
+    end
+    return table.concat(out, "; ")
+end
+
 local function readyAndAccept(root, who, reReady)
     task.wait(0.4)
-    -- READY is a toggle. When the buyer readied first, our press starts the "Xs Left" countdown
-    -- straight away (no ACCEPT button yet), and pressing READY again un-readies us, so the trade
-    -- fell apart. Proof of being ready: our Ready mark, the countdown, ACCEPT, Confirmed!, or the
-    -- READY button gone. READY is pressed once; a second press only after 6 s with no proof at all.
+    -- READY is a toggle: pressing it again un-readies. When the buyer readied first, our press
+    -- starts the "Xs Left" countdown straight away (no ACCEPT yet). Proof of being ready: our
+    -- Ready mark, ACCEPT, Confirmed!, a countdown that was not there before our press, or the
+    -- READY button gone after our press. A timer shown before we pressed proves nothing.
+    -- READY is pressed once; a second press only after 6 s with no proof at all.
+    local countBefore = textShown(root, "%d+%s*s%s+Left")
+    log("info", "trade READY step - " .. tradeSnap(root))
+    local presses, lastPress, readied, why = 0, -99, false, nil
     local function isReady()
         local yr = root:FindFirstChild("Your") and root.Your:FindFirstChild("Ready")
-        if yr and yr:IsA("GuiObject") and shown(yr) then return true end
-        if textShown(root, "%d+%s*s%s+Left") or textShown(root, "^%s*Confirmed") then return true end
-        if buttonWithText(root, "ACCEPT", "CONFIRM") then return true end
-        return false
+        if yr and yr:IsA("GuiObject") and shown(yr) then return "ready mark" end
+        if buttonWithText(root, "ACCEPT", "CONFIRM") then return "ACCEPT shown" end
+        if textShown(root, "^%s*Confirmed") then return "Confirmed shown" end
+        if presses > 0 and not countBefore and textShown(root, "%d+%s*s%s+Left") then return "countdown started" end
+        return nil
     end
-    local readyAt, presses, lastPress, readied = os.clock(), 0, -99, false
+    local readyAt, snapped = os.clock(), false
     while os.clock() - readyAt < 15 and tradeRoot() do
-        if isReady() then readied = true break end
+        why = isReady()
+        if why then readied = true break end
         local b = buttonWithText(root, "READY")
         if b and presses < 2 and os.clock() - lastPress > 6 then
             presses += 1; lastPress = os.clock()
             fire(b.Activated, nil, 1)
         elseif not b and presses > 0 then
-            readied = true break   -- pressed and the READY button is gone: the game took it
+            readied, why = true, "READY button gone"   -- pressed and the game took it
+            break
+        end
+        if presses > 0 and not snapped and os.clock() - lastPress > 2 then
+            snapped = true
+            log("info", "after pressing READY - " .. tradeSnap(root))
         end
         task.wait(0.2)
     end
     if not tradeRoot() then return false, who .. " closed the trade", true end
-    if not readied then cancelTrade(); return false, "could not press READY" end
+    if not readied then
+        log("warn", ("READY did not go through (%d press(es)) - %s"):format(presses, tradeSnap(root)))
+        cancelTrade(); return false, "could not press READY"
+    end
+    log("info", ("ready (%s, %d press(es))"):format(why, presses))
     notify("Ready - waiting for " .. who .. " to accept")
 
     -- once both sides are ready the game shows a short "Xs Left" countdown with ACCEPT greyed out
     -- (presses are ignored), then ACCEPT works; pressing it shows "Confirmed!" on your offer
     -- (proof video 2026-10-16). Press only after the countdown, until Confirmed!, never after.
     local acceptT0, presses, readies, lastPress, countdownSince = os.clock(), 0, 0, -99, nil
+    local lastSnap = os.clock()
     while tradeRoot() and os.clock() - acceptT0 < ACCEPT_TIMEOUT do
         local confirmed = textShown(root:FindFirstChild("Your"), "^%s*Confirmed")
             or (textShown(root, "^%s*Confirmed") and not textShown(root:FindFirstChild("Other"), "^%s*Confirmed"))
@@ -268,6 +304,7 @@ local function readyAndAccept(root, who, reReady)
         if counting then countdownSince = countdownSince or os.clock() else countdownSince = nil end
         local waitCount = counting and os.clock() - countdownSince < 15   -- a timer that never ends is ignored
         local b = not confirmed and buttonWithText(root, "ACCEPT", "CONFIRM")
+        if os.clock() - lastSnap > 20 then lastSnap = os.clock(); log("info", ("waiting for ACCEPT (%d press(es))%s - %s"):format(presses, confirmed and ", Confirmed" or "", tradeSnap(root))) end
         if b and not waitCount and presses < 30 and os.clock() - lastPress > 1.5 then
             presses += 1; lastPress = os.clock()
             fire(b.Activated, nil, 1)
@@ -280,7 +317,7 @@ local function readyAndAccept(root, who, reReady)
             task.wait(0.25)
         end
     end
-    if tradeRoot() then cancelTrade(); return false, who .. " did not accept in time" end
+    if tradeRoot() then log("warn", ("ACCEPT stage timed out (%d press(es)) - %s"):format(presses, tradeSnap(root))); cancelTrade(); return false, who .. " did not accept in time" end
     return true
 end
 

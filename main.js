@@ -734,6 +734,7 @@ function ipc() {
   handle('eld:orders', q => eld.soldOrders(q || {}));
   handle('eld:order', id => eld.order(id));
   handle('eld:deliver', id => eld.deliverOrder(id));
+  handle('eld:cancelOrder', (id, reason) => eld.cancelOrder(id, reason));
   handle('eld:notifications', unread => eld.notifications(unread));
   handle('eld:markRead', id => eld.markRead(id));
   handle('eld:markAllRead', () => eld.markAllRead());
