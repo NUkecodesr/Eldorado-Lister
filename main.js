@@ -385,7 +385,7 @@ function wire() {
   launcher.legit = new LegitRoblox({ dir: path.join(process.env.LOCALAPPDATA || app.getPath('userData'), 'Zotac Lister', 'LegitRoblox'), log: (lvl, msg) => store.log(lvl, msg) });
   launcher.legit.on('progress', p => send('legit:progress', p));
   launcher.on('launched', () => send('launcher:changed'));
-  delivery.on('job', j => launcher.onJob(j));
+  delivery.on('job', j => { syncDeliveryAutoexec(); launcher.onJob(j); });
 
   // Security mode: the stock account a steal takes from is opened with real Roblox (never the
   // executor) and closed again afterwards, only when Zotac opened it for that
@@ -445,6 +445,7 @@ function wire() {
   ipcMain.on('bridge:event', (_e, { type, payload }) => { if (type === 'talk:message') delivery.onMessage(payload); });
 
   try { syncAutoexec(); } catch (e) { store.log('warn', '[Autoexec] ' + e.message); }
+  setTimeout(() => { for (const j of store.get('jobs')) if (j.status === 'pending' && Date.now() - (j.createdAt || 0) < 10 * 60000) launcher.onJob(j); }, 8000);
   startLocalServer({ store, bridge, delivery, wantRescan: acc => autoScan.wants(acc), wantServer: acc => autoScan.wantsServer(acc), onServerScan: d => { saveServerScan(d); autoScan.onServerScan(d); }, onArt: a => { try { art.remember(a); } catch (e) { store.log('warn', '[Scanner] art: ' + e.message); } }, onAgentClosing: acc => { launcher.markClosing(acc); setTimeout(() => launcher.closeGame(acc).catch(() => {}), 2500); }, onClientError: (acc, msg) => launcher.clientError(acc, msg), importScan: data => { const r = importPets(data, null, { replace: true, onlySaved: true }); if (r.skipped === true) return r; refreshAvatarsSoon(); const noGen = data && data.remote && Array.isArray(data.pets) ? data.pets.filter(p => !(Number(p.gen) > 0)).length : 0; autoScan.onImport(data && data.username, r, data && Array.isArray(data.pets) ? data.pets.length : null, noGen); send('pets:changed'); store.log('info', `[Scanner] ${data && data.username}: ${r.added} pets synced`); return r; }, onCookies: () => { send('auth:changed'); afterLogin(); } });
 }
 
@@ -653,9 +654,19 @@ function autoexecTargets() {
   return targets.filter(t => fs.existsSync(t.dir) && (t.always || removed.has(t.dir.toLowerCase()) || names.some(n => fs.existsSync(path.join(t.dir, n)))));
 }
 const AUTOEXEC_FILES = { delivery: 'zotac_delivery.lua', scanner: 'zotac_scanner.lua' };
+// the delivery agent is in autoexec while Auto Delivery is on, and also while any delivery job waits
+// (Simulator / Start auto delivery with Auto Delivery off: the launched game had no agent, so the
+// job sat pending and no trade was ever sent)
+const deliveryJobsActive = () => store.get('jobs').some(j => ['pending', 'running'].includes(j.status));
 function autoexecWanted() {
   const s = store.get('settings');
-  return { 'zotac_delivery.lua': !!(s.delivery || {}).enabled, 'zotac_scanner.lua': (s.scanner || {}).autoexec !== false };
+  return { 'zotac_delivery.lua': !!(s.delivery || {}).enabled || deliveryJobsActive(), 'zotac_scanner.lua': (s.scanner || {}).autoexec !== false };
+}
+function syncDeliveryAutoexec() {
+  if (process.env.ZOTAC_NO_AUTOEXEC) return;
+  const want = autoexecWanted()['zotac_delivery.lua'];
+  const has = (lastAutoexec || []).some(f => /zotac_delivery\.lua$/i.test(f));
+  if (want !== has) try { syncAutoexec(); } catch (e) { store.log('warn', '[Autoexec] ' + e.message); }
 }
 function syncAutoexec() {
   if (process.env.ZOTAC_NO_AUTOEXEC) return lastAutoexec;   // test copies must not overwrite the real autoexec
