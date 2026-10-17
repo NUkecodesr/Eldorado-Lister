@@ -44,7 +44,12 @@ local function log(level, msg)
     api("POST", "/log", {level = level, message = LP.Name .. ": " .. msg})
 end
 
+-- every UI press is paced like a person: at least FIRE_GAP s after the previous one
+local FIRE_GAP, lastFire = 0.9, -99
 local function fire(sig, ...)
+    local w = lastFire + FIRE_GAP - os.clock()
+    if w > 0 then task.wait(w) end
+    lastFire = os.clock()
     local args = table.pack(...)
     if typeof(firesignal) == "function" then
         if pcall(firesignal, sig, table.unpack(args, 1, args.n)) then return true end
@@ -102,12 +107,14 @@ local function sendTrade(name, uid)
     local box, list = tradeMenu()
     if not (box and list) then return false, "the game's trade menu is not loaded" end
     -- the name always goes into "Search player here..." on screen (also when the row is already
-    -- listed), pasted in one go, so the proof video shows who the trade went to
+    -- listed), pasted in one go and left there a couple of seconds before Enter, so the proof
+    -- video shows who the trade went to and the search is not rushed
+    task.wait(0.8)
     box.Text = name
-    task.wait(0.3)
+    task.wait(2.5)
     local hooked = fire(box.FocusLost, true, nil)
     local row, t0 = nil, os.clock()
-    repeat RunService.Heartbeat:Wait(); row = findRow(list, name, uid) until (row and os.clock() - t0 > 0.5) or os.clock() - t0 > 6
+    repeat RunService.Heartbeat:Wait(); row = findRow(list, name, uid) until (row and os.clock() - t0 > 1.5) or os.clock() - t0 > 8
     if not row and not hooked then return false, "trade search box not hooked" end
     row = findRow(list, name, uid) or row   -- the search may have rebuilt the rows: use the live one
     if not row then return false, "buyer @" .. name .. " not found in trade search" end

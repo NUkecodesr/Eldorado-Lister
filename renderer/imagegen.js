@@ -164,12 +164,9 @@ async function renderCardCanvas({ pet, rarity, art, traitArt = [], mutationArt =
       const box = Math.max(8, L.traits.size), gap = Math.max(0, L.traits.gap), k = box / 58;
       const cx = px(L.traits.x), cy = px(L.traits.y);
       if (!icons.length) {
-        // nothing to show: a rarity badge keeps the row (and so the whole layout) identical
-        const label = String(rarity || pet.rarity || 'Brainrot').toUpperCase();
-        g.font = `900 ${20 * k}px Segoe UI`; const w = g.measureText(label).width + 40 * k;
-        pill(g, cx - w / 2, cy - 17 * k, w, 36 * k, 'rgba(255,255,255,.07)', RARITY_COLORS[rarity || pet.rarity] || 'rgba(242,182,49,.7)');
-        g.fillStyle = RARITY_COLORS[rarity || pet.rarity] || '#f2b631'; g.fillText(label, cx, cy + 2 * k);
-        boxes.traits = { x: cx - w / 2, y: cy - 17 * k, w, h: 36 * k };
+        // no traits: the row stays empty (no rarity badge); the box is kept so the Image Editor can
+        // still pick and move the traits element
+        boxes.traits = { x: cx - box * 1.5, y: cy - box / 2, w: box * 3, h: box };
         return;
       }
       const total = icons.length * box + (icons.length - 1) * gap, rowTop = cy - box / 2;
