@@ -123,7 +123,7 @@ const autoScan = {
     const r = await result;
     if (r.ok) { this.done++; this.say(`@${a.username}: scanned (${r.added || 0} pets)`); }
     else { this.failed++; this.say(`@${a.username}: ${r.why}`, 'warn'); }
-    setTimeout(() => launcher.closeGame(a.username).catch(() => {}), 3000);
+    setTimeout(() => launcher.closeGame(a.username).catch(() => {}), 1500);
   },
   stop() { this.stopFlag = true; for (const k of Object.keys(this.waiters)) { const w = this.waiters[k]; delete this.waiters[k]; w({ ok: false, why: 'stopped' }); } this.say('Stopping...'); return this.state(); }
 };
@@ -251,7 +251,7 @@ function wire() {
   ipcMain.on('bridge:event', (_e, { type, payload }) => { if (type === 'talk:message') delivery.onMessage(payload); });
 
   try { syncAutoexec(); } catch (e) { store.log('warn', '[Autoexec] ' + e.message); }
-  startLocalServer({ store, bridge, delivery, onServerScan: saveServerScan, onAgentClosing: acc => launcher.closeGame(acc), importScan: data => { const r = importPets(data, null, { replace: true }); refreshAvatarsSoon(); autoScan.onImport(data && data.username, r); store.log('info', `[Scanner] ${data && data.username}: ${r.added} pets synced`); return r; }, onCookies: () => { send('auth:changed'); afterLogin(); } });
+  startLocalServer({ store, bridge, delivery, onServerScan: saveServerScan, onArt: a => { try { art.remember(a); } catch (e) { store.log('warn', '[Scanner] art: ' + e.message); } }, onAgentClosing: acc => launcher.closeGame(acc), importScan: data => { const r = importPets(data, null, { replace: true }); refreshAvatarsSoon(); autoScan.onImport(data && data.username, r); send('pets:changed'); store.log('info', `[Scanner] ${data && data.username}: ${r.added} pets synced`); return r; }, onCookies: () => { send('auth:changed'); afterLogin(); } });
 }
 
 async function afterLogin() {

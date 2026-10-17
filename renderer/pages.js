@@ -104,6 +104,8 @@ async function openAutoScan() {
   bg.append(body);
   $('#modal-root').append(bg);
   const draw = () => {
+    // never rebuild while you are typing in the batch box (it would lose what you typed)
+    if (document.activeElement && body.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') { clearTimeout(AS.later); AS.later = setTimeout(draw, 600); return; }
     const st = AS.st || {};
     const pct = st.total ? Math.round((st.done + st.failed) / st.total * 100) : 0;
     body.textContent = '';
@@ -111,7 +113,7 @@ async function openAutoScan() {
       h('div', { class: 'as-head' }, h('div', { class: 'as-ico' }, '⌕'), h('div', { class: 'grow' }, h('b', null, 'Auto Scan'), h('small', null, 'Scans every logged-in account in batches and imports automatically')),
         h('button', { class: 'as-x', onclick: close }, '✕')),
       h('div', { class: 'as-row' }, h('span', null, 'Accounts per batch'),
-        h('input', { type: 'number', min: '1', max: '10', value: batch, disabled: st.running, onchange: e => { batch = Math.max(1, Math.min(10, Number(e.target.value) || 1)); } }),
+        h('input', { type: 'number', min: '1', max: '10', value: batch, disabled: st.running, oninput: e => { batch = Math.max(1, Math.min(10, Number(e.target.value) || 1)); } }),
         h('div', { class: 'grow' }),
         st.running ? h('button', { class: 'btn danger', onclick: () => M.call('autoscan:stop') }, '■ Stop')
           : h('button', { class: 'btn primary', onclick: async () => { AS.st = await run(() => M.call('autoscan:start', { ids: [...AS.sel], batch })) || AS.st; draw(); } }, '▶ Start')),

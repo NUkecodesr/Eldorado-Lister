@@ -554,22 +554,28 @@ local function runOnce(first)
     local sig = signature(data)
     if sig == lastSig then return end
     lastSig = sig
-    local okA, art = pcall(collectArt, data.pets)
-    if okA then data.art = art end
-    if modelsOut then
-        data.art = data.art or {}
-        data.art.models = modelsOut
-    end
+    local models = modelsOut
     local json = HttpService:JSONEncode(data)
     if first and SHOW_GUI and setclipboard then pcall(setclipboard, json) end
     local ok, why = send(data)
     if ok then
-        for k in pairs((data.art and data.art.models) or {}) do modelsSent[k] = true end
-        if data.art and data.art.allIcons then _G.ZotacAllIconsSent = true end
-        notify(#data.pets .. " pets sent to Zotac" .. (first and " (also copied)" or ""))
+        notify(#data.pets .. " pets sent to Zotac" .. ((first and SHOW_GUI) and " (also copied)" or ""))
     elseif first then
         notify(#data.pets .. " pets copied - paste into Zotac Auto List (" .. why .. ")")
+        return
     end
+    -- pictures, trait icons and 3D data are slower to collect: they follow without holding up the pets
+    task.spawn(function()
+        local okA, art = pcall(collectArt, data.pets)
+        if not okA then art = nil end
+        if models then art = art or {}; art.models = models end
+        if not art then return end
+        local ok2 = post("/scanner/art", {username = data.username, art = art})
+        if ok2 then
+            for k in pairs(art.models or {}) do modelsSent[k] = true end
+            if art.allIcons then _G.ZotacAllIconsSent = true end
+        end
+    end)
 end
 
 local function scanServer(includeEmpty)
@@ -788,13 +794,13 @@ local function buildGui()
 end
 
 if not game:IsLoaded() then game.Loaded:Wait() end
-task.wait(3)
-heartbeat()
+task.wait(1)
+task.spawn(heartbeat)
 if SHOW_GUI then local okG, errG = pcall(buildGui); if not okG then notify("GUI failed: " .. tostring(errG)) end end
 
-for _ = 1, 10 do
+for _ = 1, 60 do
     if findMyPlot() then break end
-    task.wait(3)
+    task.wait(0.5)
 end
 runOnce(true)
 pcall(runServer)
