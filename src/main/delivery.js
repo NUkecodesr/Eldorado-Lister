@@ -774,6 +774,18 @@ class Delivery extends EventEmitter {
     // Zotac restarted while a job ran (an update, a crash of the app): Zotac no longer knows that
     // game. 90 s after the start, a running job whose account sent nothing since = its game is gone
     // (crashed or closed): it starts over on a fresh launch, like a crash seen live
+    // a running job whose game went quiet: its agent heartbeats every 10 s, also during a job, so
+    // heard after the job started and then nothing for 60 s = closed, crashed or frozen. Also covers
+    // games this Zotac session did not open (after a restart). Older agents never heartbeat during a
+    // job and are never judged by this.
+    for (const j of jobs.filter(x => x.status === 'running' && x.accountId)) {
+      const name = acc(j);
+      const p = Object.entries(this.lastAgentPoll).find(([k]) => k.toLowerCase() === name);
+      const heard = Math.max(p ? p[1] : 0, this.lastSeen[name] || 0);
+      if (heard > (j.startedAt || 0) + 2000 && now - heard > 60000 && j.status === 'running') {
+        this.accountCrashed({ id: j.accountId, username: j.account, why: 'stopped answering for 60 s (closed, crashed or frozen)' });
+      }
+    }
     if (!this.bootChecked && now - this.bootAt > 90000) {
       this.bootChecked = true;
       const heardSince = name => { const p = Object.entries(this.lastAgentPoll).find(([k]) => k.toLowerCase() === name); return Math.max(p ? p[1] : 0, this.lastSeen[name] || 0) > this.bootAt; };

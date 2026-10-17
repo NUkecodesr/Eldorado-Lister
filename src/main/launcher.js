@@ -307,7 +307,16 @@ class Launcher extends EventEmitter {
   stop() { clearInterval(this.sweep); clearInterval(this.watch); if (this.holder) try { this.holder.kill(); } catch { /* gone */ } }
 
   // legit = open real Roblox from Zotac's own clean install (no executor, so no Zotac scripts in it)
-  async launch(id, { force = false, legit = false } = {}) {
+  // one launch per account at a time: two jobs (or a job and the sweep) asking at the same moment
+  // used to open the account twice, and the second login kicks the first
+  launch(id, opts = {}) {
+    this.inFlight = this.inFlight || {};
+    if (this.inFlight[id]) return Promise.resolve({ skipped: 'launching' });
+    const p = this.launchNow(id, opts).finally(() => { delete this.inFlight[id]; });
+    this.inFlight[id] = p;
+    return p;
+  }
+  async launchNow(id, { force = false, legit = false } = {}) {
     const a = this.acct(id);
     if (!a) throw new Error('Account not found');
     const cookie = decryptCookie(a.cookieEnc);

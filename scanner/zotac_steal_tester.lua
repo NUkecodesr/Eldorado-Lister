@@ -179,46 +179,45 @@ local function climb(pivot, path, k, label)
     hum:Move(Vector3.zero)
     return last, root.Position.Y >= topY - 0.5
 end
--- base lock: while a base is locked its lasers (LaserHitbox.Main parts) collide and push you out,
--- and the countdown shows on Purchases.PlotBlock.Main.BillboardGui.RemainingTime ("86s" / "1:05").
--- Never walk into them: wait at the line until the lock is over.
-local laserCache = setmetatable({}, {__mode = "k"})
-local function lasersOf(plot)
-    local c = laserCache[plot]
-    if c and os.clock() - c.at < 30 then return c.parts end
-    local parts = {}
-    for _, d in ipairs(plot:GetDescendants()) do
-        if d:IsA("BasePart") and d.Name == "Main" and d.Parent and d.Parent.Name == "LaserHitbox" then table.insert(parts, d) end
-    end
-    laserCache[plot] = {at = os.clock(), parts = parts}
-    return parts
-end
-local function lasersOn(plot)
-    for _, p in ipairs(lasersOf(plot)) do if p.Parent and p.CanCollide then return true end end
-    return false
-end
+-- base lock: the base's lock countdown (Purchases.PlotBlock.Main.BillboardGui.RemainingTime,
+-- "86s" / "1:05"). Its lasers go away when it ends, so only the timer counts. The seconds are read
+-- once and counted here: the label can keep its last text ("1s") after the lock is over.
 local function lockSeconds(plot)
     local n = plot:FindFirstChild("Purchases"); n = n and n:FindFirstChild("PlotBlock"); n = n and n:FindFirstChild("Main"); n = n and n:FindFirstChild("BillboardGui")
     local rt = n and n:FindFirstChild("RemainingTime")
-    local t = rt and rt:IsA("TextLabel") and tostring(rt.Text) or ""
+    if not (rt and rt:IsA("TextLabel")) or (n:IsA("BillboardGui") and not n.Enabled) or not rt.Visible then return nil end
+    local t = tostring(rt.Text)
     local m, s = t:match("^(%d+):(%d+)$")
     if m then return tonumber(m) * 60 + tonumber(s) end
     local s2 = t:match("^(%d+)s$")
     return s2 and tonumber(s2) or nil
 end
-local function baseLocked(plot) local left = lockSeconds(plot); return lasersOn(plot) or (left ~= nil and left > 0), left end
+local openSince = setmetatable({}, {__mode = "k"})   -- plot -> when its lock was waited out
+local function baseLocked(plot)
+    local left = lockSeconds(plot)
+    if not left or left <= 0 then return false, left end
+    -- a leftover "1s"/"2s" right after a lock was waited out is the stale label, not a new lock
+    if left <= 2 and openSince[plot] and os.clock() - openSince[plot] < 90 then return false, left end
+    return true, left
+end
 local function waitUnlocked(plot, maxWait)
     local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
     local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
     if hum and root then hum:MoveTo(root.Position) end   -- stop at the line, not in the lasers
-    local t0 = os.clock()
-    while not stopFlag and os.clock() - t0 < maxWait do
-        local locked, left = baseLocked(plot)
-        if not locked then return true end
-        setStatus(("Base locked - waiting%s (lasers on)"):format(left and (" " .. left .. "s") or ""))
+    local locked, left = baseLocked(plot)
+    if not locked then return true end
+    local t0, said = os.clock(), -math.huge
+    local openAt = os.clock() + left + 1
+    while not stopFlag and os.clock() < openAt and os.clock() - t0 < maxWait do
+        local now = lockSeconds(plot)
+        -- locked again (more time than is left): wait for that one instead
+        if now and now > (openAt - os.clock()) + 3 then openAt = os.clock() + now + 1 end
+        left = math.max(0, math.ceil(openAt - os.clock()))
+        setStatus(("Base locked - waiting %ds"):format(left))
         task.wait(0.5)
     end
-    return not baseLocked(plot)
+    if os.clock() >= openAt then openSince[plot] = os.clock(); return true end
+    return false
 end
 local boxCache = setmetatable({}, {__mode = "k"})
 local function insideBase(plot, pos)
