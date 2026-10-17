@@ -1114,7 +1114,6 @@ async function loadThumbs(pets, { pictures = true } = {}) {
     return [...Object.values(r.pets || {}), ...Object.values(r.traits || {}), ...Object.values(r.mutations || {})].some(Boolean);
   } catch { return false; /* cards fall back to initials */ }
 }
-const XSLOT_CAP = 21;
 const XRANGES = [['', 'All ranges'], ['0-1e6', '< 1M/s'], ['1e6-1e7', '1M – 10M/s'], ['1e7-1e8', '10M – 100M/s'], ['1e8-1e9', '100M – 1B/s'], ['1e9-1e15', '1B+/s']];
 const RA = { filter: { account: '', q: '', mutation: '', min: '', max: '', range: '' }, view: 'account', tab: 'accounts', sort: 'desc', stock: false, org: 'name', open: null, limit: 60, showEmpty: false };
 PAGES.accounts = async root => {
@@ -1223,7 +1222,6 @@ PAGES.accounts = async root => {
     const mine = live.filter(p => p.accountId === a.id);
     const shown = petsFiltered.filter(p => p.accountId === a.id);
     const open = RA.open.has(a.id);
-    const full = mine.length >= XSLOT_CAP;
     return h('div', { class: 'x-arow' },
       h('div', { class: 'x-ahead', onclick: () => { open ? RA.open.delete(a.id) : RA.open.add(a.id); render(); } },
         h('span', { class: 'x-drag' }, '⠿'),
@@ -1231,7 +1229,8 @@ PAGES.accounts = async root => {
         h('span', { class: 'x-on' + ((LST[a.id] || {}).online ? ' on' : ''), title: (LST[a.id] || {}).online ? 'Delivery script online' : 'Not in game' }),
         h('b', null, '@' + a.username), h('small', { class: 'muted' }, a.robloxUserId ? 'ID: ' + a.robloxUserId : (a.note || '')),
         h('div', { class: 'grow' }),
-        h('span', { class: 'x-slot' + (full ? ' full' : '') }, h('i'), `${mine.length}/${XSLOT_CAP}`), h('small', { class: 'muted' }, `${mine.length} pets`),
+        // pet count only: each base has its own slot cap (seen 19-24), the game shows it in the trade window
+        h('span', { class: 'x-slot' }, h('i'), `${mine.length} pets`),
         h('button', { class: 'x-ib', title: 'Copy username', onclick: e => { e.stopPropagation(); xCopy(a.username, 'Username copied'); } }, '⎘'),
         h('button', { class: 'x-ab', title: 'List this account\'s available pets on Eldorado', onclick: e => { e.stopPropagation(); startAcct(a); } }, 'List'),
         h('button', { class: 'x-ab start', title: a.hasCookie ? 'Launch Roblox on this account (private server)' : 'Add the account cookie first (✎)', disabled: !a.hasCookie, onclick: e => { e.stopPropagation(); launch(a); } }, '▶ Start'),
@@ -1303,12 +1302,7 @@ PAGES.accounts = async root => {
       h('div', { class: 'row x-head-r' },
         h('button', { class: 'btn sm primary', onclick: async () => { const txt2 = await readFileText(); if (!txt2) return; const r = await run(() => M.call('accounts:import', txt2)); if (r) { toast(`Imported ${r.accounts} accounts, ${r.pets} pets`, 'good'); await refreshData(); render(); } } }, '⬆ Import JSON'),
         h('button', { class: 'btn sm', onclick: async () => xCopy(await M.call('accounts:export'), 'All accounts copied') }, '⎘ Copy All'),
-        h('button', { class: 'btn sm', onclick: () => { RA.org = RA.org === 'name' ? 'pets' : RA.org === 'pets' ? 'free' : 'name'; toast('Sorted by ' + ({ name: 'name', pets: 'most pets', free: 'most free slots' }[RA.org]), 'info', 2200); render(); } }, '⠿ Organize'),
-        h('button', { class: 'btn sm', onclick: () => {
-          const rows = S.accounts.map(a => ({ a, free: Math.max(0, XSLOT_CAP - live.filter(p => p.accountId === a.id).length) })).filter(r => r.free > 0).sort((x, y) => y.free - x.free);
-          modal('Free Slots', h('div', null, h('p', { class: 'muted' }, `${rows.reduce((s2, r) => s2 + r.free, 0)} free slots across ${rows.length} accounts (cap ${XSLOT_CAP} each).`),
-            table(rows, [{ label: 'Account', render: r => '@' + r.a.username }, { label: 'Free', num: true, render: r => r.free }], { empty: 'All accounts are full.', maxHeight: '360px' })), [{ label: t('close') }]);
-        } }, '▦ Free Slots'),
+        h('button', { class: 'btn sm', onclick: () => { RA.org = RA.org === 'name' ? 'pets' : RA.org === 'pets' ? 'free' : 'name'; toast('Sorted by ' + ({ name: 'name', pets: 'most pets', free: 'fewest pets' }[RA.org]), 'info', 2200); render(); } }, '⠿ Organize'),
         h('button', { class: 'btn sm primary', onclick: () => openAutoScan() }, '⌕ Auto Scan'),
         h('button', { class: 'btn sm', title: 'Launch every account that has a cookie and is not in game', onclick: async () => { const n = S.accounts.filter(a => a.hasCookie).length; if (!n) return toast('No logged-in accounts', 'error'); if (!await confirmBox(`Open Roblox on all ${n} logged-in accounts (4 s apart, accounts already in game are skipped)?`)) return; toast('Launching accounts…', 'info'); const r = await run(() => M.call('accounts:launchAll')); if (r) toast(r.map(x => `${x.username}: ${x.error || x.skipped || 'launched'}`).join(' · ') || 'No accounts with cookies', 'good', 9000); } }, '▶ Launch All'),
         h('button', { class: 'btn sm', title: 'Restart the multi-instance helper (when a new client closes the old one)', onclick: () => run(() => M.call('launcher:fix'), 'Launcher reset') }, '⟳ Fix Launch'),
