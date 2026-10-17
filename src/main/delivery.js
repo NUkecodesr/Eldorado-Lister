@@ -399,7 +399,9 @@ class Delivery extends EventEmitter {
       id: rid(6), kind: 'steal', orderId: d.orderId, accountId: mother.id, account: mother.username || null,
       fromAccountId: feeder.id, fromUsername: feeder.username || null, fromUserId: feeder.robloxUserId || null, fromDisplayName: feeder.displayName || null,
       pets: pets.map(p => ({ id: p.id, uuid: p.uuid || null, name: p.name, mutation: p.mutation, gen: p.gen, traits: p.traits || [] })),
-      status: 'pending', createdAt: Date.now(), attempt: g.tries - 1, closeWhenIdle: false
+      status: 'pending', createdAt: Date.now(), attempt: g.tries - 1, closeWhenIdle: false,
+      // the way into a base (walked by hand once, src/main/baseroute.js); set by main
+      route: this.baseRoute ? this.baseRoute() : null
     };
     g.jobId = job.id;
     this.store.get('jobs').push(job);

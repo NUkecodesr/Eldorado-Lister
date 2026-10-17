@@ -581,10 +581,10 @@ local function stealPromptFor(plot, model)
     if not best then return nil end
     local att = best:FindFirstChild("PromptAttachment", true)
     for _, p in ipairs((att and att:GetChildren()) or best:GetDescendants()) do
-        if p:IsA("ProximityPrompt") and string.find(string.lower(p.ActionText or ""), "steal", 1, true) then return p end
+        if p:IsA("ProximityPrompt") and string.find(string.lower(p.ActionText or ""), "steal", 1, true) then return p, best end
     end
-    for _, p in ipairs(best:GetDescendants()) do if p:IsA("ProximityPrompt") then return p end end
-    return nil
+    for _, p in ipairs(best:GetDescendants()) do if p:IsA("ProximityPrompt") then return p, best end end
+    return nil, best
 end
 local function promptPos(p)
     local par = p and p.Parent
@@ -619,6 +619,123 @@ local function walkTo(pos, within, timeout)
     end
     return close()
 end
+-- ---------- recorded base routes ----------
+-- job.route = the way into a base the user walked by hand (scanner/zotac_path_recorder.lua), relative
+-- to the base's pivot (every base is the same model): nodes {x, y, z, kind} (0 walk, 1 ladder,
+-- 2 in the air), one-way edges (0-based), slots[podium] = where to stand to steal, exits = ground
+-- spots at the front / outside where the walk home starts. Walked with MoveTo like a player; a
+-- ladder is climbed by walking into it (Humanoid:Move), like holding W.
+local function nodeWorld(route, pivot, i)
+    local n = route.nodes[i]
+    return pivot:PointToWorldSpace(Vector3.new(n[1], n[2], n[3]))
+end
+local function routePath(route, from, goals)
+    local n = #route.nodes
+    local adj = {}
+    for i = 1, n do adj[i] = {} end
+    for _, e in ipairs(route.edges) do
+        local a, b = e[1] + 1, e[2] + 1
+        local A, B = route.nodes[a], route.nodes[b]
+        if A and B then table.insert(adj[a], {b, math.sqrt((A[1] - B[1]) ^ 2 + (A[3] - B[3]) ^ 2) + math.abs(A[2] - B[2]) * 0.5}) end
+    end
+    local dist, prev, done = {}, {}, {}
+    for i = 1, n do dist[i] = math.huge end
+    dist[from] = 0
+    while true do
+        local u, du = nil, math.huge
+        for i = 1, n do if not done[i] and dist[i] < du then u, du = i, dist[i] end end
+        if not u then return nil end
+        if goals[u] then
+            local path, x = {}, u
+            while x do table.insert(path, 1, x); x = prev[x] end
+            return path
+        end
+        done[u] = true
+        for _, e in ipairs(adj[u]) do
+            if du + e[2] < dist[e[1]] then dist[e[1]] = du + e[2]; prev[e[1]] = u end
+        end
+    end
+end
+-- the walk node nearest to pos (only nodes in "only" when given)
+local function nearestNode(route, pivot, pos, only)
+    local best, bestD = nil, math.huge
+    local list = only or {}
+    if not only then for i = 1, #route.nodes do list[i] = i - 1 end end
+    for _, i0 in ipairs(list) do
+        local i = i0 + 1
+        local n = route.nodes[i]
+        if n and n[4] == 0 then
+            local d = (nodeWorld(route, pivot, i) - pos).Magnitude
+            if d < bestD then best, bestD = i, d end
+        end
+    end
+    return best, bestD
+end
+local function followRoute(route, pivot, path, timeout)
+    local char = LP.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not (hum and root) then return false end
+    local t0, lastDir = os.clock(), nil
+    for _, i in ipairs(path) do
+        if not running or os.clock() - t0 > timeout then hum:Move(Vector3.zero); return false end
+        local n = route.nodes[i]
+        local wp = nodeWorld(route, pivot, i)
+        local flatV = (wp - root.Position) * Vector3.new(1, 0, 1)
+        if n[4] == 1 then
+            local dir = flatV.Magnitude > 0.3 and flatV.Unit or lastDir
+            local tC = os.clock()
+            while dir and root.Position.Y < wp.Y - 0.7 and os.clock() - tC < 4 and running do
+                hum:Move(dir, false)
+                RunService.Heartbeat:Wait()
+            end
+            if dir then lastDir = dir end
+        else
+            if flatV.Magnitude > 0.3 then lastDir = flatV.Unit end
+            hum:MoveTo(wp)
+            local tW, lastPos, still = os.clock(), root.Position, os.clock()
+            repeat
+                RunService.Heartbeat:Wait()
+                if (root.Position - lastPos).Magnitude > 0.5 then lastPos, still = root.Position, os.clock()
+                elseif os.clock() - still > 1 then hum.Jump = true; still = os.clock() end   -- caught on a step
+            until ((wp - root.Position) * Vector3.new(1, 0, 1)).Magnitude < 1.8 or os.clock() - tW > 4 or not running
+        end
+    end
+    hum:Move(Vector3.zero)
+    return true
+end
+-- into a base along the recorded way: to its front on open ground, then the route to that podium
+local function routeTo(route, plot, slot)
+    local goal = route.slots and route.slots[tostring(slot)]
+    local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+    if goal == nil or not root then return false end
+    local pivot = plot:GetPivot()
+    local start, d = nearestNode(route, pivot, root.Position)
+    if not start or d > 6 then
+        start = nearestNode(route, pivot, root.Position, route.exits)
+        if not start or not walkTo(nodeWorld(route, pivot, start), 3, 60) then return false end
+    end
+    local path = routePath(route, start, {[goal + 1] = true})
+    return path ~= nil and followRoute(route, pivot, path, 120)
+end
+-- out of a base along the recorded way, down to the ground at its front / outside
+local function routeOut(route, plot)
+    local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+    if not root or type(route.exits) ~= "table" then return false end
+    local pivot = plot:GetPivot()
+    local start, d = nearestNode(route, pivot, root.Position)
+    if not start or d > 8 then return false end
+    local goals = {}
+    for _, e in ipairs(route.exits) do goals[e + 1] = true end
+    local path = routePath(route, start, goals)
+    return path ~= nil and followRoute(route, pivot, path, 120)
+end
+local function inRange(p)
+    local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+    local pp = promptPos(p)
+    return root and pp and (root.Position - pp).Magnitude <= (tonumber(p.MaxActivationDistance) or 10) - 0.5
+end
+
 local function holdPrompt(p)
     local okB = pcall(function() p:InputHoldBegin() end)
     if not okB then return false end
@@ -652,6 +769,7 @@ local function stealPets(job, took)
     local homePos = hit and hit:IsA("BasePart") and hit.Position or (home and home:GetPivot().Position)
     if not homePos then return false, "own base not found" end
     local used = {}
+    local route = type(job.route) == "table" and type(job.route.nodes) == "table" and #job.route.nodes > 1 and job.route or nil
     for i, pet in ipairs(job.pets) do
         if not running then return false, "agent stopped" end
         local mineBefore = countInBase(pet)
@@ -676,10 +794,13 @@ local function stealPets(job, took)
             if not target then task.wait(1) end
         until target or os.clock() - tFind > 30
         if not target then return false, pet.name .. " not found in @" .. from .. "'s base" end
-        local prompt = stealPromptFor(plot, target)
+        local prompt, podium = stealPromptFor(plot, target)
         if not prompt then return false, "no steal prompt at " .. pet.name end
-        -- 3. walk there, steal (a locked base keeps the prompt off: wait for it)
-        if not walkTo(promptPos(prompt) or target:GetPivot().Position, math.max(4, (prompt.MaxActivationDistance or 10) - 2), 60) then return false, "could not walk to " .. pet.name end
+        -- 3. walk there (the recorded way into the base; pathfinding only without a route), steal
+        -- (a locked base keeps the prompt off: wait for it)
+        local walked = route and podium and routeTo(route, plot, podium.Name)
+        if route and not walked then log("warn", "recorded route to podium " .. tostring(podium and podium.Name) .. " did not get there - trying pathfinding") end
+        if not inRange(prompt) and not walkTo(promptPos(prompt) or target:GetPivot().Position, math.max(4, (prompt.MaxActivationDistance or 10) - 2), 60) then return false, "could not walk to " .. pet.name end
         local tE = os.clock()
         while not prompt.Enabled and os.clock() - tE < 70 do task.wait(1) end
         if not prompt.Enabled then return false, "@" .. from .. "'s base stays locked" end
@@ -693,7 +814,8 @@ local function stealPets(job, took)
         end
         if not got then return false, "steal prompt did not pick up " .. pet.name end
         notify(("Took %s (%d/%d) - walking home"):format(pet.name, i, #job.pets))
-        -- 4. home: into your own base's delivery spot
+        -- 4. home: out of their base the recorded way, then into your own base's delivery spot
+        if route and not routeOut(route, plot) then log("warn", "recorded way out did not work - walking home directly") end
         walkTo(homePos, 4, 90)
         local tH = os.clock()
         repeat task.wait(0.5) until LP:GetAttribute("Stealing") ~= true or os.clock() - tH > 20

@@ -636,7 +636,6 @@ PAGES.delivery = async root => {
   // delivering keep the mode they started with
   const mode = cfg.mode === 'security' ? 'security' : 'single';
   const scriptAccts = S.accounts.filter(a => a.hasCookie && !a.legit);
-  const stockAccts = S.accounts.filter(a => a.hasCookie && a.legit);
   const scriptOnline = scriptAccts.some(a => ((DV.lst || {})[a.id] || {}).online);
   const pickMode = k => {
     if (k === mode) return;
@@ -691,13 +690,6 @@ PAGES.delivery = async root => {
           h('div', { class: 'av' }, (a.username || '?')[0].toUpperCase(), h('span', { class: 'led ' + (st.online ? 'on' : '') })),
           h('div', null, h('b', null, a.username), h('div', { class: 'muted', style: { fontSize: '11px' } }, st.online ? 'in game, script connected' : 'not in game — opened with the executor when an order needs it')));
       })) : h('div', { class: 'mx-empty' }, 'No logged-in account is in SCRIPT mode: set one to SCRIPT on Roblox Accounts (it becomes the mother).')),
-    mxCard(mxIco('user', 'purple'), 'Stock Accounts', 'Accounts in Legit mode: Zotac opens them with real Roblox when the mother needs their pets', h('span', { class: 'mx-badge' }, `${stockAccts.length} LEGIT`),
-      stockAccts.length ? h('div', { class: 'mx-rows' }, stockAccts.map(a => {
-        const st = (DV.lst || {})[a.id] || {};
-        return h('div', { class: 'mx-acct' },
-          h('div', { class: 'av' }, (a.username || '?')[0].toUpperCase(), h('span', { class: 'led ' + (st.online ? 'on' : '') })),
-          h('div', null, h('b', null, a.username), h('div', { class: 'muted', style: { fontSize: '11px' } }, 'Legit — real Roblox, no scripts')));
-      })) : h('div', { class: 'mx-empty' }, 'No logged-in account is in Legit mode. Set stock accounts to Legit on Roblox Accounts.')),
     mxCard(mxIco('code'), 'Autoexec', 'The delivery script must run by itself when Roblox opens', h('span', { class: 'mx-badge ' + ((DV.autoexec || []).length ? 'good' : 'bad') }, (DV.autoexec || []).length ? 'INSTALLED' : 'NOT INSTALLED'),
       h('p', { class: 'ink2', style: { marginTop: 0 } }, 'Zotac copies zotac_delivery.lua into your executor\'s autoexec folder. Synapse Z and executors in AppData are found by themselves; for any other executor add its autoexec folder here. Without it Roblox opens but nothing trades.'),
       (DV.autoexec || []).length ? h('div', { class: 'mx-rows' }, DV.autoexec.map(f => h('div', { class: 'muted mono', style: { fontSize: '11px' } }, '✓ ' + f))) : h('div', { class: 'mx-empty' }, 'No executor autoexec folder found yet.'),

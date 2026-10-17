@@ -14,6 +14,7 @@ const { startLocalServer } = require('./src/main/localserver');
 const { checkUpdate, installUpdate } = require('./src/main/updater');
 const webmfix = require('./src/main/webmfix');
 const { LegitRoblox } = require('./src/main/legitroblox');
+const baseroute = require('./src/main/baseroute');
 const { Launcher, decryptCookie } = require('./src/main/launcher');
 const { Art } = require('./src/main/art');
 const { Wiki } = require('./src/main/wiki');
@@ -255,6 +256,9 @@ function wire() {
   delivery.on('job', j => launcher.onJob(j));
   // Security mode: the stock account a steal takes from is opened with real Roblox (never the
   // executor) and closed again afterwards, only when Zotac opened it for that
+  // the recorded way into a base for the steal walk (userData/base-route.json wins over the bundled one)
+  const route = baseroute.load(app.getPath('userData'));
+  delivery.baseRoute = () => route;
   const hostOpened = new Set();
   delivery.hosts = {
     open: async id => {
