@@ -651,6 +651,25 @@ function ipc() {
   });
   handle('settings:regenToken', which => { const s = store.get('settings'); s[which] = rid(8); store.save(); if (which === 'agentToken') syncAutoexec(); return s[which]; });
   handle('webhook:test', () => discord(store, { title: '🐾 Zotac Lister test', description: 'Webhook works!', ping: true }));
+  // preview of each Discord card the app sends, filled with sample data (never pings)
+  handle('webhook:testCard', async kind => {
+    if (!store.get('settings').webhookUrl) throw new Error('Set a webhook URL first');
+    const pet = { name: 'Burguro And Fryuro', mutation: 'Rainbow', gen: 1.5e9, traits: ['Taco', 'Fire'] };
+    const now = Date.now();
+    const d = { orderId: 'TEST-' + rid(6), buyer: 'PlushLace-kp0t', username: 'Ckind122', robloxId: 1, price: 2.55, petIds: [], samplePets: [pet], sampleAccounts: ['BloxBeast35594'],
+      createdAt: now - 106000, finishedAt: now, attempts: 0, sim: true };
+    if (kind === 'delivered') return delivery.reportCard({ ...d, state: 'done' }, 'done');
+    if (kind === 'cancelled') return delivery.reportCard({ ...d, state: 'cancelled', attempts: 3, price: 24.99 }, 'cancelled', 'Buyer did not accept the trade in time');
+    if (kind === 'failed') return delivery.reportCard({ ...d, state: 'manual', attempts: 3 }, 'manual', 'the delivery script never connected from @BloxBeast35594');
+    const T = '[TEST] ';
+    if (kind === 'sale') return discord(store, { title: T + '💰 New sale!', color: 0x22c55e, description: '**Rainbow Burguro And Fryuro | 1.5B/s**', fields: [
+      { name: 'Price', value: '$2.55', inline: true }, { name: 'Qty', value: '1', inline: true }, { name: 'Buyer', value: 'PlushLace-kp0t', inline: true },
+      { name: 'Accounts', value: 'BloxBeast35594', inline: false }, { name: 'Order', value: d.orderId, inline: false }] });
+    if (kind === 'dispute') return discord(store, { title: T + '⚠️ Dispute opened', color: 0xef4444, description: `**Rainbow Burguro And Fryuro | 1.5B/s**\nBuyer: PlushLace-kp0t\nOrder: ${d.orderId}` });
+    if (kind === 'chat') return discord(store, { title: T + '💬 New message', description: 'PlushLace-kp0t: is my order coming?' });
+    if (kind === 'autolist') return discord(store, { title: T + '📦 Auto List finished', description: '5 listed, 1 failed' });
+    return discord(store, { title: T + '🐾 Zotac Lister test', description: 'Webhook works!' });
+  });
   handle('logs:get', () => store.get('logs').slice(-600));
   handle('logs:clear', () => { store.set('logs', []); return true; });
   handle('data:export', async () => {

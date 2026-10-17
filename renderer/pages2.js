@@ -320,6 +320,7 @@ PAGES.reviews = async root => {
 };
 
 // ============================== NOTIFICATIONS =============================
+const WH = { kind: 'delivered' };
 const NT = { list: null, orders: null, page: 1, more: false, unreadOnly: false, loading: false, shown: 15 };
 const ntKind = n => { const s = `${n.type} ${n.title} ${n.body}`; return /cancel|refund|reject|declin|dispute|fail/i.test(s) ? 'bad' : /complet|deliver|receiv|sold|paid|releas|success|new order/i.test(s) ? 'good' : 'info'; };
 const ntBuyer = n => {
@@ -791,7 +792,15 @@ PAGES.settings = async root => {
           chk('Forward chat notifications', s.notifyMessages, v => saveSettings({ notifyMessages: v }))),
         h('div', { class: 'row' },
           h('button', { class: 'btn primary', onclick: async () => { await run(() => saveSettings({ webhookUrl: urlIn.value.trim(), webhookPing: pingIn.value.trim() }), 'Saved'); } }, 'Save'),
-          h('button', { class: 'btn', onclick: async () => { await saveSettings({ webhookUrl: urlIn.value.trim(), webhookPing: pingIn.value.trim() }); run(() => M.call('webhook:test'), 'Test sent'); } }, 'Test'))),
+          h('button', { class: 'btn', onclick: async () => { await saveSettings({ webhookUrl: urlIn.value.trim(), webhookPing: pingIn.value.trim() }); run(() => M.call('webhook:test'), 'Test sent'); } }, 'Test')),
+        h('div', { class: 'row', style: { marginTop: '8px' } },
+          h('span', { class: 'muted' }, 'Preview a card:'),
+          (() => { const pick = sel([['delivered', 'Delivery: delivered'], ['cancelled', 'Delivery: cancelled'], ['failed', 'Delivery: failed / needs you'], ['sale', 'New sale'], ['dispute', 'Dispute opened'], ['chat', 'Chat message'], ['autolist', 'Auto List finished'], ['plain', 'Plain test']], WH.kind, v => { WH.kind = v; }); return pick; })(),
+          h('button', { class: 'btn', onclick: async () => {
+            await saveSettings({ webhookUrl: urlIn.value.trim(), webhookPing: pingIn.value.trim() });
+            const ok = await run(() => M.call('webhook:testCard', WH.kind));
+            if (ok !== undefined) toast(ok === false ? 'Discord refused the webhook (check the URL)' : 'Sample card sent (marked TEST, no ping)', ok === false ? 'error' : 'good');
+          } }, 'Send sample'))),
       mxCard('speaker', 'Sale Sound', 'Play a custom sound on this computer whenever a sale comes in.', null,
         chk('Enable sale sound', lsGet('zotac.sound.on', '1') === '1', v => lsSet('zotac.sound.on', v ? '1' : '0')),
         h('div', { class: 'row', style: { margin: '10px 0', flexWrap: 'nowrap' } }, h('span', { class: 'ink2' }, 'Audio file'),

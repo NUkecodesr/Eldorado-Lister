@@ -353,11 +353,11 @@ class Delivery extends EventEmitter {
   // running total for today in the footer.
   report(d, outcome, reason) { this.reportCard(d, outcome, reason).catch(e => this.log('warn', 'Discord card: ' + e.message)); }
   async reportCard(d, outcome, reason) {
-    const pets = this.store.get('pets').filter(p => d.petIds.includes(p.id));
+    const pets = d.samplePets || this.store.get('pets').filter(p => d.petIds.includes(p.id));
     const fmtGen = n => { n = Number(n) || 0; for (const [v, u] of [[1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'K']]) if (n >= v) return +(n / v).toFixed(2) + u + '/s'; return n + '/s'; };
     const MUT = { gold: '🟨', diamond: '💎', rainbow: '🌈', lava: '🌋', bloodrot: '🩸', celestial: '🌌', candy: '🍬', galaxy: '🌌', yinyang: '☯️', radioactive: '☢️', cursed: '😈', none: '🧊', normal: '🧊' };
     const mutEmoji = m => MUT[String(m || 'none').toLowerCase().replace(/[^a-z]/g, '')] || '🔷';
-    const accounts = [...new Set(pets.map(p => (this.store.get('accounts').find(a => a.id === p.accountId) || {}).username).filter(Boolean))];
+    const accounts = d.sampleAccounts || [...new Set(pets.map(p => (this.store.get('accounts').find(a => a.id === p.accountId) || {}).username).filter(Boolean))];
     const price = d.price != null ? d.price : pets.reduce((s, p) => s + (Number(p.price) || 0), 0);
     const secs = Math.max(0, Math.round(((d.finishedAt || Date.now()) - (d.createdAt || Date.now())) / 1000));
     const dur = secs >= 60 ? Math.floor(secs / 60) + 'm ' + (secs % 60) + 's' : secs + 's';
@@ -390,7 +390,7 @@ class Delivery extends EventEmitter {
 
     let thumb = null;
     try { if (pets[0] && this.petImageUrl) thumb = await this.petImageUrl(pets[0].name); } catch { /* no picture */ }
-    discord(this.store, {
+    return discord(this.store, {
       username: 'Zotac Auto Delivery', color: style[1], ping: outcome !== 'done' && !d.sim,
       description: lines.join('\n').slice(0, 4000),
       thumbnail: thumb || d.avatar || undefined,
