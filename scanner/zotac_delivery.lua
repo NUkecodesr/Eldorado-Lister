@@ -527,6 +527,25 @@ local function plotOwnedBy(plr)
     return nil
 end
 local function isPetModel(inst) return inst:IsA("Model") and inst:GetAttribute("__AssetDescendantCount") ~= nil end
+-- every brainrot has its own uuid: read from the plot cache entry or the pet model's attributes
+-- (only reading what the client already has), so Zotac knows "same pet" from "new identical pet"
+local UUID_KEYS = {"UUID", "Uuid", "uuid", "AnimalUUID", "AnimalUuid", "AnimalId", "Guid", "GUID", "Id", "ID", "id"}
+local function normUuid(v)
+    if type(v) ~= "string" then return nil end
+    local s = string.lower((v:gsub("[{}]", "")))
+    if s:match("^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$") then return s end
+    return nil
+end
+local function modelUuid(model)
+    for _, k in ipairs(UUID_KEYS) do
+        local u = normUuid(model:GetAttribute(k))
+        if u then return u, "model." .. k end
+    end
+    local ok, attrs = pcall(function() return model:GetAttributes() end)
+    if ok then for k, v in pairs(attrs) do local u = normUuid(v); if u then return u, "model." .. k end end end
+    return nil
+end
+
 local function mutOk(model, pet)
     local m = norm(model:GetAttribute("Mutation") or "none")
     local want = norm(pet.mutation or "none")
@@ -640,7 +659,13 @@ local function stealPets(job, took)
         local target, tFind = nil, os.clock()
         repeat
             local best, bestD = nil, math.huge
-            for _, c in ipairs(plot:GetChildren()) do
+            -- the exact pet when the scan gave Zotac its uuid
+            if pet.uuid then
+                for _, c in ipairs(plot:GetChildren()) do
+                    if isPetModel(c) and not used[c] and modelUuid(c) == pet.uuid then best, bestD = c, -1 break end
+                end
+            end
+            for _, c in ipairs(bestD < 0 and {} or plot:GetChildren()) do
                 if isPetModel(c) and not used[c] and norm(c.Name) == norm(pet.name) and mutOk(c, pet) then
                     local g = genNear(c)
                     local d = g and math.abs(g - (tonumber(pet.gen) or 0)) or 1e15

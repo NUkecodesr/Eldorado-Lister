@@ -91,6 +91,13 @@ function findItem(idx, name) {
 // --- Pet JSON import ------------------------------------------------------
 const pick = (o, keys) => { for (const k of keys) if (o[k] !== undefined && o[k] !== null && o[k] !== '') return o[k]; return undefined; };
 
+// the game's own id of one brainrot (from the scanner): lower case, no braces
+function normUuid(v) {
+  if (typeof v !== 'string') return null;
+  const s = v.trim().replace(/[{}]/g, '').toLowerCase();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(s) ? s : null;
+}
+
 function petFromAny(o, accountName) {
   if (!o || typeof o !== 'object') return null;
   // Eldorado offer export (results[].offer or offer object)
@@ -119,6 +126,7 @@ function petFromAny(o, accountName) {
   if (traits && !Array.isArray(traits)) traits = String(traits).split(/[,;|]/).map(s => s.trim()).filter(Boolean);
   return {
     name: name.trim(),
+    uuid: normUuid(pick(o, ['uuid', 'UUID', 'Uuid', 'animalUuid'])),
     mutation: pick(o, ['mutation', 'Mutation', 'mut', 'variant', 'Variant']) || 'None',
     gen: parseGen(genRaw),
     traits: traits || [],
@@ -185,4 +193,4 @@ function petKey(p) {
   return [norm(p.name), norm(p.mutation || 'None'), Math.round(Number(p.gen) || 0), (p.traits || []).map(norm).sort().join(',')].join('|');
 }
 
-module.exports = { parseGen, formatGen, genBucket, mutationId, traitIds, buildItemIndex, findItem, normalizePetImport, fillTemplate, norm, slug, petKey };
+module.exports = { parseGen, formatGen, genBucket, mutationId, traitIds, buildItemIndex, findItem, normalizePetImport, fillTemplate, norm, slug, petKey, normUuid };

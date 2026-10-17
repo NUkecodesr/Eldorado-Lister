@@ -96,6 +96,70 @@ local function isPet(inst)
     return inst:IsA("Model") and inst:GetAttribute("__AssetDescendantCount") ~= nil
 end
 
+-- every brainrot has its own uuid: read from the plot cache entry or the pet model's attributes
+-- (only reading what the client already has), so Zotac knows "same pet" from "new identical pet"
+local UUID_KEYS = {"UUID", "Uuid", "uuid", "AnimalUUID", "AnimalUuid", "AnimalId", "Guid", "GUID", "Id", "ID", "id"}
+local function normUuid(v)
+    if type(v) ~= "string" then return nil end
+    local s = string.lower((v:gsub("[{}]", "")))
+    if s:match("^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$") then return s end
+    return nil
+end
+local function uuidOf(entry, key)
+    if type(entry) == "table" then
+        for _, k in ipairs(UUID_KEYS) do
+            local ok, v = pcall(rawget, entry, k)
+            local u = ok and normUuid(v)
+            if u then return u, k end
+        end
+        local okP, u2, k2 = pcall(function()
+            for k, v in pairs(entry) do local u = normUuid(v); if u then return u, tostring(k) end end
+        end)
+        if okP and u2 then return u2, k2 end
+    end
+    local u = normUuid(key)
+    if u then return u, "list key" end
+    return nil
+end
+local function modelUuid(model)
+    for _, k in ipairs(UUID_KEYS) do
+        local u = normUuid(model:GetAttribute(k))
+        if u then return u, "model." .. k end
+    end
+    local ok, attrs = pcall(function() return model:GetAttributes() end)
+    if ok then for k, v in pairs(attrs) do local u = normUuid(v); if u then return u, "model." .. k end end end
+    return nil
+end
+local function entrySlot(a, key)
+    for _, k in ipairs({"Slot", "slot", "PodiumIndex", "Podium"}) do
+        local ok, v = pcall(rawget, a, k)
+        if ok and (type(v) == "number" or type(v) == "string") then return tostring(v) end
+    end
+    if type(key) == "number" then return tostring(key) end
+    return nil
+end
+local function podiumSlot(podiums, pos)
+    local best, bestD = nil, 15
+    for _, pod in ipairs(podiums and podiums:GetChildren() or {}) do
+        local ok, cf = pcall(function() return pod:GetPivot() end)
+        if ok then
+            local d = Vector2.new(cf.Position.X - pos.X, cf.Position.Z - pos.Z).Magnitude
+            if d < bestD then best, bestD = pod.Name, d end
+        end
+    end
+    return best
+end
+-- the plot cache entry of one pet model: same uuid, else same podium slot, else same name +
+-- mutation, else same name (each entry used once)
+local function takeEntry(entries, name, uuid, slot, mut)
+    local function take(i) local e = entries[i]; table.remove(entries, i); return e end
+    if uuid then for i, e in ipairs(entries) do if e.uuid == uuid then return take(i) end end end
+    if slot then for i, e in ipairs(entries) do if e.slot == slot and e.a.Index == name then return take(i) end end end
+    if mut then for i, e in ipairs(entries) do if e.a.Index == name and tostring(e.a.Mutation or "None") == tostring(mut) then return take(i) end end end
+    for i, e in ipairs(entries) do if e.a.Index == name then return take(i) end end
+    return nil
+end
+
 local function readOverheads()
     local list = {}
     local debris = workspace:FindFirstChild("Debris")
@@ -453,25 +517,45 @@ local modelsSent = {}
 local modelsOut = nil
 
 local function readPlot(plot, overheads, used, withModels)
-    local dataByName = {}
+    local entries, info = {}, {}
     local animals = plotAnimalList(plot.Name)
     if animals then
-        for _, a in pairs(animals) do
+        for k, a in pairs(animals) do
             if type(a) == "table" and type(a.Index) == "string" then
-                dataByName[a.Index] = dataByName[a.Index] or {}
-                table.insert(dataByName[a.Index], a)
+                local u, from = uuidOf(a, k)
+                if u and not info.uuidFrom then info.uuidFrom = from end
+                if not info.entryKeys then   -- field names + types only (shows where the uuid lives)
+                    local names = {}
+                    pcall(function() for kk, vv in pairs(a) do table.insert(names, tostring(kk) .. ":" .. type(vv)) end end)
+                    table.sort(names)
+                    info.entryKeys = table.concat(names, ",")
+                    info.listKey = type(k)
+                end
+                table.insert(entries, {a = a, key = k, uuid = u, slot = entrySlot(a, k)})
             end
         end
     end
+    local podiums = plot:FindFirstChild("AnimalPodiums")
 
     local pets = {}
     for _, c in ipairs(plot:GetChildren()) do
         if isPet(c) then
-            local o = nearestOverhead(overheads, c.Name, c:GetPivot().Position, used)
+            local pos = c:GetPivot().Position
+            local o = nearestOverhead(overheads, c.Name, pos, used)
             local genL = o and o.gui:FindFirstChild("Generation")
             local rarL = o and o.gui:FindFirstChild("Rarity")
-            local q = dataByName[c.Name]
-            local a = q and table.remove(q, 1)
+            local mu, mFrom = modelUuid(c)
+            if mu and not info.uuidFrom then info.uuidFrom = mFrom end
+            if not info.modelAttrs then
+                local names = {}
+                pcall(function() for kk in pairs(c:GetAttributes()) do table.insert(names, tostring(kk)) end end)
+                table.sort(names)
+                info.modelAttrs = table.concat(names, ",")
+            end
+            local e = takeEntry(entries, c.Name, mu, podiumSlot(podiums, pos), c:GetAttribute("Mutation"))
+            local a = e and e.a
+            local uuid = mu or (e and e.uuid) or nil
+            if uuid then info.withUuid = (info.withUuid or 0) + 1 end
             local mutation = c:GetAttribute("Mutation") or (a and a.Mutation) or "None"
 
             local cache = RS:FindFirstChild("Controllers") and RS.Controllers:FindFirstChild("AssetStreamController")
@@ -487,6 +571,7 @@ local function readPlot(plot, overheads, used, withModels)
             end
             table.insert(pets, {
                 name     = c.Name,
+                uuid     = uuid,
                 mutation = tostring(mutation),
                 gen      = genL and parseMoney(genL.Text) or 0,
                 rarity   = rarL and stripTags(rarL.Text) or nil,
@@ -499,7 +584,7 @@ local function readPlot(plot, overheads, used, withModels)
         end
     end
     table.sort(pets, function(x, y) return (x.gen or 0) > (y.gen or 0) end)
-    return pets, animals
+    return pets, animals, info
 end
 
 local function scan()
@@ -511,10 +596,10 @@ local function scan()
     end
     local overheads = readOverheads()
     modelsOut = nil
-    local pets, animals = readPlot(plot, overheads, {}, true)
+    local pets, animals, info = readPlot(plot, overheads, {}, true)
     local expected = nil
     if animals then expected = 0; for _, a in pairs(animals) do if type(a) == "table" and type(a.Index) == "string" then expected += 1 end end end
-    return {expected = expected, username = LP.Name, userId = LP.UserId, displayName = LP.DisplayName, scannedAt = os.time(), pets = pets, traitsKnown = animals ~= nil or #overheads > 0}
+    return {expected = expected, username = LP.Name, userId = LP.UserId, displayName = LP.DisplayName, scannedAt = os.time(), pets = pets, traitsKnown = animals ~= nil or #overheads > 0, uuidInfo = info}
 end
 
 local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request

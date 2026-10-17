@@ -339,6 +339,14 @@ function importPets(json, accountId, { replace = false, onlySaved = false } = {}
     if (!importPets.warned.has(k)) { importPets.warned.add(k); store.log('warn', `[Scanner] @${raw.username} is not a saved account - its base is not synced (add it in Roblox Accounts)`); }
     return { added: 0, removed: 0, skipped: true, notSaved: raw.username };
   }
+  if (replace && raw && raw.uuidInfo && raw.username) {
+    const ui = raw.uuidInfo, k = String(raw.username).toLowerCase();
+    importPets.uuidLogged = importPets.uuidLogged || new Set();
+    if (!importPets.uuidLogged.has(k)) {
+      importPets.uuidLogged.add(k);
+      store.log('info', `[Scanner] @${raw.username}: ${ui.withUuid || 0}/${(raw.pets || []).length} pets with uuid${ui.uuidFrom ? ' (from ' + ui.uuidFrom + ')' : ''}; cache entry fields: ${ui.entryKeys || '?'} (list key ${ui.listKey || '?'}); model attributes: ${ui.modelAttrs || '?'}`);
+    }
+  }
   const fixed = accounts.find(a => a.id === accountId);
   const items = sab.normalizePetImport(raw, fixed ? fixed.username : '');
   const added = [];
@@ -388,23 +396,44 @@ function importPets(json, accountId, { replace = false, onlySaved = false } = {}
       if (raw && raw.userId && String(raw.username || '').toLowerCase() === acct.username.toLowerCase()) acct.robloxUserId = raw.userId;
     }
     if (onlySaved && !acct) continue;
+    // same uuid = the same brainrot, whatever changed on it; two different uuids are never the same
+    // pet. Without a uuid on one side (old records, a scan that could not read it) the old rules apply.
+    const u = it.uuid || null;
+    const fits = p => !u || !p.uuid || p.uuid === u;
+    const sameU = p => !!u && p.uuid === u;
+    const adopt = p => { if (u) p.uuid = u; };
     if (replace && acct) {
-      const i = listedLeft.findIndex(p => p.accountId === acct.id && sab.norm(p.name) === sab.norm(it.name) && sab.norm(p.mutation) === sab.norm(it.mutation || 'None'));
-      if (i >= 0) { const was = listedLeft.splice(i, 1)[0]; if (was.session) was.session = false; continue; }
+      // exact uuid first: a listed/sold pet, an unlisted one, a pasted one
+      let ui = u ? listedLeft.findIndex(p => p.accountId === acct.id && sameU(p)) : -1;
+      if (ui >= 0) { const was = listedLeft.splice(ui, 1)[0]; if (was.session) was.session = false; continue; }
+      ui = u ? dropped.findIndex(p => !p._kept && p.accountId === acct.id && sameU(p)) : -1;
+      if (ui >= 0) {
+        // the scan is the truth for what this pet is now (mutation machine, new traits)
+        const old = dropped[ui]; old._kept = true;
+        old.mutation = it.mutation || 'None'; if (it.gen) old.gen = it.gen;
+        if ((it.traits || []).length || (raw && raw.traitsKnown !== false)) old.traits = it.traits || [];
+        if (it.rarity) old.rarity = it.rarity;
+        store.get('pets').push(old); continue;
+      }
+      ui = u ? sessionLeft.findIndex(p => p.accountId === acct.id && sameU(p)) : -1;
+      if (ui >= 0) { const was = sessionLeft.splice(ui, 1)[0]; was.session = false; continue; }
+      const i = listedLeft.findIndex(p => p.accountId === acct.id && fits(p) && sab.norm(p.name) === sab.norm(it.name) && sab.norm(p.mutation) === sab.norm(it.mutation || 'None'));
+      if (i >= 0) { const was = listedLeft.splice(i, 1)[0]; if (was.session) was.session = false; adopt(was); continue; }
       // the exact same pet as an unlisted one Zotac already had: keep that one (same id, price,
       // title, card...) instead of a fresh copy
       const key = sab.petKey({ ...it, mutation: it.mutation || 'None' });
-      const j = dropped.findIndex(p => !p._kept && p.accountId === acct.id && sab.petKey(p) === key);
-      if (j >= 0) { const old = dropped[j]; old._kept = true; if (it.rarity) old.rarity = it.rarity; store.get('pets').push(old); continue; }
-      const sj = sessionLeft.findIndex(p => p.accountId === acct.id && sab.petKey(p) === key);
-      if (sj >= 0) { const was = sessionLeft.splice(sj, 1)[0]; was.session = false; if (it.rarity) was.rarity = it.rarity; continue; }
+      const j = dropped.findIndex(p => !p._kept && p.accountId === acct.id && fits(p) && sab.petKey(p) === key);
+      if (j >= 0) { const old = dropped[j]; old._kept = true; if (it.rarity) old.rarity = it.rarity; adopt(old); store.get('pets').push(old); continue; }
+      const sj = sessionLeft.findIndex(p => p.accountId === acct.id && fits(p) && sab.petKey(p) === key);
+      if (sj >= 0) { const was = sessionLeft.splice(sj, 1)[0]; was.session = false; if (it.rarity) was.rarity = it.rarity; adopt(was); continue; }
     }
     if (!replace && acct) {
       const key = sab.petKey({ ...it, mutation: it.mutation || 'None' });
-      const j = have.findIndex(p => p.accountId === acct.id && sab.petKey(p) === key);
-      if (j >= 0) { const old = have.splice(j, 1)[0]; if (old.alHidden) old.alHidden = false; matched.push(old); continue; }
+      let j = u ? have.findIndex(p => p.accountId === acct.id && sameU(p)) : -1;
+      if (j < 0) j = have.findIndex(p => p.accountId === acct.id && fits(p) && sab.petKey(p) === key);
+      if (j >= 0) { const old = have.splice(j, 1)[0]; if (old.alHidden) old.alHidden = false; adopt(old); matched.push(old); continue; }
     }
-    const pet = { id: rid(6), accountId: acct ? acct.id : null, name: it.name, mutation: it.mutation || 'None', gen: it.gen || 0, traits: it.traits || [], rarity: it.rarity || '', cost: it.cost || 0, status: it.offerId ? 'listed' : 'available', offerId: it.offerId || null, price: it.price || null, createdAt: Date.now() };
+    const pet = { id: rid(6), uuid: u || undefined, accountId: acct ? acct.id : null, name: it.name, mutation: it.mutation || 'None', gen: it.gen || 0, traits: it.traits || [], rarity: it.rarity || '', cost: it.cost || 0, status: it.offerId ? 'listed' : 'available', offerId: it.offerId || null, price: it.price || null, createdAt: Date.now() };
     store.get('pets').push(pet); added.push(pet);
   }
   const kept = dropped.filter(p => p._kept);
@@ -420,7 +449,10 @@ function importPets(json, accountId, { replace = false, onlySaved = false } = {}
     const k = p => sab.norm(p.name) + '|' + sab.norm(p.mutation || 'None') + '|' + Math.round((Number(p.gen) || 0) / 1000);
     const still = {};
     for (const p of added) still[k(p)] = (still[k(p)] || 0) + 1;
-    const gone = lost.filter(p => { if (still[k(p)] > 0) { still[k(p)]--; return false; } return true; });
+    // with uuids it is exact: a pet whose uuid the scan no longer shows is gone (a new identical
+    // pet has a new uuid)
+    const seenU = new Set(items.map(it => it.uuid).filter(Boolean));
+    const gone = lost.filter(p => { if (p.uuid && seenU.size) return !seenU.has(p.uuid); if (still[k(p)] > 0) { still[k(p)]--; return false; } return true; });
     const uname = id => (accounts.find(a => a.id === id) || {}).username || null;
     for (const [acc, list] of Object.entries(gone.reduce((m, p) => ((m[p.accountId] ||= []).push(p), m), {}))) {
       delivery.record('gone', { from: uname(acc), pets: list, note: 'no longer in the base (not traded by Zotac)' });

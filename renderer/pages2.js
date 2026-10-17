@@ -28,7 +28,7 @@ const MXP = {
   code: 'M8 8l-5 4 5 4M16 8l5 4-5 4M14 5l-4 14', user: 'M12 12a4 4 0 100-8 4 4 0 000 8zM4 21a8 8 0 0116 0', clip: 'M9 4h6v3H9zM6 5h3M15 5h3v16H6V5', pulse: 'M3 12h4l3-8 4 16 3-8h4',
   clock: 'M12 21a9 9 0 100-18 9 9 0 000 18zM12 7v5l3 2', hook: 'M12 3a5 5 0 00-5 5v3l-2 3h14l-2-3V8a5 5 0 00-5-5zM10 18a2 2 0 004 0', speaker: 'M4 9h4l5-4v14l-5-4H4zM17 9a4 4 0 010 6',
   globe: 'M12 21a9 9 0 100-18 9 9 0 000 18zM3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18', key: 'M14 10a4 4 0 11-3 3l-7 7v-3h3v-3h3l1-1', refresh: 'M20 12a8 8 0 10-3 6.2M20 5v6h-6',
-  people: 'M9 11a3 3 0 100-6 3 3 0 000 6zM3 20a6 6 0 0112 0M17 11a3 3 0 100-6M21 20a6 6 0 00-4-5.6', wallet: 'M3 7h18v12H3zM3 7l2-3h12l2 3M16 13h2', warn: 'M12 4l9 16H3zM12 10v4M12 17v.01'
+  people: 'M9 11a3 3 0 100-6 3 3 0 000 6zM3 20a6 6 0 0112 0M17 11a3 3 0 100-6M21 20a6 6 0 00-4-5.6', layers: 'M12 3l9 5-9 5-9-5zM3 12.5l9 5 9-5M3 17l9 5 9-5', wallet: 'M3 7h18v12H3zM3 7l2-3h12l2 3M16 13h2', warn: 'M12 4l9 16H3zM12 10v4M12 17v.01'
 };
 function mxSvg(name, size) {
   const ns = 'http://www.w3.org/2000/svg';
@@ -379,8 +379,7 @@ const DV = { data: null, tab: 'activity', hist: 'all', clearedAt: 0 };
 const STEP_META = [
   ['STEP 1 - GREETING', 'Order received, asking the buyer for their username', 'gold', [
     ['greeting', 'Greeting', 'new order without a Roblox username: asks for it', '{buyer} {orderId}'],
-    ['greetingKnownUser', 'Greeting (username given at checkout)', 'the buyer is only asked to confirm it', '{buyer} {username}'],
-    ['multiAccount', 'Multi-account order', 'Single mode, pets on several accounts (one trade per account)', '{accounts}']]],
+    ['greetingKnownUser', 'Greeting (username given at checkout)', 'the buyer is only asked to confirm it', '{buyer} {username}']]],
   ['STEP 2 - USERNAME CHECK', "Validating and confirming the buyer's Roblox username", 'purple', [
     ['confirmUsername', 'Username confirmation', 'Yes/No prompt', '{username}'],
     ['invalidReply', 'Invalid confirmation reply', 'buyer typed something other than 1 or 2', ''],
@@ -388,8 +387,7 @@ const STEP_META = [
     ['usernameNotFound', 'Username not found', 'no Roblox account with that name', '']]],
   ['STEP 3 - DELIVERY', 'Trade machine flow — sending the trade and handling retries', 'gold', [
     ['deliveryStarting', 'Delivery starting', 'username confirmed, launching delivery', '{username}'],
-    ['gathering', 'Gathering onto one account', 'Security mode, pets on several accounts: the mother takes them first', '{quantity} {accounts} {mother}'],
-    ['deliveryAccountStep', 'Account step', 'Single mode, pets on several accounts: before each account\'s trade', '{step} {accounts} {account}'],
+    ['gathering', 'Gathering onto one account', 'pets on several accounts: the mother takes them first (Security)', '{quantity} {accounts} {mother}'],
     ['buyerCancelled', 'Buyer cancelled the trade', 'the trade is sent again at once (up to 2 more times)', '{round}'],
     ['deliveryFailed', 'Delivery failed (retrying)', 'agent reported a failed trade', '{reason}'],
     ['deliverySuccess', 'Delivery success', 'all trades done', '{username}'],
@@ -408,7 +406,7 @@ const TUTORIAL = {
   how: [
     ['A buyer pays', ['the order enters the ', ['Delivery Queue'], ' and Zotac greets them in the order chat.']],
     ['The buyer sends their Roblox username', ['Zotac looks it up and asks them to confirm with 1 (yes) or 2 (no).']],
-    ['Delivery mode', [['Single'], ': each account trades its own pets to the buyer. ', ['Security'], ': one SCRIPT account (the mother) takes the pets in game from the stock accounts, opened with real Roblox one at a time (max 2 games open), then does one trade to the buyer.']],
+    ['Delivery mode', [['Security Mode Only'], ': one SCRIPT account (the mother) takes the pets in game from the stock accounts, opened with real Roblox one at a time (max 2 games open), then does one trade to the buyer. ', ['Single Mode'], ': an order on one SCRIPT account is traded straight from it; anything else uses Security.']],
     ['A trade job is created', ['the account is opened if needed and its script sends the trade to the buyer. If the buyer cancels, it is sent again.']],
     ['Done', ['when the script reports success, Zotac tells the buyer, optionally marks the order as delivered and records the trade on video. After 3 failed tries the order is ', ['cancelled'], ' on Eldorado (or left to you if that is switched off).']]
   ]
@@ -436,7 +434,7 @@ async function openOrderSimulator() {
     const same = pet ? avail.filter(p => sameKey(p) === sameKey(pet)) : [];
     const accts = [...new Set(same.map(p => (S.accounts.find(a => a.id === p.accountId) || {}).username || '?'))];
     qtyIn.max = Math.max(1, same.length);
-    qtyHint.textContent = `${same.length} identical in stock${accts.length > 1 ? ' on ' + accts.map(a => '@' + a).join(', ') + ((S.settings.delivery || {}).mode === 'security' ? ' (Security: the mother takes them first)' : ' (Single: one trade per account)') : ''}`;
+    qtyHint.textContent = `${same.length} identical in stock${accts.length > 1 ? ' on ' + accts.map(a => '@' + a).join(', ') + ' (the mother takes them first)' : ''}`;
   };
   petSel.addEventListener('change', showQty); showQty();
   const start = await new Promise(res => modal('Simulate an order', h('div', { class: 'grid' },
@@ -637,22 +635,28 @@ PAGES.delivery = async root => {
   // Single / Security: a popup says what the mode does and what it needs; orders already
   // delivering keep the mode they started with
   const mode = cfg.mode === 'security' ? 'security' : 'single';
+  const scriptAccts = S.accounts.filter(a => a.hasCookie && !a.legit);
+  const stockAccts = S.accounts.filter(a => a.hasCookie && a.legit);
+  const scriptOnline = scriptAccts.some(a => ((DV.lst || {})[a.id] || {}).online);
   const pickMode = k => {
     if (k === mode) return;
     const scriptAccts = S.accounts.filter(a => a.hasCookie && !a.legit);
     const body = k === 'security'
       ? h('div', null,
-        h('p', null, 'Security mode: one account in SCRIPT mode is the mother. For each order Zotac opens the stock accounts that hold its pets with real Roblox (Legit, no executor) in your private server, one at a time. The mother walks into their base, takes the pets with the game\'s own steal prompt, brings them home, then does ONE trade to the buyer.'),
+        h('p', null, 'Security Mode Only: one account in SCRIPT mode is the mother. For every order Zotac opens the stock accounts that hold its pets with real Roblox (Legit, no executor) in your private server, one at a time. The mother walks into their base, takes the pets with the game\'s own steal prompt, brings them home, then does ONE trade to the buyer.'),
         h('p', null, 'Only the mother ever runs Zotac\'s scripts. The trade to the buyer is the only part recorded on video.'),
         h('p', { class: scriptAccts.length ? 'muted' : 'mx-fail' }, scriptAccts.length
           ? `Mother candidates now (SCRIPT, logged in): ${scriptAccts.map(a => '@' + a.username).join(', ')}. Zotac picks the best one per order.`
           : 'No logged-in account is in SCRIPT mode yet: orders will stop for you until one is (Roblox Accounts → SCRIPT).'))
       : h('div', null,
-        h('p', null, 'Single mode: every account trades its own pets to the buyer, one trade per account, with Zotac\'s delivery script running in each of them.'),
-        h('p', { class: 'muted' }, 'Accounts in Legit mode can\'t run the script: an order with pets on one stops for you.'));
-    modal(k === 'security' ? 'Security mode' : 'Single mode', body, [
+        h('p', null, 'Single Mode + Security on multi-account: an order whose pets are all on one account in SCRIPT mode is traded straight from that account (faster, no steal).'),
+        h('p', null, 'Pets on several accounts, or on an account in Legit mode: the order falls back to Security (the mother takes the pets, then one trade).'),
+        h('p', { class: scriptAccts.length ? 'muted' : 'mx-fail' }, scriptAccts.length
+          ? `SCRIPT accounts now: ${scriptAccts.map(a => '@' + a.username).join(', ')}.`
+          : 'No logged-in account is in SCRIPT mode yet: orders will stop for you until one is (Roblox Accounts → SCRIPT).'));
+    modal(k === 'security' ? 'Security Mode Only' : 'Single Mode', body, [
       { label: t('cancel') },
-      { label: k === 'security' ? 'Use Security mode' : 'Use Single mode', cls: 'primary', fn: async () => { await saveSettings({ delivery: { mode: k } }); toast(`Auto Delivery: ${k === 'security' ? 'Security' : 'Single'} mode`, 'good'); render(); } }
+      { label: k === 'security' ? 'Use Security Mode Only' : 'Use Single Mode', cls: 'primary', fn: async () => { await saveSettings({ delivery: { mode: k } }); toast(`Auto Delivery: ${k === 'security' ? 'Security Mode Only' : 'Single Mode + Security on multi-account'}`, 'good'); render(); } }
     ]);
   };
   const stateCls = { done: 'good', manual: 'bad', delivering: 'gold', cancelled: '' };
@@ -668,19 +672,32 @@ PAGES.delivery = async root => {
       h('div', { class: 'mx-rows' },
         setting('Mark order delivered', 'Calls Eldorado "deliver" after all trades succeed', sw(cfg.markDelivered, v => saveSettings({ delivery: { markDelivered: v } }))),
         setting('Cancel order if delivery fails', 'After 3 failed attempts: tell the buyer why and cancel the order on Eldorado (refund). Off = manual fallback', sw(cfg.cancelOnFail !== false, v => saveSettings({ delivery: { cancelOnFail: v } }))),
-        setting('Delivery mode', mode === 'security'
-          ? 'Security: one account in SCRIPT mode (the mother) takes the pets in game from the stock accounts, which Zotac opens with real Roblox (Legit) one at a time, then does ONE trade to the buyer. Only the mother runs scripts'
-          : 'Single: every account trades its own pets to the buyer, one trade per account. Accounts in Legit mode can\'t trade',
-          h('div', { class: 'mx-pills sm' }, [['single', 'Single'], ['security', 'Security']].map(([k, l]) => h('button', { class: 'mx-pill' + (mode === k ? ' on' : ''), onclick: () => pickMode(k) }, l)))),
         setting('Record video proof', 'Records the Roblox window during delivery (Video Proof page)', sw(cfg.recordProof, v => saveSettings({ delivery: { recordProof: v } }))),
         setting('Script connect timeout', 'Seconds a queued trade waits for the account\'s delivery script to connect (a running trade gets 7–10 min)', num(cfg.agentTimeoutSec, v => saveSettings({ delivery: { agentTimeoutSec: v } }))))),
-    mxCard(mxIco('user', 'purple'), 'Stock Accounts', 'Every logged-in account can deliver; Zotac opens the one an order needs', h('span', { class: 'mx-badge ' + (online ? 'good' : '') }, online ? 'SCRIPT CONNECTED' : 'NO SCRIPT ONLINE'),
-      S.accounts.filter(a => a.hasCookie).length ? h('div', { class: 'mx-rows' }, S.accounts.filter(a => a.hasCookie).map(a => {
+    mxCard(mxIco('layers', 'green'), 'Delivery Mode', 'How orders are delivered in-game', null,
+      h('div', { class: 'mx-modes' },
+        h('button', { class: 'mx-modeopt' + (mode === 'security' ? ' on' : ''), onclick: () => pickMode('security') },
+          h('b', null, 'Security Mode Only'),
+          h('small', null, 'Mother steals every pet and delivers in ', h('b', null, 'one trade'), '. Works with any account setup.')),
+        h('button', { class: 'mx-modeopt' + (mode === 'single' ? ' on' : ''), onclick: () => pickMode('single') },
+          h('b', null, 'Single Mode ', h('span', { class: 'muted' }, '+ Security on multi-account')),
+          h('small', null, h('b', null, 'Single-account'), ' orders deliver straight from the stock account (faster, no steal). ', h('b', null, 'Multi-account'), ' orders auto-fallback to Security.')))),
+    // the mother candidates: accounts in SCRIPT mode (their script must be connected to trade)
+    mxCard(mxIco('code', 'purple'), 'Script Account', 'Runs Zotac\'s scripts: the mother that steals and trades the buyer (SCRIPT mode on Roblox Accounts)',
+      h('span', { class: 'mx-badge ' + (scriptOnline ? 'good' : '') }, scriptOnline ? 'CONNECTED' : 'NOT CONNECTED'),
+      scriptAccts.length ? h('div', { class: 'mx-rows' }, scriptAccts.map(a => {
         const st = (DV.lst || {})[a.id] || {};
         return h('div', { class: 'mx-acct' },
           h('div', { class: 'av' }, (a.username || '?')[0].toUpperCase(), h('span', { class: 'led ' + (st.online ? 'on' : '') })),
-          h('div', null, h('b', null, a.username), h('div', { class: 'muted', style: { fontSize: '11px' } }, st.online ? 'in game, delivery script connected' : 'not in game — opened when an order needs it')));
-      })) : h('div', { class: 'mx-empty' }, 'Log in your Roblox accounts on the Roblox Accounts page.')),
+          h('div', null, h('b', null, a.username), h('div', { class: 'muted', style: { fontSize: '11px' } }, st.online ? 'in game, script connected' : 'not in game — opened with the executor when an order needs it')));
+      })) : h('div', { class: 'mx-empty' }, 'No logged-in account is in SCRIPT mode: set one to SCRIPT on Roblox Accounts (it becomes the mother).')),
+    mxCard(mxIco('user', 'purple'), 'Stock Accounts', 'Accounts in Legit mode: Zotac opens them with real Roblox when the mother needs their pets', h('span', { class: 'mx-badge' }, `${stockAccts.length} LEGIT`),
+      stockAccts.length ? h('div', { class: 'mx-rows' }, stockAccts.map(a => {
+        const st = (DV.lst || {})[a.id] || {};
+        return h('div', { class: 'mx-acct' },
+          h('div', { class: 'av' }, (a.username || '?')[0].toUpperCase(), h('span', { class: 'led ' + (st.online ? 'on' : '') })),
+          h('div', null, h('b', null, a.username), h('div', { class: 'muted', style: { fontSize: '11px' } }, 'Legit — real Roblox, no scripts')));
+      })) : h('div', { class: 'mx-empty' }, 'No logged-in account is in Legit mode. Set stock accounts to Legit on Roblox Accounts.')),
     mxCard(mxIco('code'), 'Autoexec', 'The delivery script must run by itself when Roblox opens', h('span', { class: 'mx-badge ' + ((DV.autoexec || []).length ? 'good' : 'bad') }, (DV.autoexec || []).length ? 'INSTALLED' : 'NOT INSTALLED'),
       h('p', { class: 'ink2', style: { marginTop: 0 } }, 'Zotac copies zotac_delivery.lua into your executor\'s autoexec folder. Synapse Z and executors in AppData are found by themselves; for any other executor add its autoexec folder here. Without it Roblox opens but nothing trades.'),
       (DV.autoexec || []).length ? h('div', { class: 'mx-rows' }, DV.autoexec.map(f => h('div', { class: 'muted mono', style: { fontSize: '11px' } }, '✓ ' + f))) : h('div', { class: 'mx-empty' }, 'No executor autoexec folder found yet.'),

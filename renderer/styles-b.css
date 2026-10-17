@@ -208,3 +208,12 @@
 .mx-nrow .nbox::before { content: ''; position: absolute; left: 0; right: 0; top: 4px; height: 2px; background: rgba(120, 72, 30, .35); }
 .mx-nrow .nbox::after { content: ''; position: absolute; top: 0; bottom: 0; left: 7px; width: 4px; background: rgba(255, 255, 255, .35); }
 .mx-nrow .amt { color: var(--gold); font-weight: 700; }
+/* Auto Delivery: Delivery Mode options */
+.mx-modes { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.mx-modeopt { display: block; width: 100%; text-align: left; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line2); background: rgba(255, 255, 255, .015); color: var(--ink); font: inherit; cursor: pointer; }
+.mx-modeopt:hover { border-color: rgba(242, 182, 49, .45); }
+.mx-modeopt.on { border-color: var(--gold); background: linear-gradient(90deg, rgba(242, 182, 49, .12), rgba(242, 182, 49, .03)); }
+.mx-modeopt > b { display: block; font-size: 13px; }
+.mx-modeopt > b .muted { font-weight: 400; }
+.mx-modeopt > small { display: block; margin-top: 4px; font-size: 11px; color: var(--ink2); }
+.mx-modeopt > small b { color: var(--ink); }

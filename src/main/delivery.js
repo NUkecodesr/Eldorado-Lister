@@ -199,7 +199,6 @@ class Delivery extends EventEmitter {
       d.conversationId = order.id;
       this.store.save();
       await this.say(d, 'greeting');
-      await this.multiNote(d);
       this.emit('update', d);
       return d;
     }
@@ -213,11 +212,9 @@ class Delivery extends EventEmitter {
     const user = preset ? await this.lookupUser(preset) : null;
     if (user) {
       await this.say(d, 'greetingKnownUser', { username: user.name });
-      await this.multiNote(d);
       await this.proposeUsername(d, user.name, user);
     } else {
       await this.say(d, 'greeting');
-      await this.multiNote(d);
     }
     this.emit('update', d);
   }
@@ -291,22 +288,34 @@ class Delivery extends EventEmitter {
     this.store.save();
   }
 
-  // Two delivery modes (Auto Delivery settings), fixed per order when its delivery starts:
-  //  single:   every account trades its own pets to the buyer (one trade per account). An account
-  //            in Legit mode can't run the delivery script, so its pets stop the order for you.
-  //  security: an account in SCRIPT mode is the mother. Each stock account holding pets of the order
-  //            is opened with real Roblox (Legit, no executor) in the private server, one at a time;
-  //            the mother steals its pets in game and brings them home, then does ONE trade to the
-  //            buyer. Only the mother ever runs Zotac's scripts.
+  // Two delivery modes (Auto Delivery → Delivery Mode), fixed per order when its delivery starts:
+  //  security: "Security Mode Only". An account in SCRIPT mode is the mother. Each stock account
+  //            holding pets of the order is opened with real Roblox (Legit, no executor) in the
+  //            private server, one at a time; the mother steals its pets in game, brings them home,
+  //            then does ONE trade to the buyer. Only the mother runs Zotac's scripts.
+  //  single:   "Single Mode + Security on multi-account". All pets on one account that can run the
+  //            script (SCRIPT mode): that account trades the buyer straight away (faster, no steal).
+  //            Pets on several accounts, or on a Legit one: Security, as above.
   modeOf(d) { return (d && d.mode) || (this.cfg.mode === 'security' ? 'security' : 'single'); }
-  async multiNote(d) { if (d.accounts.length > 1 && this.modeOf(d) === 'single') await this.say(d, 'multiAccount'); }
+  // Single mode: the one account holding every pet of the order, when it can trade by itself
+  directAccount(d) {
+    const owners = [...new Set(this.store.get('pets').filter(p => d.petIds.includes(p.id) && !p.delivered).map(p => p.accountId))];
+    if (owners.length !== 1 || !owners[0]) return null;
+    const a = this.store.get('accounts').find(x => x.id === owners[0]);
+    return a && !a.legit ? a.id : null;
+  }
 
   async startDelivery(d) {
     d.state = 'delivering'; d.step = 0; d.confirmedAt = Date.now();
     d.mode = this.modeOf(d);
     await this.say(d, 'deliveryStarting');
     if (this.cfg.recordProof) this.emit('proof', { action: 'start', orderId: d.orderId });
-    if (d.mode === 'security') return this.startSecurity(d);
+    const direct = d.mode === 'single' ? this.directAccount(d) : null;
+    if (!direct) {
+      if (d.mode === 'single') { d.securityFallback = true; this.log('info', `Order ${d.orderId}: Single mode, pets on ${d.accounts.length > 1 ? 'several accounts' : 'a Legit account'} — Security (mother) for this order`); }
+      return this.startSecurity(d);
+    }
+    d.accounts = [direct];
     this.queueNext(d);
   }
 
@@ -364,6 +373,10 @@ class Delivery extends EventEmitter {
     if (d.feeders.some(id => g[id] && !g[id].done)) return;
     const next = d.feeders.find(id => !g[id]);
     if (next) return this.queueSteal(d, next);
+    // every pet still to deliver must be on the mother now (a pet with no account, or one a steal
+    // never moved, would otherwise count as delivered)
+    const off = this.store.get('pets').filter(p => d.petIds.includes(p.id) && !p.delivered && p.accountId !== d.mother);
+    if (off.length) return this.needsYou(d, `${off.length} pet(s) of this order are not on the mother (${off.map(p => p.name + (p.accountId ? '' : ', no account')).join('; ')}) — deliver by hand`);
     d.accounts = [d.mother]; d.step = 0; d.attempts = 0;
     this.store.save();
     this.queueNext(d);
@@ -385,7 +398,7 @@ class Delivery extends EventEmitter {
     const job = {
       id: rid(6), kind: 'steal', orderId: d.orderId, accountId: mother.id, account: mother.username || null,
       fromAccountId: feeder.id, fromUsername: feeder.username || null, fromUserId: feeder.robloxUserId || null, fromDisplayName: feeder.displayName || null,
-      pets: pets.map(p => ({ id: p.id, name: p.name, mutation: p.mutation, gen: p.gen, traits: p.traits || [] })),
+      pets: pets.map(p => ({ id: p.id, uuid: p.uuid || null, name: p.name, mutation: p.mutation, gen: p.gen, traits: p.traits || [] })),
       status: 'pending', createdAt: Date.now(), attempt: g.tries - 1, closeWhenIdle: false
     };
     g.jobId = job.id;
@@ -537,23 +550,27 @@ class Delivery extends EventEmitter {
     const missing = d.petIds.filter(id => !this.store.get('pets').some(p => p.id === id));
     if (missing.length) return this.needsYou(d, `${missing.length} pet(s) of this order are no longer in Zotac's pet list (removed by a rescan or by hand) — deliver by hand`);
     if (!pets.length && d.petIds.length) {
+      // nothing on this account: fine only when the order's other pets are delivered or wait on a
+      // later account; a pet with no account is never "already delivered"
+      const later = new Set(accounts.slice(d.step + 1));
+      const stray = this.store.get('pets').filter(p => d.petIds.includes(p.id) && !p.delivered && !later.has(p.accountId));
+      if (stray.length) return this.needsYou(d, `${stray.length} pet(s) of this order are not on @${acct.username || '?'} (${stray.map(p => p.name).join(', ')}) — deliver by hand`);
       this.log('info', `Order ${d.orderId}: ${accounts.length > 1 ? 'this account\'s pets were' : 'everything was'} already delivered — skipping`);
       d.step++;
       return this.queueNext(d);
     }
     // Legit = real Roblox without the executor: no delivery script can run in it
-    if (acct.legit) return this.needsYou(d, `@${acct.username} is in Legit mode (real Roblox, no scripts), so it can't trade the buyer — switch it to SCRIPT, or use Security mode`);
+    if (acct.legit) return this.needsYou(d, `@${acct.username} is in Legit mode (real Roblox, no scripts), so it can't trade the buyer`);
     const job = {
       id: rid(6), kind: 'deliver', orderId: d.orderId, accountId, account: acct.username || null,
       buyerUsername: d.username, buyerUserId: d.robloxId, gathered: !!d.mother,
-      pets: pets.map(p => ({ id: p.id, name: p.name, mutation: p.mutation, gen: p.gen, traits: p.traits || [] })),
+      pets: pets.map(p => ({ id: p.id, uuid: p.uuid || null, name: p.name, mutation: p.mutation, gen: p.gen, traits: p.traits || [] })),
       status: 'pending', createdAt: Date.now(), attempt: d.attempts,
       closeWhenIdle: (this.store.get('settings').launcher || {}).closeAfterDelivery !== false
     };
     this.store.get('jobs').push(job);
     d.jobs.push(job.id);
     this.store.save();
-    if (accounts.length > 1) this.say(d, 'deliveryAccountStep', { step: d.step + 1, account: acct.username || '?' });
     this.emit('job', job);
   }
 
@@ -789,7 +806,7 @@ class Delivery extends EventEmitter {
     const job = {
       id: rid(6), orderId: 'TEST-' + rid(4), test: true, accountId: acct.id, account: acct.username,
       buyerUsername: user.name, buyerUserId: user.id,
-      pets: [{ id: pet.id, name: pet.name, mutation: pet.mutation, gen: pet.gen, traits: pet.traits || [] }],
+      pets: [{ id: pet.id, uuid: pet.uuid || null, name: pet.name, mutation: pet.mutation, gen: pet.gen, traits: pet.traits || [] }],
       status: 'pending', createdAt: Date.now(), attempt: 0
     };
     this.store.get('jobs').push(job);
