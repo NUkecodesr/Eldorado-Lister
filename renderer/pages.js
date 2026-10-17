@@ -45,7 +45,7 @@ function xTile(label, value, cls = '', sub = null, iconEl = null) {
 function xPills(options, value, onchange) {
   return h('div', { class: 'x-pills' }, options.map(o => { const [v, l] = Array.isArray(o) ? o : [o, o]; return h('button', { class: 'x-pill' + (v === value ? ' on' : ''), onclick: () => onchange(v) }, l); }));
 }
-const xMutColor = m => { const k = String(m || 'none').toLowerCase().replace(/\s+/g, '-'); const p = MUTATION_COLORS[k]; return k === 'none' ? null : (k === 'rainbow' ? '#ff6ad5' : p ? p[0] : '#a594ff'); };
+const xMutColor = m => { const k = mutKey(m); const p = MUTATION_COLORS[k]; return k === 'none' ? null : (k === 'rainbow' ? '#ff6ad5' : p ? p[0] : '#a594ff'); };
 const xRarity = name => { const i = (S.items || []).find(x => x.name && String(x.name).toLowerCase() === String(name || '').toLowerCase()); return i && i.rarity || ''; };
 const xInitials = n => String(n || '?').split(/\s+/).filter(Boolean).map(w => w[0]).join('').slice(0, 3).toUpperCase();
 function xAvatar(pet, size = 34) {
@@ -193,7 +193,7 @@ const xDeliverable = p => { const a = S.accounts.find(x => x.id === p.accountId)
 const xSpecial = () => new Set(((S.settings.autolist || {}).specialTraits || []).map(x => String(x).toLowerCase()));
 const xIsReview = (p, set) => (p.traits || []).some(t => set.has(String(t).toLowerCase()));
 function xMutBlock(m) {
-  const k = String(m || 'none').toLowerCase().replace(/\s+/g, '-');
+  const k = mutKey(m);
   const none = k === 'none' || k === 'normal';
   const pic = !none && ART_THUMBS.mutations[m];
   const pal = MUTATION_COLORS[k];
