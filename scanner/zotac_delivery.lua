@@ -15,7 +15,7 @@ local PG = LP:WaitForChild("PlayerGui")
 
 if _G.ZotacDeliveryStop then pcall(_G.ZotacDeliveryStop) end
 local running = true
-_G.ZotacDeliveryStop = function() running = false end
+_G.ZotacDeliveryStop = function() running = false; pcall(function() game:GetService("RunService"):UnbindFromRenderStep("ZotacClimbPush") end) end
 
 local INVITE_TIMEOUT = 150
 local RESEND_EVERY   = 25
@@ -560,21 +560,22 @@ local function genNear(model)
         local nm = gui and gui:FindFirstChild("DisplayName")
         if nm and stripTags(nm.Text) == model.Name then
             local p = part.Position
-            local d = Vector2.new(p.X - pos.X, p.Z - pos.Z).Magnitude
+            local d = (p - pos).Magnitude
             if d < bestD then best, bestD = gui, d end
         end
     end
     local g = best and best:FindFirstChild("Generation")
     return g and parseMoney(g.Text) or nil
 end
--- the steal prompt of the podium a pet stands on
+-- the steal prompt of the podium a pet stands on (3D: the floors are stacked, so podium 2, 12
+-- and 20 have the same X/Z)
 local function stealPromptFor(plot, model)
     local podiums = plot:FindFirstChild("AnimalPodiums")
     local pos, best, bestD = model:GetPivot().Position, nil, 20
     for _, pod in ipairs(podiums and podiums:GetChildren() or {}) do
         local ok, cf = pcall(function() return pod:GetPivot() end)
         if ok then
-            local d = Vector2.new(cf.Position.X - pos.X, cf.Position.Z - pos.Z).Magnitude
+            local d = (cf.Position - pos).Magnitude
             if d < bestD then best, bestD = pod, d end
         end
     end
@@ -622,9 +623,11 @@ end
 -- ---------- recorded base routes ----------
 -- job.route = the way into a base the user walked by hand (scanner/zotac_path_recorder.lua), relative
 -- to the base's pivot (every base is the same model): nodes {x, y, z, kind} (0 walk, 1 ladder,
--- 2 in the air), one-way edges (0-based), slots[podium] = where to stand to steal, exits = ground
--- spots at the front / outside where the walk home starts. Walked with MoveTo like a player; a
--- ladder is climbed by walking into it (Humanoid:Move), like holding W.
+-- 2 in the air), one-way edges (0-based) only along lines the user walked, slots[podium] = where
+-- to stand to steal, entry = where the walk into the base starts, exits = ground spots at the front
+-- / outside where the walk home starts. Walked like a player: MoveTo per spot, a ladder by pushing
+-- into it like holding W. (Tested live 2026-10-17 with the steal tester: floor 3, ladder.)
+local function flatDist(a, b) return ((a - b) * Vector3.new(1, 0, 1)).Magnitude end
 local function nodeWorld(route, pivot, i)
     local n = route.nodes[i]
     return pivot:PointToWorldSpace(Vector3.new(n[1], n[2], n[3]))
@@ -656,79 +659,135 @@ local function routePath(route, from, goals)
         end
     end
 end
--- the walk node nearest to pos (only nodes in "only" when given)
-local function nearestNode(route, pivot, pos, only)
-    local best, bestD = nil, math.huge
-    local list = only or {}
-    if not only then for i = 1, #route.nodes do list[i] = i - 1 end end
-    for _, i0 in ipairs(list) do
-        local i = i0 + 1
-        local n = route.nodes[i]
-        if n and n[4] == 0 then
+-- the walk spot nearest to pos, within maxD
+local function nearestNode(route, pivot, pos, maxD)
+    local best, bestD = nil, maxD or math.huge
+    for i, n in ipairs(route.nodes) do
+        if n[4] == 0 then
             local d = (nodeWorld(route, pivot, i) - pos).Magnitude
             if d < bestD then best, bestD = i, d end
         end
     end
     return best, bestD
 end
+-- straight walk on open ground, MoveTo re-issued (it gives up after 8 s), hop when caught on a step
+local function walkStraight(pos, within, timeout)
+    local char = LP.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not (hum and root and pos) then return false end
+    local t0, lastPos, still = os.clock(), root.Position, os.clock()
+    while flatDist(root.Position, pos) > within and os.clock() - t0 < timeout and running do
+        hum:MoveTo(pos)
+        local w0 = os.clock()
+        repeat
+            RunService.Heartbeat:Wait()
+            if (root.Position - lastPos).Magnitude > 0.5 then lastPos, still = root.Position, os.clock()
+            elseif os.clock() - still > 1 then hum.Jump = true; still = os.clock() end
+        until flatDist(root.Position, pos) <= within or os.clock() - w0 > 2 or not running
+    end
+    return flatDist(root.Position, pos) <= within
+end
+-- a ladder: the way into it comes from the route (walk spot before it -> the ladder), never from
+-- where the character stands. Line up at its foot, then push into it until the top of the climb.
+-- Roblox's control script sets the move direction to the keys every frame (zero when no key is
+-- held) at RenderPriority.Input, so the push is set right after it, like holding W.
+local function climbLadder(route, pivot, path, k, hum, root)
+    local last = k
+    while path[last + 1] and route.nodes[path[last + 1]][4] == 1 do last += 1 end
+    local topY = -math.huge
+    for j = k, last do topY = math.max(topY, nodeWorld(route, pivot, path[j]).Y) end
+    local first = route.nodes[path[k]]
+    local dirRel
+    for j = k - 1, 1, -1 do
+        local p = route.nodes[path[j]]
+        local v = Vector3.new(first[1] - p[1], 0, first[3] - p[3])
+        if v.Magnitude > 0.4 then dirRel = v.Unit break end
+    end
+    if not dirRel and path[last + 1] then
+        local p = route.nodes[path[last + 1]]
+        local v = Vector3.new(p[1] - first[1], 0, p[3] - first[3])
+        if v.Magnitude > 0.4 then dirRel = v.Unit end
+    end
+    if not dirRel then return last, false end
+    local dir = pivot:VectorToWorldSpace(dirRel)
+    local foot = nodeWorld(route, pivot, path[k]) - dir * 1.5
+    hum:MoveTo(foot)
+    local tF = os.clock()
+    repeat RunService.Heartbeat:Wait() until flatDist(root.Position, foot) < 1 or os.clock() - tF > 2 or not running
+    hum:MoveTo(root.Position)   -- an active MoveTo would win over the push
+    local pushing = true
+    pcall(function() RunService:UnbindFromRenderStep("ZotacClimbPush") end)
+    RunService:BindToRenderStep("ZotacClimbPush", Enum.RenderPriority.Input.Value + 1, function() if pushing then hum:Move(dir, false) end end)
+    local t0, bestY, gainAt = os.clock(), root.Position.Y, os.clock()
+    while root.Position.Y < topY - 0.5 and os.clock() - t0 < 15 and running do
+        RunService.Heartbeat:Wait()
+        if root.Position.Y > bestY + 0.3 then bestY, gainAt = root.Position.Y, os.clock() end
+        if os.clock() - gainAt > 1.5 then hum.Jump = true; gainAt = os.clock() end   -- not grabbing: hop onto it
+    end
+    local tT = os.clock()
+    while os.clock() - tT < 0.5 and running do RunService.Heartbeat:Wait() end   -- step onto the floor
+    pushing = false
+    pcall(function() RunService:UnbindFromRenderStep("ZotacClimbPush") end)
+    hum:Move(Vector3.zero)
+    return last, root.Position.Y >= topY - 0.5
+end
 local function followRoute(route, pivot, path, timeout)
     local char = LP.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     local root = char and char:FindFirstChild("HumanoidRootPart")
     if not (hum and root) then return false end
-    local t0, lastDir = os.clock(), nil
-    for _, i in ipairs(path) do
+    local t0, k = os.clock(), 1
+    while k <= #path do
         if not running or os.clock() - t0 > timeout then hum:Move(Vector3.zero); return false end
-        local n = route.nodes[i]
-        local wp = nodeWorld(route, pivot, i)
-        local flatV = (wp - root.Position) * Vector3.new(1, 0, 1)
-        if n[4] == 1 then
-            local dir = flatV.Magnitude > 0.3 and flatV.Unit or lastDir
-            local tC = os.clock()
-            while dir and root.Position.Y < wp.Y - 0.7 and os.clock() - tC < 4 and running do
-                hum:Move(dir, false)
-                RunService.Heartbeat:Wait()
-            end
-            if dir then lastDir = dir end
+        local i = path[k]
+        if route.nodes[i][4] == 1 then
+            local last, ok = climbLadder(route, pivot, path, k, hum, root)
+            if not ok then log("warn", ("route: ladder climb failed at spot %d/%d"):format(k, #path)); return false end
+            k = last + 1
         else
-            if flatV.Magnitude > 0.3 then lastDir = flatV.Unit end
+            local wp = nodeWorld(route, pivot, i)
             hum:MoveTo(wp)
             local tW, lastPos, still = os.clock(), root.Position, os.clock()
             repeat
                 RunService.Heartbeat:Wait()
                 if (root.Position - lastPos).Magnitude > 0.5 then lastPos, still = root.Position, os.clock()
                 elseif os.clock() - still > 1 then hum.Jump = true; still = os.clock() end   -- caught on a step
-            until ((wp - root.Position) * Vector3.new(1, 0, 1)).Magnitude < 1.8 or os.clock() - tW > 4 or not running
+            until flatDist(root.Position, wp) < 1.8 or os.clock() - tW > 4 or not running
+            k += 1
         end
     end
     hum:Move(Vector3.zero)
     return true
 end
--- into a base along the recorded way: to its front on open ground, then the route to that podium
+-- into a base along the recorded way: from the nearest spot when already on the route, else from
+-- its entry (reached on open ground), then the recorded lines to that podium
 local function routeTo(route, plot, slot)
     local goal = route.slots and route.slots[tostring(slot)]
     local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
     if goal == nil or not root then return false end
     local pivot = plot:GetPivot()
-    local start, d = nearestNode(route, pivot, root.Position)
-    if not start or d > 6 then
-        start = nearestNode(route, pivot, root.Position, route.exits)
-        if not start or not walkTo(nodeWorld(route, pivot, start), 3, 60) then return false end
+    local start = nearestNode(route, pivot, root.Position, 6)
+    if not start then
+        start = (tonumber(route.entry) or 0) + 1
+        if not route.nodes[start] then return false end
+        local entryPos = nodeWorld(route, pivot, start)
+        if not walkStraight(entryPos, 3, 45) and not walkTo(entryPos, 3, 45) then return false end
     end
     local path = routePath(route, start, {[goal + 1] = true})
-    return path ~= nil and followRoute(route, pivot, path, 120)
+    return path ~= nil and followRoute(route, pivot, path, 150)
 end
 -- out of a base along the recorded way, down to the ground at its front / outside
 local function routeOut(route, plot)
     local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
     if not root or type(route.exits) ~= "table" then return false end
     local pivot = plot:GetPivot()
-    local start, d = nearestNode(route, pivot, root.Position)
-    if not start or d > 8 then return false end
+    local start = nearestNode(route, pivot, root.Position, 8)
+    if not start then return false end
     local goals = {}
     for _, e in ipairs(route.exits) do goals[e + 1] = true end
     local path = routePath(route, start, goals)
-    return path ~= nil and followRoute(route, pivot, path, 120)
+    return path ~= nil and followRoute(route, pivot, path, 150)
 end
 local function inRange(p)
     local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
@@ -816,7 +875,7 @@ local function stealPets(job, took)
         notify(("Took %s (%d/%d) - walking home"):format(pet.name, i, #job.pets))
         -- 4. home: out of their base the recorded way, then into your own base's delivery spot
         if route and not routeOut(route, plot) then log("warn", "recorded way out did not work - walking home directly") end
-        walkTo(homePos, 4, 90)
+        if not (route and walkStraight(homePos, 3, 90)) then walkTo(homePos, 4, 90) end
         local tH = os.clock()
         repeat task.wait(0.5) until LP:GetAttribute("Stealing") ~= true or os.clock() - tH > 20
         if LP:GetAttribute("Stealing") == true then return false, "could not bring " .. pet.name .. " home" end

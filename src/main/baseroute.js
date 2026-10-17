@@ -5,7 +5,7 @@
 //
 // Graph: nodes [x, y, z, kind] (kind 0 walk, 1 climb, 2 in the air), edges [from, to] one way.
 // Recorded order = one-way edges (climbs, drops); walking edges on a floor or the stairs also go
-// back; nearby walk nodes on the same level are joined. `slots` = where the user stood to steal
+// back; the walk is only joined to itself where it crossed its own line. `slots` = where the user stood to steal
 // at each podium; `exits` = ground nodes at the front / outside, where the walk home starts.
 const fs = require('fs');
 const path = require('path');
@@ -51,9 +51,11 @@ function build(rec) {
     // walking (floor or stairs) also works backwards; climbs and drops only as recorded
     if (A[3] === 0 && B[3] === 0 && Math.abs(A[1] - B[1]) <= 2.5) add(b, a);
   }
-  for (let a = 0; a < nodes.length; a++) for (let b = a + 1; b < nodes.length; b++) {
+  // junctions: only where the walk crossed itself (two walk nodes on the same spot), so a route only
+  // ever goes along lines the user really walked (user: it has to follow the path I put)
+  for (let a = 0; a < nodes.length; a++) for (let b = a + 2; b < nodes.length; b++) {
     const A = nodes[a], B = nodes[b];
-    if (A[3] || B[3] || A[4] !== B[4] || Math.abs(A[1] - B[1]) > 1.2 || flat(A, B) > 4) continue;
+    if (A[3] || B[3] || Math.abs(A[1] - B[1]) > 1 || flat(A, B) > 2) continue;
     add(a, b); add(b, a);
   }
   // a podium without a mark: the nearest walked spot on its floor (within 8 studs of its prompt)
@@ -69,7 +71,7 @@ function build(rec) {
   const exits = [];
   nodes.forEach((n, i) => { if (n[3] === 0 && n[1] <= floorY + 1.5 && (n[4] === 0 || n[2] < -25)) exits.push(i); });
   return {
-    v: 1, from: { by: rec.by, at: rec.at, plot },
+    v: 2, from: { by: rec.by, at: rec.at, plot }, entry: 0,
     nodes: nodes.map(n => [n[0], n[1], n[2], n[3]]), edges, slots, exits,
     podiums: (rec.plots[plot].podiums || []).map(q => ({ slot: q.slot, prompt: q.prompt || q.rel })),
   };

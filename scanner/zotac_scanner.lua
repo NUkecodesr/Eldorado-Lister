@@ -143,7 +143,7 @@ local function podiumSlot(podiums, pos)
     for _, pod in ipairs(podiums and podiums:GetChildren() or {}) do
         local ok, cf = pcall(function() return pod:GetPivot() end)
         if ok then
-            local d = Vector2.new(cf.Position.X - pos.X, cf.Position.Z - pos.Z).Magnitude
+            local d = (cf.Position - pos).Magnitude   -- 3D: the floors are stacked
             if d < bestD then best, bestD = pod.Name, d end
         end
     end
