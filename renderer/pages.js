@@ -108,6 +108,7 @@ async function openAutoScan() {
     if (document.activeElement && body.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') { clearTimeout(AS.later); AS.later = setTimeout(draw, 600); return; }
     const st = AS.st || {};
     const pct = st.total ? Math.round((st.done + st.failed) / st.total * 100) : 0;
+    const boxes = scrollState(body);
     body.textContent = '';
     body.append(
       h('div', { class: 'as-head' }, h('div', { class: 'as-ico' }, '⌕'), h('div', { class: 'grow' }, h('b', null, 'Auto Scan'), h('small', null, 'Scans every logged-in account in batches and imports automatically')),
@@ -129,8 +130,9 @@ async function openAutoScan() {
       h('div', { class: 'as-card' }, h('div', { class: 'as-sel' }, h('span', null, '‹› EXECUTOR SCRIPT (AUTOEXEC)'), h('div', { class: 'grow' }),
           h('button', { class: 'btn sm', onclick: async () => xCopy(await M.call('scanner:autoexecScript'), 'Scanner script copied') }, '⎘ Copy script')),
         h('small', { class: 'muted' }, 'Zotac puts this scanner (and the delivery script) into your executor\'s autoexec by itself (Synapse Z, AppData executors, and the folders added on Auto Delivery). Each opened account scans its base, Zotac imports it and closes that Roblox.')),
-      h('div', { class: 'as-log' }, (st.log || []).length ? st.log.slice().reverse().map(l => h('div', { class: 'l-' + l.level }, `${new Date(l.t).toLocaleTimeString()}  ${l.msg}`))
+      h('div', { class: 'as-log', 'data-head': true }, (st.log || []).length ? st.log.slice().reverse().map(l => h('div', { class: 'l-' + l.level }, `${new Date(l.t).toLocaleTimeString()}  ${l.msg}`))
         : h('div', { class: 'muted' }, 'No runs yet — set the batch size and press Start.')));
+    restoreScroll(body, boxes);
   };
   AS.draw = draw;
   draw();
@@ -562,8 +564,7 @@ PAGES.autolist = async root => {
           setting('Ignore my own offers', 'Listing Rules: skip my offers when pricing', sw(rules.ignoreOwn, v => saveSettings({ rules: { ignoreOwn: v } }))),
           setting('Pet art folder', al.imageFolder || 'Optional: PNGs named after the brainrot', h('button', { class: 'btn sm', onclick: async () => { const f = await M.call('dialog:folder'); if (f !== null) { await saveSettings({ autolist: { imageFolder: f } }); render(); } } }, 'Choose'))),
         h('div', { class: 'card' }, h('h3', null, 'Activity'),
-          h('div', { class: 'log', id: 'al-log' }, (S.logs || []).filter(l => /\[AutoList\]/.test(l.msg)).slice(-80).map(l => h('div', { class: 'l-' + l.level }, `${new Date(l.t).toLocaleTimeString()}  ${l.msg.replace('[AutoList] ', '')}`)))))));
-  const lg = $('#al-log'); if (lg) lg.scrollTop = lg.scrollHeight;
+          h('div', { class: 'log', id: 'al-log', 'data-tail': true }, (S.logs || []).filter(l => /\[AutoList\]/.test(l.msg)).slice(-80).map(l => h('div', { class: 'l-' + l.level }, `${new Date(l.t).toLocaleTimeString()}  ${l.msg.replace('[AutoList] ', '')}`)))))));
 };
 
 // "Special traits — manual review": grid of every trait (Eldorado list + the ones your pets
@@ -736,7 +737,7 @@ PAGES.listings = async root => {
       h('details', { class: 'x-fold' }, h('summary', null, 'Repricer settings & log'),
         h('div', { class: 'card', style: { marginTop: '10px' } },
           h('div', { class: 'grid g2' }, h('label', { class: 'f' }, 'Floor (% of first price)', num(rp.floorPct, v => saveSettings({ repricer: { floorPct: v } })))),
-          h('div', { class: 'log', style: { marginTop: '10px' } }, (S.logs || []).filter(l => /\[Repricer\]/.test(l.msg)).slice(-40).map(l => h('div', { class: 'l-' + l.level }, `${new Date(l.t).toLocaleTimeString()} ${l.msg.replace('[Repricer] ', '')}`)))))));
+          h('div', { class: 'log', 'data-tail': true, style: { marginTop: '10px' } }, (S.logs || []).filter(l => /\[Repricer\]/.test(l.msg)).slice(-40).map(l => h('div', { class: 'l-' + l.level }, `${new Date(l.t).toLocaleTimeString()} ${l.msg.replace('[Repricer] ', '')}`)))))));
 };
 
 // ============================== TEMPLATES =================================
@@ -1618,7 +1619,7 @@ PAGES.chat = async root => {
       rbxName ? h('button', { class: 'btn sm ghost', onclick: () => xCopy(rbxName, 'Username copied') }, '⎘ Copy') : null,
       h('button', { class: 'btn sm ghost', onclick: () => { CH.live = !CH.live; render(); } }, CH.live ? '← Bubbles' : 'Eldorado view')),
     CH.live ? (() => { const wv = document.createElement('webview'); wv.setAttribute('partition', 'persist:eldorado'); wv.setAttribute('src', url); wv.setAttribute('allowpopups', ''); wv.className = 'x-wv'; return wv; })()
-      : h('div', { class: 'x-msgs', id: 'ch-msgs' },
+      : h('div', { class: 'x-msgs', id: 'ch-msgs-' + CH.orderId, 'data-tail': true },
         hist.err ? h('div', { class: 'x-sys' }, h('div', null, 'Could not load the chat: ' + hist.err), h('button', { class: 'btn sm', style: { marginTop: '6px' }, onclick: () => chLoadHistory(CH.orderId, true) }, 'Try again'), ' ',
           h('button', { class: 'btn sm ghost', style: { marginTop: '6px' }, onclick: () => { CH.live = true; render(); } }, 'Eldorado view')) : null,
         msgs.length ? msgs.map(m => m.err ? h('div', { class: 'x-sys' }, 'Send failed: ' + m.text) : m.sys ? h('div', { class: 'x-sys' }, h('div', null, m.text)) : h('div', { class: 'x-msg ' + (m.mine ? 'mine' : 'theirs') },
@@ -1646,5 +1647,4 @@ PAGES.chat = async root => {
           xOrderAva(o, 34),
           h('div', { class: 'x-cm' }, h('div', { class: 'x-cl1' }, h('b', null, o.buyer || '—'), h('small', { class: 'muted' }, ago(o.date))), h('small', { class: 'muted x-ctt' }, o.title || ''), h('div', { class: 'x-cl3' }, h('b', { class: 'x-cp' }, money(o.price)), xStatePill(o.state))))) : h('div', { class: 'x-empty sm' }, CH.orders && !CH.orders.length ? 'No orders yet.' : 'Nothing matches.'))),
       thread));
-  const ms = $('#ch-msgs'); if (ms) ms.scrollTop = ms.scrollHeight;
 };

@@ -722,7 +722,7 @@ PAGES.delivery = async root => {
         h('span', { class: 'pill ' + (stateCls[d.state] || 'info') }, d.state), rowActions(d))))
         : mxEmpty('clip', 'No deliveries in queue'));
   const logCard = mxCard(mxIco('pulse', 'green'), 'Activity Log', 'Real-time delivery events', h('button', { class: 'btn sm', onclick: () => { DV.clearedAt = Date.now(); render(); } }, 'Clear'),
-      h('div', { class: 'log mx-log' }, logs.length ? logs.map(l => h('div', { class: 'l-' + l.level }, `[${mxTime(l.t)}] ${l.msg.replace(/^\[(Delivery|Proof|Agent)\]\s*/, '')}`)) : h('span', { class: 'muted' }, 'No events yet.')));
+      h('div', { class: 'log mx-log', 'data-tail': true }, logs.length ? logs.map(l => h('div', { class: 'l-' + l.level }, `[${mxTime(l.t)}] ${l.msg.replace(/^\[(Delivery|Proof|Agent)\]\s*/, '')}`)) : h('span', { class: 'muted' }, 'No events yet.')));
   const histCard = mxCard(mxIco('clock', 'purple'), 'Delivery History', 'Completed and failed deliveries',
       h('div', { class: 'mx-pills sm' }, [['all', 'All'], ['ok', '✓'], ['bad', '✗']].map(([k, l]) => h('button', { class: 'mx-pill' + (DV.hist === k ? ' on' : ''), onclick: () => { DV.hist = k; render(); } }, l))),
       hist.length ? h('div', { class: 'mx-dlist scroll' }, hist.map(d => h('div', { class: 'mx-drow', onclick: () => convModal(d) }, thumb(d),
@@ -1051,5 +1051,5 @@ function settingsLogs() {
     h('div', { class: 'row', style: { marginBottom: '8px' } },
       sel([['all', 'All areas'], ...areas.map(a => [a, a])], SL.area, v => { SL.area = v; render(); }),
       sel([['all', 'All levels'], ['info', 'Info'], ['warn', 'Warnings'], ['error', 'Errors']], SL.level, v => { SL.level = v; render(); })),
-    h('div', { class: 'log', style: { maxHeight: '360px' } }, rows.length ? rows.map(l => h('div', { class: 'l-' + l.level }, new Date(l.t).toLocaleString() + '  ' + l.msg)) : h('span', { class: 'muted' }, 'No log lines.')));
+    h('div', { class: 'log', 'data-head': true, style: { maxHeight: '360px' } }, rows.length ? rows.map(l => h('div', { class: 'l-' + l.level }, new Date(l.t).toLocaleString() + '  ' + l.msg)) : h('span', { class: 'muted' }, 'No log lines.')));
 }

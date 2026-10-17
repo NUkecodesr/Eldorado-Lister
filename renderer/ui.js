@@ -21,6 +21,41 @@ function h(tag, attrs, ...kids) {
 }
 
 const $ = (sel, root = document) => root.querySelector(sel);
+
+// Pages are rebuilt on every live refresh, which put every log / list box back at its top. The
+// boxes you scrolled are remembered (by id, else class name + position) and put back after the
+// rebuild. data-tail = log with the newest line at the bottom: opens at the bottom and stays there
+// while you are at the bottom. data-head = newest line on top: the lines you are reading stay put
+// when new ones arrive above them.
+function scrollState(root) {
+  const out = new Map(), n = {};
+  for (const el of root.querySelectorAll('*')) {
+    const key = el.id ? '#' + el.id : el.tagName + '.' + el.className;
+    const k = el.id ? key : key + ':' + (n[key] = (n[key] || 0) + 1);
+    if (!(el.scrollTop > 0 || el.hasAttribute('data-tail'))) continue;
+    const s = { top: el.scrollTop, height: el.scrollHeight, bottom: el.scrollTop + el.clientHeight >= el.scrollHeight - 4 };
+    // newest-first log: remember the first line in view (lines shift when new ones come in on top)
+    if (el.hasAttribute('data-head')) {
+      const c = [...el.children].find(x => relTop(el, x) >= el.scrollTop - 1);
+      if (c) { s.anchor = c.textContent; s.off = relTop(el, c) - el.scrollTop; }
+    }
+    out.set(k, s);
+  }
+  return out;
+}
+const relTop = (box, child) => child.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
+function restoreScroll(root, saved) {
+  const n = {};
+  for (const el of root.querySelectorAll('*')) {
+    const key = el.id ? '#' + el.id : el.tagName + '.' + el.className;
+    const s = saved && saved.get(el.id ? key : key + ':' + (n[key] = (n[key] || 0) + 1));
+    if (!s) { if (el.hasAttribute('data-tail')) el.scrollTop = el.scrollHeight; continue; }
+    if (el.hasAttribute('data-head')) {
+      const c = s.anchor !== undefined && [...el.children].find(x => x.textContent === s.anchor);
+      el.scrollTop = c ? relTop(el, c) - s.off : s.top + Math.max(0, el.scrollHeight - s.height);
+    } else el.scrollTop = s.bottom ? el.scrollHeight : s.top;
+  }
+}
 const money = n => (n === null || n === undefined || isNaN(n) ? '—' : '$' + Number(n).toFixed(2));
 const fmtDate = d => { if (!d) return '—'; const x = new Date(d); return isNaN(x) ? String(d) : x.toLocaleString(); };
 const fmtShort = d => { if (!d) return '—'; const x = new Date(d); return isNaN(x) ? String(d) : x.toLocaleDateString(); };

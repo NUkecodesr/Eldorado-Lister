@@ -105,8 +105,11 @@ async function render() {
     root.append = (...kids) => Element.prototype.append.apply(root, kids.flat(Infinity).filter(k => k !== null && k !== undefined && k !== false));
     const fn = PAGES[S.page] || PAGES.autolist;
     try { await fn(root); } catch (e) { console.error(e); root.append(h('div', { class: 'card empty' }, 'Page error: ' + e.message)); }
-    const old = $('#page'); old ? old.replaceWith(root) : main.appendChild(root);
+    const old = $('#page'); const boxes = old ? scrollState(old) : null;
+    old ? old.replaceWith(root) : main.appendChild(root);
     main.scrollTop = top;
+    restoreScroll(root, old && old.dataset.page === S.page ? boxes : null);
+    root.dataset.page = S.page;
   } finally { rendering = false; if (again) { again = false; render(); } }
 }
 
@@ -196,7 +199,7 @@ function wire() {
   M.on('pets:changed', reload);
   M.on('bridge:state', s => { S.bridge = s; renderFooter(); soft(); });
   M.on('auth:changed', async () => { await refreshMe(); soft(); });
-  M.on('log', e => { S.logs.push(e); if (S.logs.length > 1500) S.logs.shift(); const el = $('#al-log'); if (el && /\[AutoList\]/.test(e.msg)) { el.appendChild(h('div', { class: 'l-' + e.level }, `${new Date(e.t).toLocaleTimeString()}  ${e.msg}`)); el.scrollTop = el.scrollHeight; } });
+  M.on('log', e => { S.logs.push(e); if (S.logs.length > 1500) S.logs.shift(); const el = $('#al-log'); if (el && /\[AutoList\]/.test(e.msg)) { const end = el.scrollTop + el.clientHeight >= el.scrollHeight - 4; el.appendChild(h('div', { class: 'l-' + e.level }, `${new Date(e.t).toLocaleTimeString()}  ${e.msg}`)); if (end) el.scrollTop = el.scrollHeight; } });
   M.on('autolist:progress', p => { S.listerProgress = p; S.listerRunning = !!p && p.done < p.total; if (!S.listerRunning) refreshData().then(soft); else if (S.page === 'autolist') soft(); });
   M.on('repricer:done', () => { if (S.page === 'listings') soft(); });
   M.on('server:scan', () => { if (S.page === 'server') liveTick('local', true); });
