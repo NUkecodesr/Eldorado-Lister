@@ -267,11 +267,14 @@ local function readyAndAccept(root, who, reReady)
         return nil
     end
     local readyAt, snapped = os.clock(), false
-    while os.clock() - readyAt < 15 and tradeRoot() do
+    while os.clock() - readyAt < 22 and tradeRoot() do
         why = isReady()
         if why then readied = true break end
         local b = buttonWithText(root, "READY")
-        if b and presses < 2 and os.clock() - lastPress > 6 then
+        -- right after the offer changes the game shows a short "⏰4.5s Left" cooldown and ignores
+        -- READY until it ends (live log 2026-10-17): wait it out, then press once
+        local cooling = presses == 0 and textShown(root, "%d+%s*s%s+Left") and os.clock() - readyAt < 10
+        if b and not cooling and presses < 2 and os.clock() - lastPress > 6 then
             presses += 1; lastPress = os.clock()
             fire(b.Activated, nil, 1)
         elseif not b and presses > 0 then
