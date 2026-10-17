@@ -518,6 +518,16 @@ class Delivery extends EventEmitter {
   async jobEvent(id, body = {}) {
     const j = this.store.get('jobs').find(x => x.id === id);
     if (!j || j.status !== 'running') return false;
+    if (body.event === 'buyer_offline') {
+      // waiting for the buyer to come online: not a failure, the run timer restarts, told once
+      j.startedAt = Date.now();
+      const first = !j.toldOffline; j.toldOffline = true;
+      this.store.save(); this.emit('job', j);
+      const d = this.map[j.orderId];
+      this.log('info', `Job ${id}: buyer @${j.buyerUsername} is offline in Steal a Brainrot - waiting for them`);
+      if (d && first) await this.say(d, 'buyerOffline', { username: j.buyerUsername || d.username || '' });
+      return true;
+    }
     if (body.event === 'buyer_cancelled') {
       j.startedAt = Date.now(); j.reoffers = (j.reoffers || 0) + 1;
       this.store.save(); this.emit('job', j);

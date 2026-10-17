@@ -389,6 +389,7 @@ const STEP_META = [
     ['deliveryStarting', 'Delivery starting', 'username confirmed, launching delivery', '{username}'],
     ['gathering', 'Gathering onto one account', 'pets on several accounts: the mother takes them first (Security)', '{quantity} {accounts} {mother}'],
     ['buyerCancelled', 'Buyer cancelled the trade', 'the trade is sent again at once (up to 2 more times)', '{round}'],
+    ['buyerOffline', 'Buyer offline', 'the trade is ready but the buyer is not online in the game (waits 3 min)', '{username}'],
     ['deliveryFailed', 'Delivery failed (retrying)', 'agent reported a failed trade', '{reason}'],
     ['deliverySuccess', 'Delivery success', 'all trades done', '{username}'],
     ['manualFallback', 'Manual fallback', 'when Zotac needs you: 3 failures with cancelling off, or pets it can not match', ''],

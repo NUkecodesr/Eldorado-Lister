@@ -461,6 +461,10 @@ end
 -- the trade is sent again and the pets re-added, up to 3 rounds per job. Zotac is told each time
 -- (it messages the buyer and restarts the job's timer). Never re-sent when the pets already left.
 local REOFFERS = 3
+-- the buyer is not online in Steal a Brainrot (their trade row says Offline): the trade stays ready,
+-- Zotac tells the buyer once, and the agent looks again every 10 s for 3 minutes
+local OFFLINE_WAIT = 180
+local function isOffline(w) return type(w) == "string" and string.find(w, "is offline", 1, true) ~= nil end
 local function deliver(job)
     local rounds = tonumber(job.maxRounds) or REOFFERS
     local why
@@ -468,6 +472,20 @@ local function deliver(job)
         local ok, w, cancelled = deliverOnce(job)
         if ok then return true end
         why = w
+        if isOffline(w) then
+            api("POST", "/jobs/" .. job.id .. "/event", {event = "buyer_offline"})
+            notify("Buyer is offline - waiting for them to come online")
+            log("info", ("buyer @%s is offline - waiting up to %ds"):format(tostring(job.buyerUsername), OFFLINE_WAIT))
+            local t0 = os.clock()
+            while running and isOffline(why) and os.clock() - t0 < OFFLINE_WAIT do
+                task.wait(10)
+                if not wanted(job) then return false, "cancelled by Zotac" end
+                ok, w, cancelled = deliverOnce(job)
+                if ok then return true end
+                why = w
+            end
+            if isOffline(why) then return false, why .. " (waited " .. OFFLINE_WAIT .. " s)" end
+        end
         if not cancelled or round == rounds or not running or not wanted(job) then break end
         log("warn", ("%s cancelled the trade (%s) - sending it again (%d/%d)"):format("buyer", tostring(w), round, rounds - 1))
         api("POST", "/jobs/" .. job.id .. "/event", {event = "buyer_cancelled", round = round, reason = w})
@@ -1017,7 +1035,8 @@ while running do
         api("POST", "/jobs/" .. job.id, {status = okDone and "done" or "failed", reason = why, moved = moved})
         notify(okDone and (job.kind == "steal" and ("Took the pets from @" .. tostring(job.fromUsername)) or ("Delivered to @" .. tostring(job.buyerUsername))) or ("Delivery failed: " .. tostring(why)))
         log(okDone and "info" or "warn", ("job %s %s%s"):format(job.id, okDone and "done" or "failed", why and (" - " .. why) or ""))
-        if job.closeWhenIdle then closeAt = os.clock() + 15 end
+        -- close only after it worked: a failed job is tried again in a moment, in this same game
+        if job.closeWhenIdle then closeAt = os.clock() + (okDone and 15 or 90) end
     else
         task.wait(1)
     end

@@ -19,6 +19,7 @@ const DEFAULT_DELIVERY_STEPS = {
   deliverySuccess: 'Delivered! Please check your inventory and mark the order as received. Thanks for buying!',
   deliveryFailed: "The trade didn't go through ({reason}). We'll retry shortly — please stay online.",
   buyerCancelled: 'It looks like the trade was cancelled. Sending it again now, please accept it in Steal a Brainrot.',
+  buyerOffline: 'Your trade is ready, but @{username} is offline in Steal a Brainrot. Please join the game now: we send the trade as soon as you are online.',
   manualFallback: 'Automatic delivery is unavailable right now. A seller will contact you shortly to deliver manually.',
   orderCancelled: 'Your order has been cancelled after {attempts} delivery attempts were unsuccessful ({reason}). Eldorado will refund you. Please contact support if you believe this is a mistake.'
 };
