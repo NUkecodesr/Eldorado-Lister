@@ -364,6 +364,12 @@ function wire() {
   { const used = new Set(store.get('pets').map(p => p.accountId)); const before = store.get('accounts').length;
     store.set('accounts', store.get('accounts').filter(a => !(a.session && !used.has(a.id) && !a.cookieEnc && !a.note)));
     if (store.get('accounts').length !== before) store.save(); }
+  // 1.23.9: the auto-repricer is switched on with the seller's chosen settings, once per data file
+  // (repricer.preset marks it done, so changes made after that are kept). Not in the store
+  // defaults on purpose: a default preset would hide this from data files saved before it existed.
+  if (!(store.data.settings.repricer || {}).preset) {
+    store.patchSettings({ repricer: { enabled: true, intervalMin: 20, undercut: 0.01, floorPct: 70, maxDropPct: 15, onlyIfBeaten: false, scope: 'all', preset: 1 }, rules: { lowballPct: 40 } });
+  }
   // backfill new step templates for older data files
   store.data.settings.delivery.steps = { ...DEFAULT_DELIVERY_STEPS, ...store.data.settings.delivery.steps };
   art = new Art({
