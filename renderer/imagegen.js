@@ -238,9 +238,16 @@ async function renderCardCanvas({ pet, rarity, art, traitArt = [], mutationArt =
         const w = petImg.width * r, hh = petImg.height * r;
         const fx = recolor && mutated ? MUTATION_FX[mkey] : null;
         const pic = recolor && mutated && known ? tintPicture(petImg, w * S, hh * S, pal, mkey, mutIcon, S) : petImg;
+        if (fx && fx.rainbow && pic !== petImg) {   // Rainbow: a soft halo in the pet's own rainbow colours behind it
+          const pad = 8;
+          g.save(); g.filter = `blur(${Math.round(18 * S)}px) saturate(1.6) brightness(1.3)`; g.globalAlpha = 0.9;
+          g.drawImage(pic, petX - w / 2 - pad, top + (bh - hh) / 2 - pad, w + pad * 2, hh + pad * 2);
+          g.restore();
+        }
         g.save();
         // glowing mutations get a coloured halo instead of the plain drop shadow
         if (fx && fx.glow) { g.shadowColor = fx.glow; g.shadowBlur = 38; g.shadowOffsetY = 0; }
+        else if (fx && fx.rainbow) { g.shadowColor = 'rgba(0,0,0,.35)'; g.shadowBlur = 18; g.shadowOffsetY = 8; }   // lighter, so the halo shows
         else { g.shadowColor = 'rgba(0,0,0,.65)'; g.shadowBlur = 28; g.shadowOffsetY = 14; }
         if (fx && fx.alpha) g.globalAlpha = fx.alpha;
         g.drawImage(pic, petX - w / 2, top + (bh - hh) / 2, w, hh);
