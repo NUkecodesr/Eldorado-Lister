@@ -771,18 +771,25 @@ PAGES.listings = async root => {
   const maxDrop = rp.maxDropPct == null || rp.maxDropPct === '' ? 15 : Number(rp.maxDropPct) || 0;
   const unit = (value, u, fn, attrs = {}) => h('label', { class: 'x-unit' }, num(value, fn, { style: {}, min: '0', ...attrs }), h('span', null, u));
   const rpFld = (label, ctl, tip) => h('div', { class: 'x-fld', title: tip || '' }, h('span', { class: 'x-lbl' }, label), ctl);
-  const rpCard = h('section', { class: 'x-panel x-rp' + (rp.enabled ? ' on' : '') },
-    h('div', { class: 'x-rp-h' },
-      h('span', { class: 'x-glyph' }, '%'), h('b', null, 'AUTO-REPRICER'), sw(rp.enabled, v => saveSettings({ repricer: { enabled: v } }).then(render)),
+  // folds like the Auto List cards: the header (switch, status, Reprice now) always shows, the arrow
+  // opens the settings and the log (open state remembered)
+  const rpOpen = xLs.get('zotac.rpOpen', false);
+  const stop = e => e.stopPropagation();
+  const rpCard = h('section', { class: 'x-panel x-rp' + (rp.enabled ? ' on' : '') + (rpOpen ? '' : ' shut') },
+    h('div', { class: 'x-rp-h', title: rpOpen ? 'Hide the repricer settings' : 'Show the repricer settings', onclick: () => { xLs.set('zotac.rpOpen', !rpOpen); render(); } },
+      h('span', { class: 'x-glyph' }, '%'), h('b', null, 'AUTO-REPRICER'),
+      (() => { const el = sw(rp.enabled, v => saveSettings({ repricer: { enabled: v } }).then(render)); el.addEventListener('click', stop); return el; })(),
       h('span', { class: 'x-rp-st' }, (rp.enabled ? `On · every ${rp.intervalMin} min` : 'Off') + ' · last run ' + ago(S.info && S.info.repricerLast)),
       h('div', { class: 'grow' }),
-      h('button', { class: 'btn sm', onclick: manageTraits }, `Blocked traits (${blocked.length})`),
-      h('button', { class: 'btn sm primary', onclick: async () => {
+      h('button', { class: 'btn sm', onclick: e => { stop(e); manageTraits(); } }, `Blocked traits (${blocked.length})`),
+      h('button', { class: 'btn sm primary', onclick: async e => {
+        stop(e);
         const ids = D.Active.filter(o => !hasBlocked(o)).map(o => o.id);
         toast(`Repricing ${ids.length} offers…`);
         const r = await run(() => M.call('repricer:run', ids)); if (r) toast(`Checked ${r.checked}, changed ${r.changed}`, 'good'); load();
-      } }, 'Reprice now')),
-    h('div', { class: 'x-rp-grid' },
+      } }, 'Reprice now'),
+      h('span', { class: 'x-caret x-rp-caret' }, rpOpen ? '⌄' : '›')),
+    !rpOpen ? null : h('div', { class: 'x-rp-grid' },
       rpFld('REPRICE', sel([['all', 'All listings'], ['chosen', `Only chosen (${(rp.offerIds || []).length})`]], rp.scope || 'all', v => saveSettings({ repricer: { scope: v } }).then(render))),
       rpFld('EVERY', unit(rp.intervalMin, 'min', v => saveSettings({ repricer: { intervalMin: Math.max(5, Number(v) || 20) } }).then(render), { min: '5' })),
       rpFld('BEAT CHEAPEST BY', unit(rp.undercut, '$', v => saveSettings({ repricer: { undercut: Math.max(0, Number(v) || 0) } }).then(render), { step: '0.01' })),
@@ -790,17 +797,19 @@ PAGES.listings = async root => {
       rpFld('IGNORE LOWBALLERS', unit(lowPct, '% under market', v => saveSettings({ rules: { lowballPct: Math.min(90, Math.max(0, Number(v) || 0)) } }).then(render)), 'A similar offer this far under the others (or, with only 1-2 others, under your first price) is a dump or bait: it is not followed. 0 = off. Also used by Auto Price on Auto List.'),
       rpFld('MAX DROP PER RUN', unit(maxDrop, '%', v => saveSettings({ repricer: { maxDropPct: Math.min(90, Math.max(0, Number(v) || 0)) } }).then(render)), 'A price never falls more than this in one run, so a sudden dump only moves you a little at a time. 0 = no cap'),
       rpFld('RAISE WHEN CHEAPEST', h('div', { class: 'x-rp-sw' }, sw(!rp.onlyIfBeaten, v => saveSettings({ repricer: { onlyIfBeaten: !v } }).then(render)), h('small', { class: 'muted' }, !rp.onlyIfBeaten ? 'moves up to just under the next offer' : 'only lowers')))),
-    h('p', { class: 'x-rp-sum' }, `Beats the cheapest similar offer by $${Number(rp.undercut || 0).toFixed(2)}`
+    !rpOpen ? null : h('p', { class: 'x-rp-sum' }, `Beats the cheapest similar offer by $${Number(rp.undercut || 0).toFixed(2)}`
       + (lowPct ? ` · ignores offers more than ${lowPct}% under the market` : ' · lowball guard off')
       + ` · never under ${rp.floorPct || 0}% of an offer's first price (offers under it are not followed)`
       + (maxDrop ? ` · at most −${maxDrop}% per run` : '')
-      + (blocked.length ? ` · skips ${blocked.length} blocked trait${blocked.length === 1 ? '' : 's'}` : '')));
+      + (blocked.length ? ` · skips ${blocked.length} blocked trait${blocked.length === 1 ? '' : 's'}` : '')),
+    !rpOpen ? null : h('details', { class: 'x-fold x-rp-log' }, h('summary', null, 'Repricer log'),
+      h('div', { class: 'log', 'data-tail': true }, (S.logs || []).filter(l => /\[Repricer\]/.test(l.msg)).slice(-40).map(l => h('div', { class: 'l-' + l.level }, `${new Date(l.t).toLocaleTimeString()} ${l.msg.replace('[Repricer] ', '')}`)))));
 
   root.append(
     xHead('L', 'My Listings', 'Manage your active listings', stTabs,
       h('button', { class: 'btn sm', onclick: load }, LS.loading ? 'Loading…' : '⟳ ' + t('refresh'))),
     !S.me ? h('div', { class: 'card empty' }, 'Log in on the Account page to see your listings.') : h('div', null,
-      bulkBar,
+      bulkBar, rpCard,
       h('div', { class: 'x-tiles x-t6' },
         xTile('ACTIVE', String(D.Active.length), 'x-green'), xTile('PAUSED', String(D.Paused.length), 'x-yellow'),
         xTile('CLOSED', String(D.Closed.length), 'x-red'), xTile('OFFLINE', String(offline), 'x-grey'),
@@ -809,12 +818,7 @@ PAGES.listings = async root => {
         h('button', { class: 'btn sm', onclick: load }, 'Try again')) : null,
       h('input', { class: 'x-search', type: 'search', placeholder: 'Search…', value: LS.q, oninput: e => { LS.q = e.target.value; clearTimeout(LS.qt); LS.qt = setTimeout(render, 250); } }),
       rows.length ? h('div', { class: 'x-lgrid' }, rows.map(card)) : h('div', { class: 'x-empty' }, LS.loading || !LS.data ? 'Loading…' : 'No offers in this state.'),
-      LS.at ? h('small', { class: 'muted' }, 'Updated ' + ago(LS.at)) : null,
-      // the auto-repricer under the listings, its log folded under it
-      rpCard,
-      h('details', { class: 'x-fold' }, h('summary', null, 'Repricer log'),
-        h('div', { class: 'card', style: { marginTop: '10px' } },
-          h('div', { class: 'log', 'data-tail': true }, (S.logs || []).filter(l => /\[Repricer\]/.test(l.msg)).slice(-40).map(l => h('div', { class: 'l-' + l.level }, `${new Date(l.t).toLocaleTimeString()} ${l.msg.replace('[Repricer] ', '')}`)))))));
+      LS.at ? h('small', { class: 'muted' }, 'Updated ' + ago(LS.at)) : null));
 };
 
 // ============================== TEMPLATES =================================

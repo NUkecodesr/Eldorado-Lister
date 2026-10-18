@@ -559,4 +559,8 @@ input.x-alpin { width: 62px; flex: 0 0 62px; padding: 3px 5px; font-size: 12px; 
 .x-rp-grid .x-unit input { flex: 1; width: auto; min-width: 0; }
 .x-rp-grid select, .x-rp-grid .x-unit input { height: 34px; }
 .x-rulescard .x-unit input { width: 56px; height: 34px; }
-.x-rp { margin-top: 14px; }
+.x-rp-h { cursor: pointer; user-select: none; }
+.x-rp.shut .x-rp-h { margin-bottom: 0; }
+.x-rp-caret { font-size: 15px; width: 14px; text-align: center; }
+.x-rp-log { margin-top: 12px; }
+.x-rp-log .log { margin-top: 8px; }
