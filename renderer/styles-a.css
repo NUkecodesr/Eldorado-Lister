@@ -564,3 +564,5 @@ input.x-alpin { width: 62px; flex: 0 0 62px; padding: 3px 5px; font-size: 12px; 
 .x-rp-caret { font-size: 15px; width: 14px; text-align: center; }
 .x-rp-log { margin-top: 12px; }
 .x-rp-log .log { margin-top: 8px; }
+.x-oacct { margin-left: auto; flex: 0 0 auto; border: 1px solid var(--line2); background: var(--bg2); border-radius: 8px; padding: 4px 10px; font-size: 12px; font-weight: 600; color: var(--ink); white-space: nowrap; }
+.x-oacct + .x-oacct { margin-left: 0; }

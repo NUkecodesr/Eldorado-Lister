@@ -10,7 +10,6 @@ local SYNC = false   -- true only in the autoexec copy Zotac installs: sends the
 
 local Players     = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
-local StarterGui  = game:GetService("StarterGui")
 while not Players.LocalPlayer do task.wait(0.1) end
 local LP = Players.LocalPlayer
 local PG = LP:WaitForChild("PlayerGui")
@@ -21,8 +20,7 @@ local guiRoot = nil
 _G.ZotacScannerStop = function() running = false; if guiRoot then pcall(function() guiRoot:Destroy() end) end end
 
 local function notify(text)
-    pcall(StarterGui.SetCore, StarterGui, "SendNotification", {Title = "Zotac Scanner", Text = text, Duration = 5})
-    print("[Zotac] " .. text)
+    print("[ZotacScanner] " .. text)
 end
 
 local SUFFIX = {K = 1e3, M = 1e6, B = 1e9, T = 1e12, Qa = 1e15, Qi = 1e18}

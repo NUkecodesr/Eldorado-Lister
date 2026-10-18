@@ -399,8 +399,12 @@ class Delivery extends EventEmitter {
     const jobs = this.store.get('jobs');
     const since = Date.now() - 2 * 3600e3;
     const lastMother = id => Math.max(0, ...Object.values(this.map).filter(x => x && x !== d && x.mother === id).map(x => x.createdAt || 0));
-    const score = a => [pets.filter(p => p.accountId === a.id).length, this.accountOnline(a.id),
-      -jobs.filter(j => j.accountId === a.id && j.status === 'failed' && (j.finishedAt || 0) > since).length, -lastMother(a.id)];
+    // Security mode chosen by the seller always steals (even 1 pet): the mother is an account that
+    // holds none of the order's pets when there is one. Security as Single mode's fallback keeps
+    // the fewest steals (the account with most of the pets).
+    const alwaysSteal = d.mode === 'security' && !d.securityFallback;
+    const score = a => { const n = pets.filter(p => p.accountId === a.id).length; return [alwaysSteal ? -n : n, this.accountOnline(a.id),
+      -jobs.filter(j => j.accountId === a.id && j.status === 'failed' && (j.finishedAt || 0) > since).length, -lastMother(a.id)]; };
     const cands = this.store.get('accounts').filter(a => !a.legit && a.username && (a.cookieEnc || this.accountOnline(a.id)));
     cands.sort((x, y) => { const p = score(x), q = score(y); for (let i = 0; i < p.length; i++) if (p[i] !== q[i]) return q[i] - p[i]; return 0; });
     return cands.length ? cands[0].id : null;
@@ -419,6 +423,7 @@ class Delivery extends EventEmitter {
     const stuck = d.feeders.map(id => accts.find(a => a.id === id) || { id }).filter(a => !a.cookieEnc && !this.accountOnline(a.id));
     if (stuck.length) return this.needsYou(d, `Security mode: ${stuck.map(a => '@' + (a.username || '?')).join(', ')} has no saved cookie, so Zotac can't open it for the mother — add the cookie or deliver by hand`);
     const uname = id => '@' + ((accts.find(a => a.id === id) || {}).username || '?');
+    if (d.mode === 'security' && !d.securityFallback && petsOf(d.mother) > 0) this.log('warn', `Order ${d.orderId}: Security mode, but no other SCRIPT account can be the mother — @${mother.username} trades its own pet(s) without a steal`);
     if (d.feeders.length) {
       this.log('info', `Order ${d.orderId}: Security mode — mother @${mother.username} takes the pets from ${d.feeders.map(uname).join(', ')}`);
       if (d.accounts.length > 1) await this.say(d, 'gathering', { mother: mother.username });

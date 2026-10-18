@@ -566,6 +566,7 @@ function importPets(json, accountId, { replace = false, onlySaved = false } = {}
   const listedLeft = replace ? store.get('pets').filter(p => p.status === 'listed' || inDelivery.has(p.id)
     || (p.status === 'sold' && !p.delivered && Date.now() - (p.soldAt || 0) < 3 * 864e5)) : [];
   const skippedNames = new Set();
+  const moved = [];   // { pet, from }: brainrots this scan found on another account than Zotac had them
   for (const it of items) {
     let acct = fixed;
     if (!acct && it.account) {
@@ -596,6 +597,25 @@ function importPets(json, accountId, { replace = false, onlySaved = false } = {}
       }
       ui = u ? sessionLeft.findIndex(p => p.accountId === acct.id && sameU(p)) : -1;
       if (ui >= 0) { const was = sessionLeft.splice(ui, 1)[0]; was.session = false; continue; }
+      // the same brainrot (uuid) Zotac has on another account: it was moved here (trade, steal, by
+      // hand), so its record follows it - listing, price and card included - instead of the old
+      // account keeping it and this one getting a copy. A pet of a running delivery is left to it.
+      if (u) {
+        const elsewhere = p => p.accountId && p.accountId !== acct.id && sameU(p) && !p.delivered && p.status !== 'sold';
+        let mv = dropped.find(p => !p._kept && elsewhere(p));
+        if (mv) { mv._kept = true; store.get('pets').push(mv); }
+        else mv = store.get('pets').find(elsewhere);
+        if (mv && inDelivery.has(mv.id)) continue;
+        if (mv) {
+          for (const list of [listedLeft, sessionLeft]) { const x = list.indexOf(mv); if (x >= 0) list.splice(x, 1); }
+          moved.push({ pet: mv, from: mv.accountId });
+          mv.accountId = acct.id; mv.session = false;
+          mv.mutation = it.mutation || 'None'; if (it.gen) mv.gen = it.gen;
+          if ((it.traits || []).length || (raw && raw.traitsKnown !== false)) mv.traits = it.traits || [];
+          if (it.rarity) mv.rarity = it.rarity;
+          continue;
+        }
+      }
       const i = listedLeft.findIndex(p => p.accountId === acct.id && fits(p) && sab.norm(p.name) === sab.norm(it.name) && sab.norm(p.mutation) === sab.norm(it.mutation || 'None'));
       if (i >= 0) { const was = listedLeft.splice(i, 1)[0]; if (was.session) was.session = false; adopt(was); continue; }
       // the exact same pet as an unlisted one Zotac already had: keep that one (same id, price,
@@ -637,10 +657,26 @@ function importPets(json, accountId, { replace = false, onlySaved = false } = {}
       delivery.record('gone', { from: uname(acc), pets: list, note: 'no longer in the base (not traded by Zotac)' });
     }
   }
+  // pasted pets of an account whose complete scan no longer shows them left that base: dropped
+  // (they stay over restarts now, so a rescan has to clear them; never one of a running delivery)
+  let pastedGone = 0;
+  if (complete && sessionLeft.length) {
+    const drop = new Set(sessionLeft.filter(p => p.status === 'available' && !inDelivery.has(p.id)));
+    pastedGone = drop.size;
+    if (drop.size) store.set('pets', store.get('pets').filter(p => !drop.has(p)));
+  }
+  if (moved.length || pastedGone) {
+    const uname = id => (accounts.find(a => a.id === id) || {}).username || '?';
+    for (const m of moved) {
+      store.log('info', `[Scanner] ${m.pet.mutation && m.pet.mutation !== 'None' ? m.pet.mutation + ' ' : ''}${m.pet.name} moved from @${uname(m.from)} to @${uname(m.pet.accountId)} (same brainrot uuid)`);
+      delivery.record('moved', { from: uname(m.from), to: uname(m.pet.accountId), pets: [m.pet], note: 'found on another account in a scan' });
+    }
+    if (pastedGone) store.log('info', `[Scanner] ${pastedGone} pasted pet(s) no longer in their base - removed from Auto List`);
+  }
   if (onlySaved && !fixed) for (const it of items) if (!it.account) skippedNames.add('(no account in the JSON)');
   dedupeUuids();   // a uuid this import gave to a pet another account already holds
   store.save(); send('pets:changed');
-  return { added: added.length, removed, kept: kept.length, matched: matched.length, accounts: accounts.length, skipped: [...skippedNames] };
+  return { added: added.length, removed: removed + pastedGone, kept: kept.length, matched: matched.length, moved: moved.length, accounts: accounts.length, skipped: [...skippedNames] };
 }
 
 function scannerScript(which = 'scanner') {
@@ -947,7 +983,7 @@ function ipc() {
   handle('legit:install', () => launcher.legit.reinstall().then(exe => ({ exe })));
   handle('accounts:launchAll', async () => { const out = []; for (const a of store.get('accounts').filter(x => x.cookieEnc)) { try { out.push({ username: a.username, ...(await launcher.launch(a.id, { legit: !!a.legit })) }); } catch (e) { out.push({ username: a.username, error: e.message }); } await new Promise(r => setTimeout(r, 2000)); } return out; });
   handle('launcher:status', () => launcher.status());
-  handle('launcher:fix', () => launcher.resetMultiInstance());
+  handle('launcher:fix', () => launcher.fixLaunch());
   handle('accounts:save', async a => {
     const list = store.get('accounts');
     let acct = list.find(x => x.id === a.id);
@@ -968,7 +1004,9 @@ function ipc() {
     store.set('pets', store.get('pets').filter(p => !(p.accountId === id && p.status === 'available')));
     store.save(); send('pets:changed'); return true;
   });
-  handle('accounts:export', () => JSON.stringify({ format: 'zotac-accounts', version: 1, accounts: store.get('accounts').map(a => ({ ...publicAccount(a), pets: store.get('pets').filter(p => p.accountId === a.id) })) }, null, 2));
+  // all accounts (Copy All), or one account with the pets now in its base (the copy button on its card);
+  // same format, so either pastes into Import JSON / Auto List
+  handle('accounts:export', id => JSON.stringify({ format: 'zotac-accounts', version: 1, accounts: store.get('accounts').filter(a => !id || a.id === id).map(a => ({ ...publicAccount(a), pets: store.get('pets').filter(p => p.accountId === a.id && (!id || (!p.delivered && p.status !== 'sold'))) })) }, null, 2));
   handle('accounts:import', json => {
     const j = typeof json === 'string' ? JSON.parse(json) : json;
     const src = Array.isArray(j) ? j : j.accounts || [];

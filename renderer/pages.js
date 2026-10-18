@@ -1403,6 +1403,7 @@ PAGES.accounts = async root => {
         h('div', { class: 'x-acard-f' },
           h('button', { class: 'x-ab', title: 'List this account\'s available pets on Eldorado', onclick: () => startAcct(a) }, 'List'),
           h('button', { class: 'x-ib', title: 'Copy username', onclick: () => xCopy(a.username, 'Username copied') }, '⎘'),
+          h('button', { class: 'x-ib', title: 'Copy the JSON of this account (its pets)', onclick: async () => xCopy(await M.call('accounts:export', a.id), '@' + a.username + ' JSON copied') }, '{ }'),
           h('button', { class: 'x-ib', title: 'Edit', onclick: () => editAcct(a) }, '✎'),
           h('button', { class: 'x-ib del', title: 'Remove account', onclick: async () => { if (await confirmBox(`Remove ${a.username} from Zotac? Its unlisted pets go with it. (Not possible while it has listed pets or sold pets not delivered yet.)`)) { if (await run(() => M.call('accounts:delete', a.id))) { await refreshData(); render(); } } } }, '🗑'),
           h('div', { class: 'grow' }),
@@ -1488,7 +1489,7 @@ PAGES.accounts = async root => {
         h('div', { class: 'row x-asw', title: 'zotac_scanner.lua in your executor autoexec: every account Zotac opens scans its base' }, h('small', { class: 'muted' }, 'Auto Scanner'), sw((S.settings.scanner || {}).autoexec !== false, v => toggleAutoexec('scanner', v))),
         h('button', { class: 'btn sm primary', onclick: () => { if ((S.settings.scanner || {}).autoexec === false) return toast('Turn on Auto Scanner first: without it opened accounts never scan', 'error', 7000); openAutoScan(); } }, '⌕ Auto Scan'),
         h('button', { class: 'btn sm', title: 'Launch every account that has a cookie and is not in game', onclick: async () => { const n = S.accounts.filter(a => a.hasCookie).length; if (!n) return toast('No logged-in accounts', 'error'); if (!await confirmBox(`Open Roblox on all ${n} logged-in accounts (4 s apart, accounts already in game are skipped)?`)) return; toast('Launching accounts…', 'info'); const r = await run(() => M.call('accounts:launchAll')); if (r) toast(r.map(x => `${x.username}: ${x.error || x.skipped || 'launched'}`).join(' · ') || 'No accounts with cookies', 'good', 9000); } }, '▶ Launch All'),
-        h('button', { class: 'btn sm', title: 'Restart the multi-instance helper (when a new client closes the old one)', onclick: () => run(() => M.call('launcher:fix'), 'Launcher reset') }, '⟳ Fix Launch'),
+        h('button', { class: 'btn sm', title: 'Ends every open Roblox game (all accounts) and resets the launcher', onclick: async () => { if (!await confirmBox('Close every open Roblox game (all accounts, also ones Zotac did not open) and reset the launcher? A running delivery loses its game.')) return; const r = await run(() => M.call('launcher:fix')); if (r) toast(`Ended ${r.killed} Roblox game(s)${r.left ? `, ${r.left} still running` : ''} · launcher reset`, r.left ? 'error' : 'good'); } }, '⟳ Fix Launch'),
         h('button', { class: 'btn sm primary', title: 'Sign in to a stock account on roblox.com; the account and its cookie are added', onclick: async () => { const r = await run(() => M.call('accounts:loginBrowser', null)); if (r) { toast(`${r.created ? 'Added' : 'Updated'} @${r.username} — cookie saved`, 'good'); await refreshData(); render(); } } }, '⎆ Browser Login'),
         h('button', { class: 'btn sm primary', onclick: () => editAcct() }, '+ Account'),
         h('button', { class: 'btn sm danger', onclick: () => { Object.assign(RA.filter, { account: '', q: '', mutation: '', min: '', max: '', range: '' }); render(); } }, 'Clear'))),
@@ -1646,6 +1647,13 @@ PAGES.orders = async root => {
   const filt = { all: () => true, completed: o => XSTATE.completed(o.state), delivered: o => XSTATE.delivered(o.state), pending: o => XSTATE.pending(o.state), canceled: o => XSTATE.canceled(o.state) }[OR.filter] || (() => true);
   const rows = all.filter(o => filt(o) && (!OR.q || `${o.buyer} ${o.title} ${o.id}`.toLowerCase().includes(OR.q.toLowerCase())));
   const ratingTxt = o => !o.rating ? '—' : typeof o.rating === 'object' ? (o.rating.rating || o.rating.type || 'Rated') : String(o.rating);
+  // the Roblox account(s) holding the order's brainrot: its sold pets, else the offer's listed ones
+  const acctName = id => (S.accounts.find(a => a.id === id) || {}).username;
+  const orderAccts = o => {
+    let ps = S.pets.filter(p => p.orderId === o.id);
+    if (!ps.length && o.offerId) ps = S.pets.filter(p => p.offerId === o.offerId && p.status === 'listed').slice(0, Math.max(1, Number(o.quantity) || 1));
+    return [...new Set(ps.map(p => acctName(p.accountId)).filter(Boolean))];
+  };
 
   root.append(
     h('div', { class: 'x-head' }, h('div', { class: 'x-badge' }, '🛒'), h('div', { class: 'x-head-t' }, h('h1', null, 'Orders'), h('p', null, 'Sold orders on Eldorado')), h('div', { class: 'grow' }),
@@ -1660,7 +1668,8 @@ PAGES.orders = async root => {
         h('input', { class: 'x-search sm', type: 'search', placeholder: 'Search buyer or item...', value: OR.q, oninput: e => { OR.q = e.target.value; clearTimeout(OR.qt); OR.qt = setTimeout(render, 250); } })),
       h('div', { class: 'x-ohead' }, h('span', null, 'ORDER'), h('span', null, 'BUYER'), h('span', { class: 'r' }, 'AMOUNT'), h('span', null, 'STATUS'), h('span', null, 'RATING'), h('span', { class: 'r' }, 'ACTION')),
       rows.length ? rows.map(o => h('div', { class: 'x-orow' },
-        h('div', { class: 'x-oi' }, xOrderAva(o, 34), h('div', { class: 'x-ot' }, h('b', null, o.title || '—'), h('small', { class: 'muted mono' }, '#' + String(o.id || '').slice(0, 8)))),
+        h('div', { class: 'x-oi' }, xOrderAva(o, 34), h('div', { class: 'x-ot' }, h('b', null, o.title || '—'), h('small', { class: 'muted mono' }, '#' + String(o.id || '').slice(0, 8))),
+          orderAccts(o).map(n => h('span', { class: 'x-oacct', title: 'Roblox account with the brainrot of this order' }, '@' + n))),
         h('div', { class: 'x-ob' }, h('b', null, o.buyer || '—'), h('small', { class: 'muted' }, ago(o.date))),
         h('div', { class: 'x-oa' }, money(o.price)),
         h('div', null, xStatePill(o.state)),

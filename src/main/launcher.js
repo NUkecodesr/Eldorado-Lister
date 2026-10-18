@@ -220,6 +220,23 @@ class Launcher extends EventEmitter {
     this.ensureMultiInstance();
     return true;
   }
+  // "Fix Launch": end every running Roblox (all accounts, also games Zotac did not open, Legit ones
+  // included: same exe name) with taskkill /F, forget them as closed on purpose (the crash check
+  // does not reopen them), then restart the multi-instance helper. Returns how many were ended.
+  async fixLaunch() {
+    for (const id of Object.keys(this.pids)) this.closing[id] = Date.now();
+    const before = await robloxPids();
+    for (const image of ['RobloxPlayerBeta.exe', 'RobloxPlayerLauncher.exe', 'RobloxCrashHandler.exe']) {
+      await new Promise(res => execFile('taskkill', ['/IM', image, '/T', '/F'], { windowsHide: true }, () => res()));
+    }
+    for (const id of Object.keys(this.pids)) { delete this.pids[id]; if (this.missing) delete this.missing[id]; }
+    await new Promise(r => setTimeout(r, 800));
+    const left = await robloxPids();
+    const killed = before.filter(pid => !left.includes(pid)).length;
+    this.resetMultiInstance();
+    this.log(left.length ? 'warn' : 'info', `Fix Launch: ended ${killed} Roblox game(s)${left.length ? `, ${left.length} still running (pid ${left.join(', ')})` : ''} and reset the launcher`);
+    return { killed, left: left.length };
+  }
   // after a Zotac restart: the games Zotac opened before (found by their launch's tracker id in the
   // command line) are known again, so they are still closed after their job and crash-watched
   async adopt() {
