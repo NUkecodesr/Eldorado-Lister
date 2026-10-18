@@ -574,8 +574,10 @@ PAGES.autolist = async root => {
 
   // Import: the scanner script or pasted JSON, one at a time
   AL.importTab = AL.importTab || (AL.json ? 'json' : 'script');
-  const importCard = h('div', { class: 'x-import' },
-    h('div', { class: 'x-stpills' }, [['script', 'Scanner script'], ['json', 'Paste JSON']].map(([k, l]) => h('button', { class: AL.importTab === k ? 'on' : '', onclick: () => { AL.importTab = k; render(); } }, l))),
+  // one card, same height as Quick Fill: header with the two tabs, the chosen panel fills the rest
+  const importCard = h('section', { class: 'x-import' },
+    h('div', { class: 'x-import-h' }, h('span', { class: 'x-glyph' }, '⬇'), h('b', null, 'IMPORT PETS'), h('div', { class: 'grow' }),
+      h('div', { class: 'x-stpills' }, [['script', 'Scanner script'], ['json', 'Paste JSON']].map(([k, l]) => h('button', { class: AL.importTab === k ? 'on' : '', onclick: () => { AL.importTab = k; render(); } }, l)))),
     AL.importTab === 'json' ? inputPanel : scriptPanel);
   root.append(
     xHead('A', 'Auto List', 'Import pets, fill titles and prices, list them on Eldorado', null),
