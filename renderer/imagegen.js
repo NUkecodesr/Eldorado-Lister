@@ -240,7 +240,7 @@ async function renderCardCanvas({ pet, rarity, art, traitArt = [], mutationArt =
         const pic = recolor && mutated && known ? tintPicture(petImg, w * S, hh * S, pal, mkey, mutIcon, S) : petImg;
         if (fx && fx.rainbow && pic !== petImg) {   // Rainbow: a soft halo in the pet's own rainbow colours behind it
           const pad = 8;
-          g.save(); g.filter = `blur(${Math.round(13 * S)}px) saturate(1.3) brightness(1.15)`; g.globalAlpha = 0.55;
+          g.save(); g.filter = `blur(${Math.round(11 * S)}px) saturate(1.2) brightness(1.1)`; g.globalAlpha = 0.4;
           g.drawImage(pic, petX - w / 2 - pad, top + (bh - hh) / 2 - pad, w + pad * 2, hh + pad * 2);
           g.restore();
         }
