@@ -14,7 +14,7 @@
 .sf-conn { display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; color: var(--ink2); padding: 2px 2px 0; }
 .sf-conn b { color: var(--gold); }
 .sf-conn .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; }
-.sf-conn .dot.good { background: #7c5cff; } .sf-conn .dot.bad { background: #f87171; }
+.sf-conn .dot.good { background: var(--accent); } .sf-conn .dot.bad { background: #f87171; }
 .sf-ver { color: var(--muted); font-size: 10px; text-align: center; }
 
 /* private text (email): blurred until hovered */

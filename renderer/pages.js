@@ -45,12 +45,12 @@ function xTile(label, value, cls = '', sub = null, iconEl = null) {
 function xPills(options, value, onchange) {
   return h('div', { class: 'x-pills' }, options.map(o => { const [v, l] = Array.isArray(o) ? o : [o, o]; return h('button', { class: 'x-pill' + (v === value ? ' on' : ''), onclick: () => onchange(v) }, l); }));
 }
-const xMutColor = m => { const k = mutKey(m); const p = MUTATION_COLORS[k]; return k === 'none' ? null : (k === 'rainbow' ? '#ff6ad5' : p ? p[0] : '#a594ff'); };
+const xMutColor = m => { const k = mutKey(m); const p = MUTATION_COLORS[k]; return k === 'none' ? null : (k === 'rainbow' ? '#ff6ad5' : p ? p[0] : '#93c5fd'); };
 const xRarity = name => { const i = (S.items || []).find(x => x.name && String(x.name).toLowerCase() === String(name || '').toLowerCase()); return i && i.rarity || ''; };
 const xInitials = n => String(n || '?').split(/\s+/).filter(Boolean).map(w => w[0]).join('').slice(0, 3).toUpperCase();
 function xAvatar(pet, size = 34) {
-  const c = xMutColor(pet.mutation) || RARITY_COLORS[pet.rarity || xRarity(pet.name)] || '#7c87b8';
-  return h('div', { class: 'x-ava', style: { width: size + 'px', height: size + 'px', background: `linear-gradient(135deg, ${c}55, #0e1430)`, borderColor: c + '88', fontSize: Math.round(size * .36) + 'px' } }, xInitials(pet.name));
+  const c = xMutColor(pet.mutation) || RARITY_COLORS[pet.rarity || xRarity(pet.name)] || '#74829a';
+  return h('div', { class: 'x-ava', style: { width: size + 'px', height: size + 'px', background: `linear-gradient(135deg, ${c}55, #0f1726)`, borderColor: c + '88', fontSize: Math.round(size * .36) + 'px' } }, xInitials(pet.name));
 }
 // order picture (the listing image) with the initials tile as fallback
 function xOrderAva(o, size = 34) {
@@ -162,7 +162,7 @@ async function openAutoScan() {
   AS.draw = draw;
   draw();
 }
-function xDot(m) { const c = xMutColor(m); return h('span', { class: 'x-mut' }, h('i', { style: { background: c || '#3a4580' } }), m && !/^none$/i.test(m) ? m : h('span', { class: 'muted' }, 'None')); }
+function xDot(m) { const c = xMutColor(m); return h('span', { class: 'x-mut' }, h('i', { style: { background: c || '#3a5480' } }), m && !/^none$/i.test(m) ? m : h('span', { class: 'muted' }, 'None')); }
 function xJsonCount(text) {
   try {
     const j = JSON.parse(text); if (Array.isArray(j)) return j.length;
@@ -199,7 +199,7 @@ function xMutBlock(m) {
   const pic = !none && ART_THUMBS.mutations[m];
   const pal = MUTATION_COLORS[k];
   const bg = k === 'rainbow' ? 'linear-gradient(135deg, #ff4d4d, #ffe44d, #3fcf72, #4fa3f7, #a66bff)'
-    : none ? 'linear-gradient(135deg, #f1f1f4, #8b8b93)' : pal ? `linear-gradient(135deg, ${pal[0]}, ${pal[1]})` : 'linear-gradient(135deg, #a594ff, #3a2a8a)';
+    : none ? 'linear-gradient(135deg, #f1f1f4, #8b8b93)' : pal ? `linear-gradient(135deg, ${pal[0]}, ${pal[1]})` : 'linear-gradient(135deg, #93c5fd, #1e3a8a)';
   return h('span', { class: 'x-mblk', title: none ? 'No mutation' : m }, pic ? h('img', { src: pic, alt: m }) : h('i', { style: { background: bg } }));
 }
 // close the delivery-time dropdown / emoji picker when clicking elsewhere
@@ -422,16 +422,6 @@ PAGES.autolist = async root => {
     toast(`Priced ${ok}` + (noComps ? ` · ${noComps} with no similar listings moved to Manual Review` : '') + (fail ? ` · ${fail} failed (${firstErr})` : '') + (skipped ? ` · ${skipped} skipped (manual review)` : ''), fail ? 'error' : 'good', 7000);
   };
   const byMs = al.genTolMode === 'ms';
-  const bulkPrice = alCard('price', '$', 'BULK AUTO PRICE',
-    h('div', { class: 'x-bulk' },
-      h('label', { class: 'x-fld' }, h('span', { class: 'x-lbl' }, 'UNDERCUT'),
-        h('span', { class: 'x-money' }, '$', h('input', { type: 'number', step: '0.01', min: '0', value: al.undercut ?? 0.01, onchange: e => saveSettings({ autolist: { undercut: Number(e.target.value) || 0 } }) }))),
-      h('label', { class: 'x-fld' }, h('span', { class: 'x-lbl' }, 'GENERATION TOLERANCE'),
-        h('span', { class: 'row', style: { gap: '6px', flexWrap: 'nowrap' } },
-          h('input', { type: 'number', step: 'any', min: '0', class: 'x-tol', value: byMs ? (al.genToleranceMs ?? 0) : (al.genTolerancePct ?? 15), onchange: e => saveSettings({ autolist: byMs ? { genToleranceMs: Number(e.target.value) || 0 } : { genTolerancePct: Number(e.target.value) || 0 } }) }),
-          sel([['ms', 'Exact M/s'], ['pct', '± %']], byMs ? 'ms' : 'pct', v => saveSettings({ autolist: { genTolMode: v } }).then(render)))),
-      h('button', { class: 'btn', onclick: () => priceRun(pets.filter(p => AL.selected.has(p.id))) }, 'Price Selected'),
-      h('button', { class: 'btn primary', onclick: () => priceRun(live) }, 'Price All')));
 
   // ---- LISTING RULES ----
   const dts = Array.isArray(rules.deliveryTimes) ? rules.deliveryTimes : [];
@@ -446,8 +436,7 @@ PAGES.autolist = async root => {
       h('span', null, dts.length ? dts.map(dtLabel).join(', ') : h('span', { class: 'muted' }, `Any up to ${dtLabel(rules.maxDeliveryTime || 'Hour1')}`)), h('span', { class: 'x-caret' }, '⌄')),
     AL.dtOpen ? h('div', { class: 'x-mdrop' }, DELIVERY_TIMES.map(v => h('div', { class: 'x-mopt' + (dts.includes(v) ? ' on' : ''), onclick: () => setDts(dts.includes(v) ? dts.filter(x => x !== v) : [...dts, v]) },
       h('span', { class: 'x-mck' }, dts.includes(v) ? '✓' : ''), dtLabel(v)))) : null);
-  const listingRules = alCard('rules', '⚙', 'LISTING RULES',
-    h('div', { class: 'x-rules' },
+  const listingRules = h('div', { class: 'x-rules' },
       h('div', { class: 'x-rrow' },
         h('div', { class: 'x-fld grow' }, h('span', { class: 'x-lbl' }, 'DELIVERY TIME'), dtSel,
           dts.length ? h('div', { class: 'x-chips' }, dts.map(v => h('span', { class: 'x-dchip' }, dtLabel(v), h('b', { title: 'Remove', onclick: () => setDts(dts.filter(x => x !== v)) }, '×')))) : null),
@@ -468,7 +457,7 @@ PAGES.autolist = async root => {
           sel([['review', 'Manual review (set the price yourself)'], ['estimate', 'Estimate from other listings']], al.noCompsMode === 'estimate' ? 'estimate' : 'review', v => saveSettings({ autolist: { noCompsMode: v } }).then(render)),
           h('label', { class: 'x-fld', style: { flexDirection: 'row', alignItems: 'center', gap: '6px' } }, h('span', { class: 'x-lbl' }, 'NEED AT LEAST'),
             num(al.minComps ?? 1, v => saveSettings({ autolist: { minComps: Math.max(1, Math.round(Number(v) || 1)) } }), { style: { width: '56px' } }), h('small', { class: 'muted' }, 'similar')),
-          h('small', { class: 'muted' }, `similar = same brainrot + mutation within the generation tolerance; fewer than that and Auto Price would only guess (often far too low)`)))));
+          h('small', { class: 'muted' }, `similar = same brainrot + mutation within the generation tolerance; fewer than that and Auto Price would only guess (often far too low)`))));
 
   // ---- GENERATE IMAGES ----
   const genRun = async ids => {
@@ -478,11 +467,38 @@ PAGES.autolist = async root => {
     await refreshData(); render();
     toast(`${r.ok} cards saved` + (r.failed ? ` · ${r.failed} failed (${r.errors[0]})` : ''), r.failed ? 'error' : 'good', 7000);
   };
-  const genImages = alCard('images', '▨', 'GENERATE IMAGES',
+
+  // ---- steps: what you do each run, in order; the rules (set once) behind "Pricing rules" ----
+  const noCard = live.filter(p => !p.imagePath).length;
+  const tolTxt = byMs ? `${al.genToleranceMs ?? 0} M/s` : `±${al.genTolerancePct ?? 15}%`;
+  const step = (n, title, sub, ...btns) => h('div', { class: 'x-step' },
+    h('div', { class: 'x-step-h' }, h('span', { class: 'x-step-n' + (n === 3 ? ' go' : '') }, String(n)), h('b', null, title)),
+    h('p', null, sub), h('div', { class: 'x-step-b' }, btns));
+  const stepsRow = h('div', { class: 'x-steps3' },
+    step(1, 'Price', `Beats the cheapest similar offer by $${Number(al.undercut ?? 0.01).toFixed(2)} (${tolTxt} gen/s)`,
+      h('button', { class: 'btn primary', onclick: () => priceRun(live) }, 'Price all'),
+      h('button', { class: 'btn', onclick: () => priceRun(pets.filter(p => AL.selected.has(p.id))) }, 'Selected')),
+    step(2, 'Pictures', `${noCard ? noCard + ' pet' + (noCard > 1 ? 's' : '') + ' without a card' : 'Every pet has a card'} · recolor ${al.recolorByMutation !== false ? 'on' : 'off'}`,
+      h('button', { class: 'btn primary', onclick: () => genRun(live.map(p => p.id)) }, 'Generate all'),
+      h('button', { class: 'btn', onclick: () => genRun(selIds().filter(id => live.some(p => p.id === id))) }, 'Selected'),
+      h('label', { class: 'x-chk' }, h('input', { type: 'checkbox', checked: al.recolorByMutation !== false, onchange: e => saveSettings({ autolist: { recolorByMutation: e.target.checked } }).then(render) }), 'Recolor')),
+    step(3, 'List', `${live.length} ready · ${dtLabel(al.deliveryTime || 'Minute20')} delivery`,
+      // calls the start itself: a ".btn.danger" lookup in the action bar found Remove first
+      h('button', { class: 'btn primary x-go', onclick: () => S.listerRunning ? M.call('autolist:stop') : startList() }, S.listerRunning ? 'Stop' : `Start Auto List (${AL.selected.size})`)));
+  const rulesBar = h('div', { class: 'x-rulesbar' },
+    h('span', null, `Rules: ${tolTxt} gen/s · ${rules.minRatings || 0}+ reviews, ${rules.minFeedback || 0}%+ rating · ${dts.length ? dts.map(dtLabel).join(', ') : 'any delivery'} · ${words.length} blocked word${words.length === 1 ? '' : 's'} · ${(al.specialTraits || []).length} special trait${(al.specialTraits || []).length === 1 ? '' : 's'} · no similar → ${al.noCompsMode === 'estimate' ? 'estimate' : 'you price it'}`),
+    h('button', { class: 'btn sm', onclick: () => { AL.rulesOpen = !AL.rulesOpen; render(); } }, AL.rulesOpen ? 'Hide pricing rules' : '⚙ Pricing rules'));
+  // the rules in one card: undercut and tolerance (from Bulk Auto Price) on top, then the listing rules
+  const rulesCard = h('section', { class: 'x-panel x-rulescard' },
+    h('div', { class: 'x-ptitle' }, h('span', { class: 'x-glyph' }, '⚙'), 'PRICING RULES', h('small', { class: 'muted', style: { letterSpacing: 0, fontWeight: 400, marginLeft: '6px' } }, 'set once, used by every Auto Price')),
     h('div', { class: 'x-bulk' },
-      h('button', { class: 'btn', onclick: () => genRun(selIds().filter(id => live.some(p => p.id === id))) }, 'Generate Selected'),
-      h('button', { class: 'btn primary', onclick: () => genRun(live.map(p => p.id)) }, 'Generate All'),
-      h('label', { class: 'x-chk' }, h('input', { type: 'checkbox', checked: al.recolorByMutation !== false, onchange: e => saveSettings({ autolist: { recolorByMutation: e.target.checked } }) }), 'Recolor pet by mutation')));
+      h('label', { class: 'x-fld' }, h('span', { class: 'x-lbl' }, 'BEAT THE CHEAPEST BY'),
+        h('span', { class: 'x-money' }, '$', h('input', { type: 'number', step: '0.01', min: '0', value: al.undercut ?? 0.01, onchange: e => saveSettings({ autolist: { undercut: Number(e.target.value) || 0 } }).then(render) }))),
+      h('label', { class: 'x-fld' }, h('span', { class: 'x-lbl' }, 'COUNT OFFERS WITHIN'),
+        h('span', { class: 'row', style: { gap: '6px', flexWrap: 'nowrap' } },
+          h('input', { type: 'number', step: 'any', min: '0', class: 'x-tol', value: byMs ? (al.genToleranceMs ?? 0) : (al.genTolerancePct ?? 15), onchange: e => saveSettings({ autolist: byMs ? { genToleranceMs: Number(e.target.value) || 0 } : { genTolerancePct: Number(e.target.value) || 0 } }).then(render) }),
+          sel([['ms', 'Exact M/s'], ['pct', '± %']], byMs ? 'ms' : 'pct', v => saveSettings({ autolist: { genTolMode: v } }).then(render))))),
+    listingRules);
 
   // ---- pet list ----
   const sortBtn = (key, label) => h('button', { class: 'x-chip' + (AL.sort === key ? ' on' : ''), onclick: () => { if (AL.sort === key) AL.dir = -AL.dir; else { AL.sort = key; AL.dir = key === 'name' ? 1 : -1; } render(); } },
@@ -554,17 +570,19 @@ PAGES.autolist = async root => {
     reviewG.length > lim || readyG.length > lim ? h('div', { style: { textAlign: 'center', margin: '10px' } }, h('button', { class: 'btn sm', onclick: () => { AL.limit += 200; render(); } }, 'Show more')) : null)
     : h('div', { class: 'x-empty' }, h('div', { class: 'x-empty-ic' }, '▤'), h('div', null, S.pets.length ? 'No pets match the filter.' : 'Paste a JSON and click import'));
 
+  // Start = the Confirm Auto-List window first; used by the action bar and step 3
+  const startList = async () => {
+    const chosen = [...AL.selected].map(id => S.pets.find(p => p.id === id)).filter(p => p && p.status === 'available' && !p.alHidden);
+    const ids = chosen.filter(xDeliverable).map(p => p.id);
+    if (chosen.length > ids.length) toast(`${chosen.length - ids.length} pet(s) skipped: their account is not logged in, so Zotac could not deliver them`, 'error', 8000);
+    if (!ids.length) return toast('Select available pets of logged-in accounts to list', 'error');
+    if (!S.me) return toast('Log in to Eldorado first (Account page)', 'error');
+    const ok = await confirmAutoList(ids); if (!ok) return;
+    await run(() => M.call('autolist:start', ids, { prices: ok.prices })); S.listerRunning = true; render();
+  };
   const startBtn = S.listerRunning
     ? h('button', { class: 'btn danger', onclick: () => M.call('autolist:stop') }, 'Stop')
-    : h('button', { class: 'btn primary', onclick: async () => {
-      const chosen = [...AL.selected].map(id => S.pets.find(p => p.id === id)).filter(p => p && p.status === 'available' && !p.alHidden);
-      const ids = chosen.filter(xDeliverable).map(p => p.id);
-      if (chosen.length > ids.length) toast(`${chosen.length - ids.length} pet(s) skipped: their account is not logged in, so Zotac could not deliver them`, 'error', 8000);
-      if (!ids.length) return toast('Select available pets of logged-in accounts to list', 'error');
-      if (!S.me) return toast('Log in to Eldorado first (Account page)', 'error');
-      const ok = await confirmAutoList(ids); if (!ok) return;
-      await run(() => M.call('autolist:start', ids, { prices: ok.prices })); S.listerRunning = true; render();
-    } }, `Start Auto List (${AL.selected.size})`);
+    : h('button', { class: 'btn primary', onclick: startList }, `Start Auto List (${AL.selected.size})`);
 
   // Import: the scanner script or pasted JSON, one at a time
   AL.importTab = AL.importTab || (AL.json ? 'json' : 'script');
@@ -576,7 +594,7 @@ PAGES.autolist = async root => {
   root.append(
     xHead('A', 'Auto List', 'Import pets, fill titles and prices, list them on Eldorado', null),
     h('div', { class: 'x-top2' }, importCard, quickFill),
-    bulkPrice, listingRules, genImages,
+    stepsRow, rulesBar, AL.rulesOpen ? rulesCard : null,
     prog.total ? h('div', { class: 'card', style: { marginBottom: '12px' } },
       h('h3', null, 'Progress ', h('small', null, `${prog.done}/${prog.total} · ${prog.ok} ok · ${prog.failed} failed ${prog.current ? '· now: ' + prog.current : ''}`)),
       h('div', { class: 'progress' }, h('div', { style: { width: (100 * prog.done / Math.max(1, prog.total)) + '%' } }))) : null,
@@ -1128,7 +1146,7 @@ function confirmAutoList(ids) {
           const review = (special.length && (g.p.traits || []).some(t => special.includes(String(t).toLowerCase()))) || g.p.noComps;
           return h('div', { class: 'x-cf-row' + (g.price ? '' : ' nop') },
             h('b', { class: 'x-cf-name' }, g.p.name),
-            mut ? (() => { const c = xMutColor(mut) || '#7c5cff'; return h('span', { class: 'x-cf-mut', style: { color: c, background: c + '2e', border: '1px solid ' + c + '66' } }, mut); })() : h('span'),
+            mut ? (() => { const c = xMutColor(mut) || '#3b82f6'; return h('span', { class: 'x-cf-mut', style: { color: c, background: c + '2e', border: '1px solid ' + c + '66' } }, mut); })() : h('span'),
             h('span', { class: 'x-cf-gen' }, formatGen(g.p.gen)),
             h('span', { class: 'x-cf-qty' }, '×' + g.n),
             h('b', { class: 'x-cf-sub' }, g.price ? money(g.price * g.n) : (review ? 'set price' : (status === 'pricing' ? '…' : 'no price'))));

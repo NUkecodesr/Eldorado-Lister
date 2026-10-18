@@ -711,7 +711,7 @@ PAGES.delivery = async root => {
           h('b', null, 'Single Mode ', h('span', { class: 'muted' }, '+ Security on multi-account')),
           h('small', null, h('b', null, 'Single-account'), ' orders deliver straight from the stock account (faster, no steal). ', h('b', null, 'Multi-account'), ' orders auto-fallback to Security.'))));
   // the mother candidates: accounts in SCRIPT mode (their script must be connected to trade)
-  const scriptAcctCard = mxCard(mxIco('code', 'purple'), 'Script Account', 'Runs Zotac\'s scripts: the mother that steals and trades the buyer (SCRIPT mode on Roblox Accounts)',
+  const scriptAcctCard = mxCard(mxIco('user', 'purple'), 'Script Account', 'Runs Zotac\'s scripts: the mother that steals and trades the buyer (SCRIPT mode on Roblox Accounts)',
       h('span', { class: 'mx-badge ' + (scriptOnline ? 'good' : '') }, scriptOnline ? 'CONNECTED' : 'NOT CONNECTED'),
       scriptAccts.length ? h('div', { class: 'mx-rows' }, scriptAccts.map(a => {
         const st = (DV.lst || {})[a.id] || {};
@@ -719,19 +719,33 @@ PAGES.delivery = async root => {
           h('div', { class: 'av' }, (a.username || '?')[0].toUpperCase(), h('span', { class: 'led ' + (st.online ? 'on' : '') })),
           h('div', null, h('b', null, a.username), h('div', { class: 'muted', style: { fontSize: '11px' } }, st.online ? 'in game, script connected' : 'not in game — opened with the executor when an order needs it')));
       })) : h('div', { class: 'mx-empty' }, 'No logged-in account is in SCRIPT mode: set one to SCRIPT on Roblox Accounts (it becomes the mother).'));
-  const autoexecCard = mxCard(mxIco('code'), 'Autoexec', 'The delivery script must run by itself when Roblox opens', h('span', { class: 'mx-badge ' + ((DV.autoexec || []).length ? 'good' : 'bad') }, (DV.autoexec || []).length ? 'INSTALLED' : 'NOT INSTALLED'),
-      h('p', { class: 'ink2', style: { marginTop: 0 } }, 'Zotac copies zotac_delivery.lua into your executor\'s autoexec folder. Synapse Z and executors in AppData are found by themselves; for any other executor add its autoexec folder here. Without it Roblox opens but nothing trades.'),
-      (DV.autoexec || []).length ? h('div', { class: 'mx-rows' }, DV.autoexec.map(f => h('div', { class: 'muted mono', style: { fontSize: '11px' } }, '✓ ' + f))) : h('div', { class: 'mx-empty' }, 'No executor autoexec folder found yet.'),
-      h('div', { class: 'row', style: { marginTop: '8px' } },
+  // Autoexec and the script in one card (tabs in the header, like Import Pets on Auto List)
+  const installed = (DV.autoexec || []).length;
+  DV.setupTab = DV.setupTab || 'autoexec';
+  const autoexecPanel = h('div', { class: 'mx-setup' },
+      h('p', { class: 'ink2' }, 'Zotac copies zotac_delivery.lua into your executor\'s autoexec folder. Synapse Z and executors in AppData are found by themselves; for any other executor add its autoexec folder here. Without it Roblox opens but nothing trades.'),
+      installed ? h('div', { class: 'mx-rows' }, DV.autoexec.map(f => h('div', { class: 'muted mono', style: { fontSize: '11px' } }, '✓ ' + f))) : null,
+      h('div', { class: 'row mx-setup-row' },
+        installed ? null : h('span', { class: 'muted' }, 'No executor autoexec folder found yet.'),
         ...((cfg.autoexecDirs || []).map(dir => h('span', { class: 'mx-badge' }, dir.split(/[\\/]/).slice(-2).join('/'), h('a', { href: '#', style: { marginLeft: '6px' }, onclick: async e => { e.preventDefault(); await saveSettings({ delivery: { autoexecDirs: (cfg.autoexecDirs || []).filter(x => x !== dir) } }); DV.autoexec = await M.call('agent:syncAutoexec'); render(); } }, '✕')))),
+        h('div', { class: 'grow' }),
         h('button', { class: 'btn sm', onclick: async () => {
           const dir = await run(() => M.call('dialog:folder')); if (!dir) return;
           if (!/autoexec/i.test(dir) && !await confirmBox(`"${dir}" is not called autoexec. Use it anyway?`)) return;
           await saveSettings({ delivery: { autoexecDirs: [...new Set([...(cfg.autoexecDirs || []), dir])] } });
           DV.autoexec = await run(() => M.call('agent:syncAutoexec')); render(); toast('Delivery script installed', 'good');
         } }, '+ Add autoexec folder')));
-  const scriptCard = mxCard(mxIco('code'), 'Script', 'Only to run by hand: Zotac already installs it in autoexec', null,
-    h('div', { class: 'mx-script' }, scriptBox, h('div', { class: 'col' }, h('button', { class: 'btn sm', onclick: () => { navigator.clipboard.writeText(scriptBox.value); toast('Script copied', 'good'); } }, 'Copy'))));
+  const scriptPanel = h('div', { class: 'mx-setup' },
+      h('div', { class: 'row mx-setup-top' }, h('p', { class: 'ink2 grow' }, 'Only to run by hand: Zotac already installs it in autoexec.'),
+        h('button', { class: 'btn sm', onclick: () => { navigator.clipboard.writeText(scriptBox.value); toast('Script copied', 'good'); } }, 'Copy')),
+      h('div', { class: 'x-code' }, scriptBox));
+  const setupCard = mxCard(mxIco('folder'), 'Delivery Script', 'Must run by itself when Roblox opens',
+      h('div', { class: 'row', style: { gap: '8px', flexWrap: 'nowrap' } },
+        h('span', { class: 'mx-badge ' + (installed ? 'good' : 'bad') }, installed ? 'INSTALLED' : 'NOT INSTALLED'),
+        h('div', { class: 'x-stpills' }, [['autoexec', 'Autoexec'], ['script', 'Script']].map(([k, l]) => h('button', { class: DV.setupTab === k ? 'on' : '', onclick: () => { DV.setupTab = k; render(); } }, l)))),
+      // both panels in one grid cell: the card keeps the Autoexec height, the code box fills it
+      h('div', { class: 'mx-setup-wrap' }, autoexecPanel, scriptPanel));
+  (DV.setupTab === 'script' ? autoexecPanel : scriptPanel).classList.add('off');
   const queueCard = mxCard(mxIco('clip', 'blue'), 'Delivery Queue', 'Pending trades awaiting execution',
       h('div', { class: 'row' }, h('span', { class: 'mx-count' }, queue.length + ' items'), h('button', { class: 'btn sm', onclick: reload }, mxSvg('refresh', 12))),
       queue.length ? h('div', { class: 'mx-dlist' }, queue.map(d => h('div', { class: 'mx-drow' }, thumb(d),
@@ -750,8 +764,8 @@ PAGES.delivery = async root => {
   const activity = h('div', { class: 'mx-stack' },
     tiles,
     h('div', { class: 'mx-dcols' },
-      h('div', { class: 'mx-stack' }, modeCard, settingsCard, scriptAcctCard, autoexecCard, scriptCard),
-      h('div', { class: 'mx-stack' }, queueCard, logCard)),
+      h('div', { class: 'mx-stack' }, modeCard, settingsCard, scriptAcctCard),
+      h('div', { class: 'mx-stack' }, queueCard, logCard, setupCard)),
     histCard,
     h('details', { class: 'mx-jobs' }, h('summary', null, 'Agent jobs & API'),
       table(jobs, [
