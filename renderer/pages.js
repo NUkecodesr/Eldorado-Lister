@@ -214,7 +214,9 @@ PAGES.autolist = async root => {
   const s = S.settings; const al = s.autolist; const rules = s.rules;
   const q = AL.filter.q.toLowerCase();
   // pets taken off Auto List stay in their account's inventory (Roblox Accounts), hidden here
-  if (AL.filter.status === 'removed') AL.filter.status = 'available';
+  // Auto List is the queue of pets waiting to be listed: listed and sold pets are on Listings /
+  // Roblox Accounts, so it always shows the available ones
+  AL.filter.status = 'available';
   const removedView = false;
   const pets = S.pets.filter(p =>
     (!AL.filter.account || p.accountId === AL.filter.account) &&
@@ -335,11 +337,6 @@ PAGES.autolist = async root => {
     h('span', null, h('b', null, String(AL.selected.size)), ` selected of ${pets.length} pets`),
     h('div', { class: 'grow' }),
     AL.selected.size ? [
-      h('button', { class: 'btn sm ghost', title: 'For listed pets whose Eldorado offer is gone', onclick: async () => {
-        const ids = [...AL.selected].filter(id => { const p = S.pets.find(x => x.id === id); return p && p.status === 'listed'; });
-        if (!ids.length) return toast('Only listed pets can be reset (sold ones belong to an order)', 'error');
-        if (!await confirmBox(`Put ${ids.length} listed pet(s) back to available? Their Eldorado offer is NOT deleted: only do this when the offer is already gone.`)) return;
-        await M.call('pets:update', ids, { status: 'available', offerId: null }); await refreshData(); render(); } }, 'Reset to available'),
       removedView
         ? h('button', { class: 'btn sm', onclick: () => putBack([...AL.selected]) }, '↩ Put back')
         : h('button', { class: 'btn sm ghost danger', title: 'Off Auto List only: scanned pets stay in their account inventory', onclick: async () => { const ids = [...AL.selected]; if (!await confirmBox(`Remove ${ids.length} pet(s) from Auto List? Scanned pets stay in their account's inventory (filter "Removed" puts them back); pasted pets are removed. Eldorado offers are not touched.`)) return; removeFromList(ids); } }, 'Remove')] : null,
@@ -490,11 +487,8 @@ PAGES.autolist = async root => {
   // ---- pet list ----
   const sortBtn = (key, label) => h('button', { class: 'x-chip' + (AL.sort === key ? ' on' : ''), onclick: () => { if (AL.sort === key) AL.dir = -AL.dir; else { AL.sort = key; AL.dir = key === 'name' ? 1 : -1; } render(); } },
     label, AL.sort === key ? (AL.dir > 0 ? ' ↑' : ' ↓') : '');
-  const statusPills = h('div', { class: 'x-stpills' }, [['available', 'Ready'], ['listed', 'Listed'], ['sold', 'Sold'], ['all', 'All']]
-    .map(([k, l]) => h('button', { class: AL.filter.status === k ? 'on' : '', onclick: () => { AL.filter.status = k; AL.selected.clear(); render(); } }, l)));
   const sortBar = h('div', { class: 'x-sortbar' },
-    statusPills,
-    h('span', { class: 'x-lbl', style: { marginLeft: '8px' } }, 'SORT'), sortBtn('name', 'Name'), sortBtn('gen', 'Generation'),
+    h('span', { class: 'x-lbl' }, 'SORT'), sortBtn('name', 'Name'), sortBtn('gen', 'Generation'),
     h('div', { class: 'grow' }),
     S.accounts.length > 1 ? sel([['', 'All accounts'], ...S.accounts.map(a => [a.id, a.username])], AL.filter.account, v => { AL.filter.account = v; render(); }) : null,
     h('input', { type: 'search', class: 'x-psearch', placeholder: '⌕  Search pet...', value: AL.filter.q, oninput: e => { AL.filter.q = e.target.value; clearTimeout(AL.qt); AL.qt = setTimeout(render, 250); } }));
