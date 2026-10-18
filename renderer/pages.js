@@ -497,7 +497,9 @@ PAGES.autolist = async root => {
       h('label', { class: 'x-fld' }, h('span', { class: 'x-lbl' }, 'COUNT OFFERS WITHIN'),
         h('span', { class: 'row', style: { gap: '6px', flexWrap: 'nowrap' } },
           h('input', { type: 'number', step: 'any', min: '0', class: 'x-tol', value: byMs ? (al.genToleranceMs ?? 0) : (al.genTolerancePct ?? 15), onchange: e => saveSettings({ autolist: byMs ? { genToleranceMs: Number(e.target.value) || 0 } : { genTolerancePct: Number(e.target.value) || 0 } }).then(render) }),
-          sel([['ms', 'Exact M/s'], ['pct', '± %']], byMs ? 'ms' : 'pct', v => saveSettings({ autolist: { genTolMode: v } }).then(render))))),
+          sel([['ms', 'Exact M/s'], ['pct', '± %']], byMs ? 'ms' : 'pct', v => saveSettings({ autolist: { genTolMode: v } }).then(render)))),
+      h('label', { class: 'x-fld', title: 'With 3+ similar offers, one this far under their median is a dump or bait and is not used. 0 = off. Also used by the repricer.' }, h('span', { class: 'x-lbl' }, 'IGNORE LOWBALLERS'),
+        h('span', { class: 'x-unit' }, h('input', { type: 'number', step: '1', min: '0', max: '90', value: rules.lowballPct ?? 40, onchange: e => saveSettings({ rules: { lowballPct: Math.min(90, Math.max(0, Number(e.target.value) || 0)) } }).then(render) }), h('span', null, '% under market')))),
     listingRules);
 
   // ---- pet list ----
@@ -749,48 +751,68 @@ PAGES.listings = async root => {
         h('button', { class: 'del', title: 'Delete', onclick: async () => { if (await confirmBox(`Delete offer "${o.offerTitle}"?`)) act(o, 'delete'); } }, '✕')));
   };
 
+  // ---- top: state tabs + refresh; bulk actions; the auto-repricer and its rules ----
+  const stTabs = h('div', { class: 'x-stpills' }, [['Active', D.Active.length], ['Paused', D.Paused.length], ['Closed', D.Closed.length], ['All', null]]
+    .map(([k, n]) => h('button', { class: LS.state === k ? 'on' : '', onclick: () => { LS.state = k; render(); } }, k, n != null ? h('span', { class: 'x-stn' }, String(n)) : null)));
+  const pct = Math.max(0, Number(LS.pct) || 0);
+  const bulkBar = h('section', { class: 'x-panel x-lbulk' },
+    h('div', { class: 'x-lgrp' }, h('span', { class: 'x-lbl' }, 'ALL OFFERS'),
+      h('button', { class: 'btn sm', disabled: !D.Active.length, onclick: () => bulk(D.Active, o => act(o, 'pause', undefined, true), 'Pause') }, `❚❚ Pause ${D.Active.length} active`),
+      h('button', { class: 'btn sm', disabled: !D.Paused.length, onclick: () => bulk(D.Paused, o => act(o, 'resume', undefined, true), 'Resume') }, `▶ Resume ${D.Paused.length} paused`)),
+    h('span', { class: 'x-lsep' }),
+    h('div', { class: 'x-lgrp' }, h('span', { class: 'x-lbl' }, 'CHANGE PRICES'),
+      h('div', { class: 'x-seg' }, [['-', '− Lower'], ['+', '+ Raise']].map(([k, l]) => h('button', { class: LS.dir === k ? 'on' : '', onclick: () => { LS.dir = k; render(); } }, l))),
+      h('label', { class: 'x-unit' }, h('input', { type: 'number', value: LS.pct, min: '0', step: '1', onchange: e => { LS.pct = Number(e.target.value) || 0; render(); } }), h('span', null, '%')),
+      h('button', { class: 'btn sm primary', disabled: !D.Active.length || !pct, onclick: () => { const f = 1 + (LS.dir === '+' ? 1 : -1) * pct / 100; bulk(D.Active, o => act(o, 'price', Math.max(0.01, Math.round(priceOf(o) * f * 100) / 100), true), `${LS.dir === '+' ? 'Raise' : 'Lower'} by ${pct}%:`); } }, `Apply to ${D.Active.length} active`)),
+    h('div', { class: 'grow' }),
+    h('button', { class: 'btn sm danger', disabled: !rows.length, title: 'Deletes the offers shown below (tab + search)', onclick: () => bulk(rows, o => act(o, 'delete', undefined, true), 'Delete') }, `Delete ${rows.length} shown`));
+  const rules = S.settings.rules || {};
+  const lowPct = rules.lowballPct == null || rules.lowballPct === '' ? 40 : Number(rules.lowballPct) || 0;
+  const maxDrop = rp.maxDropPct == null || rp.maxDropPct === '' ? 15 : Number(rp.maxDropPct) || 0;
+  const unit = (value, u, fn, attrs = {}) => h('label', { class: 'x-unit' }, num(value, fn, { style: {}, min: '0', ...attrs }), h('span', null, u));
+  const rpFld = (label, ctl, tip) => h('div', { class: 'x-fld', title: tip || '' }, h('span', { class: 'x-lbl' }, label), ctl);
+  const rpCard = h('section', { class: 'x-panel x-rp' + (rp.enabled ? ' on' : '') },
+    h('div', { class: 'x-rp-h' },
+      h('span', { class: 'x-glyph' }, '%'), h('b', null, 'AUTO-REPRICER'), sw(rp.enabled, v => saveSettings({ repricer: { enabled: v } }).then(render)),
+      h('span', { class: 'x-rp-st' }, (rp.enabled ? `On · every ${rp.intervalMin} min` : 'Off') + ' · last run ' + ago(S.info && S.info.repricerLast)),
+      h('div', { class: 'grow' }),
+      h('button', { class: 'btn sm', onclick: manageTraits }, `Blocked traits (${blocked.length})`),
+      h('button', { class: 'btn sm primary', onclick: async () => {
+        const ids = D.Active.filter(o => !hasBlocked(o)).map(o => o.id);
+        toast(`Repricing ${ids.length} offers…`);
+        const r = await run(() => M.call('repricer:run', ids)); if (r) toast(`Checked ${r.checked}, changed ${r.changed}`, 'good'); load();
+      } }, 'Reprice now')),
+    h('div', { class: 'x-rp-grid' },
+      rpFld('REPRICE', sel([['all', 'All listings'], ['chosen', `Only chosen (${(rp.offerIds || []).length})`]], rp.scope || 'all', v => saveSettings({ repricer: { scope: v } }).then(render))),
+      rpFld('EVERY', unit(rp.intervalMin, 'min', v => saveSettings({ repricer: { intervalMin: Math.max(5, Number(v) || 20) } }).then(render), { min: '5' })),
+      rpFld('BEAT CHEAPEST BY', unit(rp.undercut, '$', v => saveSettings({ repricer: { undercut: Math.max(0, Number(v) || 0) } }).then(render), { step: '0.01' })),
+      rpFld('NEVER UNDER', unit(rp.floorPct, '% of first price', v => saveSettings({ repricer: { floorPct: Math.max(0, Number(v) || 0) } }).then(render)), 'The lowest the repricer goes: this share of the price the offer had when Zotac first saw it'),
+      rpFld('IGNORE LOWBALLERS', unit(lowPct, '% under market', v => saveSettings({ rules: { lowballPct: Math.min(90, Math.max(0, Number(v) || 0)) } }).then(render)), 'A similar offer this far under the others (or, with only 1-2 others, under your first price) is a dump or bait: it is not followed. 0 = off. Also used by Auto Price on Auto List.'),
+      rpFld('MAX DROP PER RUN', unit(maxDrop, '%', v => saveSettings({ repricer: { maxDropPct: Math.min(90, Math.max(0, Number(v) || 0)) } }).then(render)), 'A price never falls more than this in one run, so a sudden dump only moves you a little at a time. 0 = no cap'),
+      rpFld('RAISE WHEN CHEAPEST', h('div', { class: 'x-rp-sw' }, sw(!rp.onlyIfBeaten, v => saveSettings({ repricer: { onlyIfBeaten: !v } }).then(render)), h('small', { class: 'muted' }, !rp.onlyIfBeaten ? 'moves up to just under the next offer' : 'only lowers')))),
+    h('p', { class: 'x-rp-sum' }, `Beats the cheapest similar offer by $${Number(rp.undercut || 0).toFixed(2)}`
+      + (lowPct ? ` · ignores offers more than ${lowPct}% under the market` : ' · lowball guard off')
+      + ` · never under ${rp.floorPct || 0}% of an offer's first price (offers under it are not followed)`
+      + (maxDrop ? ` · at most −${maxDrop}% per run` : '')
+      + (blocked.length ? ` · skips ${blocked.length} blocked trait${blocked.length === 1 ? '' : 's'}` : '')));
+
   root.append(
-    xHead('L', 'My Listings', 'Manage your active listings',
-      h('button', { class: 'btn sm', onclick: () => bulk(D.Active, o => act(o, 'pause', undefined, true), 'Pause') }, '❚❚ Pause All'),
-      h('button', { class: 'btn sm', onclick: () => bulk(D.Paused, o => act(o, 'resume', undefined, true), 'Resume') }, '▶ Resume All'),
-      h('span', { class: 'x-adj' },
-        sel([['-', '−'], ['+', '+']], LS.dir, v => LS.dir = v),
-        h('input', { type: 'number', value: LS.pct, min: '0', step: '1', onchange: e => LS.pct = Number(e.target.value) || 0 }), '%',
-        h('button', { class: 'btn sm', onclick: () => { const f = 1 + (LS.dir === '+' ? 1 : -1) * LS.pct / 100; bulk(D.Active, o => act(o, 'price', Math.max(0.01, Math.round(priceOf(o) * f * 100) / 100), true), `${LS.dir}${LS.pct}% on`); } }, '% All')),
-      sel([['Active', 'Active'], ['Paused', 'Paused'], ['Closed', 'Closed'], ['All', 'All']], LS.state, v => { LS.state = v; render(); }),
-      h('button', { class: 'btn sm', onclick: load }, LS.loading ? 'Loading…' : t('refresh')),
-      h('button', { class: 'btn sm danger', onclick: () => bulk(rows, o => act(o, 'delete', undefined, true), 'Delete') }, 'Delete All')),
+    xHead('L', 'My Listings', 'Manage your active listings', stTabs,
+      h('button', { class: 'btn sm', onclick: load }, LS.loading ? 'Loading…' : '⟳ ' + t('refresh'))),
     !S.me ? h('div', { class: 'card empty' }, 'Log in on the Account page to see your listings.') : h('div', null,
       h('div', { class: 'x-tiles x-t6' },
         xTile('ACTIVE', String(D.Active.length), 'x-green'), xTile('PAUSED', String(D.Paused.length), 'x-yellow'),
         xTile('CLOSED', String(D.Closed.length), 'x-red'), xTile('OFFLINE', String(offline), 'x-grey'),
         xTile('TOTAL LISTED', money(totalListed), 'x-green'), xTile('LIQUID (-15%)', money(totalListed * 0.85), 'x-purple')),
-      h('div', { class: 'x-bar' },
-        h('span', { class: 'x-bar-k' }, 'AUTO-REPRICER'), sw(rp.enabled, v => saveSettings({ repricer: { enabled: v } })),
-        h('span', { class: 'x-bar-f' }, 'Reprice: ', sel([['all', 'All listings'], ['chosen', `Only chosen (${(rp.offerIds || []).length})`]], rp.scope || 'all', v => saveSettings({ repricer: { scope: v } }).then(render))),
-        h('span', { class: 'x-bar-f' }, 'Interval: ', num(rp.intervalMin, v => saveSettings({ repricer: { intervalMin: v } }), { style: { width: '56px' } }), ' min'),
-        h('span', { class: 'x-bar-f' }, 'Undercut: $', num(rp.undercut, v => saveSettings({ repricer: { undercut: v } }), { style: { width: '66px' } })),
-        h('div', { class: 'grow' }),
-        h('button', { class: 'btn sm primary', onclick: async () => {
-          const ids = D.Active.filter(o => !hasBlocked(o)).map(o => o.id);
-          toast(`Repricing ${ids.length} offers…`);
-          const r = await run(() => M.call('repricer:run', ids)); if (r) toast(`Checked ${r.checked}, changed ${r.changed}`, 'good'); load();
-        } }, '$ Auto Price All'),
-        h('span', { class: 'x-bar-f' }, 'Raise up', sw(!rp.onlyIfBeaten, v => saveSettings({ repricer: { onlyIfBeaten: !v } })))),
-      h('div', { class: 'x-bar x-bar2' },
-        h('span', { class: 'x-bar-k' }, 'REPRICER · BLOCKED TRAITS'),
-        h('button', { class: 'btn sm', onclick: manageTraits }, `Manage traits (${blocked.length})`),
-        h('small', { class: 'muted' }, 'pets with a blocked trait won\'t be repriced'),
-        h('div', { class: 'grow' }), h('small', { class: 'muted' }, 'Last run: ' + ago(S.info && S.info.repricerLast))),
+      bulkBar, rpCard,
       LS.err ? h('div', { class: 'card x-lerr' }, h('b', null, 'Some listings could not be loaded'), h('pre', null, LS.err),
         h('button', { class: 'btn sm', onclick: load }, 'Try again')) : null,
       h('input', { class: 'x-search', type: 'search', placeholder: 'Search…', value: LS.q, oninput: e => { LS.q = e.target.value; clearTimeout(LS.qt); LS.qt = setTimeout(render, 250); } }),
       rows.length ? h('div', { class: 'x-lgrid' }, rows.map(card)) : h('div', { class: 'x-empty' }, LS.loading || !LS.data ? 'Loading…' : 'No offers in this state.'),
       LS.at ? h('small', { class: 'muted' }, 'Updated ' + ago(LS.at)) : null,
-      h('details', { class: 'x-fold' }, h('summary', null, 'Repricer settings & log'),
+      h('details', { class: 'x-fold' }, h('summary', null, 'Repricer log'),
         h('div', { class: 'card', style: { marginTop: '10px' } },
-          h('div', { class: 'grid g2' }, h('label', { class: 'f' }, 'Floor (% of first price)', num(rp.floorPct, v => saveSettings({ repricer: { floorPct: v } })))),
-          h('div', { class: 'log', 'data-tail': true, style: { marginTop: '10px' } }, (S.logs || []).filter(l => /\[Repricer\]/.test(l.msg)).slice(-40).map(l => h('div', { class: 'l-' + l.level }, `${new Date(l.t).toLocaleTimeString()} ${l.msg.replace('[Repricer] ', '')}`)))))));
+          h('div', { class: 'log', 'data-tail': true }, (S.logs || []).filter(l => /\[Repricer\]/.test(l.msg)).slice(-40).map(l => h('div', { class: 'l-' + l.level }, `${new Date(l.t).toLocaleTimeString()} ${l.msg.replace('[Repricer] ', '')}`)))))));
 };
 
 // ============================== TEMPLATES =================================

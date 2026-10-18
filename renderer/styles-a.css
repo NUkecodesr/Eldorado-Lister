@@ -534,3 +534,28 @@ input.x-alpin { width: 62px; flex: 0 0 62px; padding: 3px 5px; font-size: 12px; 
 .x-step .x-go:hover { filter: brightness(1.08); background: var(--cyan); }
 .x-rulesbar { display: flex; align-items: center; gap: 12px; justify-content: space-between; padding: 8px 14px; margin-bottom: 12px; border: 1px dashed var(--line2); border-radius: var(--radius); color: var(--muted); font-size: 11.5px; }
 .x-rulescard .x-bulk { margin-bottom: 14px; }
+
+/* Listings: state tabs, bulk bar, auto-repricer card */
+.x-stpills .x-stn { margin-left: 6px; font-size: 10px; opacity: .7; font-weight: 600; }
+.x-lbulk { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 10px 14px; }
+.x-lgrp { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.x-lsep { width: 1px; align-self: stretch; background: var(--line2); }
+.x-seg { display: inline-flex; border: 1px solid var(--line2); border-radius: 8px; overflow: hidden; background: var(--bg2); }
+.x-seg button { border: 0; background: transparent; color: var(--ink2); padding: 5px 11px; font-size: 12px; cursor: pointer; }
+.x-seg button + button { border-left: 1px solid var(--line2); }
+.x-seg button.on { background: var(--accent-soft); color: var(--accent-hi); font-weight: 600; }
+.x-unit { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line2); border-radius: 8px; background: var(--bg2); padding-right: 9px; }
+.x-unit input { width: 64px; border: 0 !important; background: transparent !important; box-shadow: none !important; padding: 6px 8px; }
+.x-unit span { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.x-rp-h { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.x-rp-h b { font-size: 10.5px; letter-spacing: .12em; color: var(--ink2); }
+.x-rp-st { font-size: 11.5px; color: var(--muted); }
+.x-rp.on .x-rp-st { color: var(--good); }
+.x-rp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px 16px; }
+.x-rp-grid select { width: 100%; }
+.x-rp-sw { display: flex; align-items: center; gap: 8px; min-height: 32px; }
+.x-rp-sum { margin: 14px 0 0; padding-top: 10px; border-top: 1px dashed var(--line2); font-size: 11.5px; color: var(--muted); }
+.x-rp-grid .x-unit { display: flex; }
+.x-rp-grid .x-unit input { flex: 1; width: auto; min-width: 0; }
+.x-rp-grid select, .x-rp-grid .x-unit input { height: 34px; }
+.x-rulescard .x-unit input { width: 56px; height: 34px; }

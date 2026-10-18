@@ -1,6 +1,6 @@
 // Background services: Discord webhook, repricer, order/notification watcher, Roblox lookups.
 const EventEmitter = require('events');
-const { smartPrice } = require('./pricing');
+const { smartPrice, lowballGuard } = require('./pricing');
 const { round2 } = require('./eldorado');
 const { rid } = require('./store');
 const sab = require('./sab');
@@ -104,22 +104,54 @@ class Repricer extends EventEmitter {
         const current = (o.pricePerUnit || {}).amount;
         if (blocked.size && traitsOf(o, pet).some(t => blocked.has(String(t).toLowerCase()))) { out.skipped = (out.skipped || 0) + 1; continue; }
         if (current && !bases[o.id]) bases[o.id] = pet.basePrice || current;
-        const tmp = { ...settings, autolist: { ...settings.autolist, undercut: rp.undercut } };
+        // own offers never count (a second offer of ours must not make us undercut ourselves)
+        const tmp = { ...settings, autolist: { ...settings.autolist, undercut: rp.undercut }, rules: { ...settings.rules, ignoreOwn: true } };
         const sp = await smartPrice(this.eld, pet, tmp, me.id || me.userId);
         out.checked++;
-        if (!sp.price || !current) continue;
+        if (!current) continue;
         const base = bases[o.id] || pet.basePrice || current;
-        const floor = Math.max(settings.autolist.minPrice || 0, base * (rp.floorPct || 0) / 100);
-        let target = Math.max(floor, sp.price);
-        target = round2(target);
-        const beaten = sp.comps.some(c => c.price < current);
-        if (Math.abs(target - current) < 0.01) continue;
+        const floor = round2(Math.max(settings.autolist.minPrice || 0, base * (rp.floorPct || 0) / 100));
+        const undercut = Number(rp.undercut) || 0;
+        const guard = lowballGuard(settings.rules);
+        const notes = [];
+        if (sp.ignored && sp.ignored.length) notes.push(`ignored ${sp.ignored.length} lowball: ${sp.ignored.map(x => '$' + x.price + (x.seller ? ' @' + x.seller : '')).join(', ')}`);
+        let ladder = sp.ladder || [];
+        // with only 1-2 similar offers there is no market median to spot a dump by: one far under the
+        // price this offer started at is ignored instead
+        if (guard && ladder.length && ladder.length < 3) {
+          const low = ladder.filter(x => x.v < base * (1 - guard));
+          if (low.length) { ladder = ladder.filter(x => !low.includes(x)); notes.push(`ignored ${low.length} lowball more than ${Math.round(guard * 100)}% under the first price $${round2(base)}: ${low.map(x => '$' + x.price + (x.seller ? ' @' + x.seller : '')).join(', ')}`); }
+        }
+        let target, why;
+        if (ladder.length) {
+          // beat the cheapest offer that can be beaten without going under the floor; offers under
+          // the floor are left alone (no race to the bottom)
+          const beat = ladder.find(x => x.v - undercut >= floor);
+          if (beat) {
+            target = beat.v - undercut;
+            why = `beat ${beat.seller ? '@' + beat.seller : 'an offer'} at $${round2(beat.v)}`;
+            const under = ladder.indexOf(beat);
+            if (under) notes.push(`${under} offer(s) under the floor $${floor} not followed`);
+          } else { target = floor; why = `every similar offer is under the floor $${floor}`; }
+        } else if (sp.ladder && sp.ladder.length) {
+          // every similar offer was a lowball: nothing real to compete with, the price stays
+          if (notes.length) this.log('info', `${o.offerTitle}: kept $${current} (${notes.join('; ')})`);
+          continue;
+        } else if (sp.price) { target = Math.max(floor, sp.price); why = sp.basis; }   // estimate mode
+        else continue;                                                                  // no similar listings
+        // a sudden drop never takes more than maxDropPct off in one run (0 = no cap)
+        const maxDrop = Math.min(90, Math.max(0, rp.maxDropPct == null || rp.maxDropPct === '' ? 15 : Number(rp.maxDropPct) || 0));
+        if (maxDrop && target < current * (1 - maxDrop / 100)) { target = current * (1 - maxDrop / 100); notes.push(`capped at -${maxDrop}% this run`); }
+        target = round2(Math.max(target, floor));
+        const beaten = ladder.some(x => x.v <= current);
+        // compared in cents: 9.99 vs 10 is 0.00999… in floats and used to be skipped as "no change"
+        if (Math.round(target * 100) === Math.round(current * 100)) { if (sp.ignored && sp.ignored.length) this.log('info', `${o.offerTitle}: kept $${current} (${notes.join('; ')})`); continue; }
         if (rp.onlyIfBeaten && !beaten && target < current) continue;
         if (rp.onlyIfBeaten && target > current) continue;
         await this.eld.setPrice(o.id, target);
         if (pet.id) { pet.price = target; pet.basePrice = pet.basePrice || current; }
         out.changed++;
-        this.log('info', `${o.offerTitle}: $${current} → $${target} (${sp.basis})`);
+        this.log('info', `${o.offerTitle}: $${current} → $${target} (${why}${notes.length ? '; ' + notes.join('; ') : ''})`);
         await new Promise(r => setTimeout(r, 1500));
       }
       this.store.save();

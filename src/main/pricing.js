@@ -69,14 +69,25 @@ async function smartPrice(eld, pet, settings, myId) {
   if (near.length < minComps && al.noCompsMode !== 'estimate') {
     return { price: null, review: true, basis: `no similar listings (${near.length} within ${tolLabel} gen${minComps > 1 ? `, need ${minComps}` : ''}, ${comps.length} of this item) - set the price yourself`, comps: comps.slice(0, 15), item, totalMarket: res && res.recordCount };
   }
-  let price, basis;
+  let price, basis, ladder = [], ignored = [];
   if (near.length) {
-    const cheapest = Math.min(...near.map(c => c.price));
-    // scale the cheapest comparable to our exact gen when it is lower/higher
-    const ref = near.find(c => c.price === cheapest);
-    const scaled = ref.gen > 0 ? cheapest * (pet.gen / ref.gen) : cheapest;
-    price = Math.min(cheapest, scaled) - (al.undercut || 0);
-    basis = `${near.length} comps within ${tolLabel} gen, cheapest $${cheapest}`;
+    // each similar offer as a price for our gen: a comparable with more gen/s is scaled down to ours,
+    // never up (the cheapest one decides, as before)
+    const eff = c => c.gen > 0 && pet.gen > 0 ? Math.min(c.price, c.price * (pet.gen / c.gen)) : c.price;
+    let list = near.map(c => ({ v: eff(c), price: c.price, seller: c.seller, gen: c.gen })).sort((a, b) => a.price - b.price);
+    // lowball guard: with 3+ similar offers, one far under their median is a dump or bait, not the
+    // market, and is ignored instead of dragging the price down (rules.lowballPct, 0 = off)
+    const guard = lowballGuard(rules);
+    if (guard && list.length >= 3) {
+      const m = median(list.map(x => x.v));
+      ignored = list.filter(x => x.v < m * (1 - guard));
+      list = list.filter(x => x.v >= m * (1 - guard));
+    }
+    ladder = list;
+    const ref = ladder[0];
+    price = ref.v - (al.undercut || 0);
+    basis = `${near.length} comps within ${tolLabel} gen, cheapest $${ref.price}${ref.seller ? ' (@' + ref.seller + ')' : ''}`
+      + (ignored.length ? `, ignored ${ignored.length} lowball (${ignored.map(x => '$' + x.price + (x.seller ? ' @' + x.seller : '')).join(', ')})` : '');
   } else if (comps.some(c => c.gen > 0) && pet.gen > 0) {
     const rates = comps.filter(c => c.gen > 0).map(c => c.price / c.gen);
     const rate = Math.min(median(rates), Math.min(...rates) * 1.5);
@@ -90,7 +101,12 @@ async function smartPrice(eld, pet, settings, myId) {
     basis = 'no comps — fallback $/M/s';
   }
   price = Math.max(al.minPrice || 0.5, Math.min(al.maxPrice || 99999, price));
-  return { price: round2(price), basis, comps: comps.slice(0, 15), item, totalMarket: res && res.recordCount };
+  return { price: round2(price), basis, comps: comps.slice(0, 15), ladder, ignored, item, totalMarket: res && res.recordCount };
+}
+// share of the market price under which a similar offer counts as a lowball (0..0.9; default 40 %)
+function lowballGuard(rules) {
+  const v = rules && rules.lowballPct;
+  return Math.min(90, Math.max(0, v === '' || v == null ? 40 : Number(v) || 0)) / 100;
 }
 
-module.exports = { smartPrice, compFromResult, passesRules };
+module.exports = { smartPrice, compFromResult, passesRules, lowballGuard };
