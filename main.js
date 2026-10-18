@@ -357,9 +357,9 @@ function setupCapture() {
 
 function wire() {
   store = new Store(app.getPath('userData'));
-  // pets pasted as JSON on Auto List are for this session only: drop the ones still unlisted
-  // (listed / sold ones stay, Auto Delivery needs them to match orders)
-  { const before = store.get('pets').length; store.set('pets', store.get('pets').filter(p => !(p.status === 'available' && (p.session || (!p.accountId && !p.manual))))); if (store.get('pets').length !== before) store.save(); }
+  // pets pasted as JSON on Auto List stay (also over a restart) until they are listed or removed;
+  // only unlisted pets that belong to no account and were not added by hand are dropped
+  { const before = store.get('pets').length; store.set('pets', store.get('pets').filter(p => !(p.status === 'available' && !p.accountId && !p.manual))); if (store.get('pets').length !== before) store.save(); }
   // and the accounts such a paste created, once nothing points at them (no pets, cookie or note)
   { const used = new Set(store.get('pets').map(p => p.accountId)); const before = store.get('accounts').length;
     store.set('accounts', store.get('accounts').filter(a => !(a.session && !used.has(a.id) && !a.cookieEnc && !a.note)));
@@ -547,7 +547,7 @@ function importPets(json, accountId, { replace = false, onlySaved = false } = {}
         if ((!it.traits || !it.traits.length) && q && q.length) it.traits = q.shift();
       }
     }
-    // temporary pasted pets are not part of the synced inventory: a rescan never drops them, but
+    // pasted pets are not part of the synced inventory: a rescan never drops them, but
     // one the scan shows in that base becomes that inventory pet (no second copy)
     sessionLeft = store.get('pets').filter(p => ids.has(p.accountId) && p.status === 'available' && p.session);
     dropped = store.get('pets').filter(p => ids.has(p.accountId) && p.status === 'available' && !inDelivery.has(p.id) && !p.session);
@@ -803,7 +803,7 @@ function ipc() {
   // pets
   handle('pets:list', () => store.get('pets'));
   handle('server:scans', () => Object.values(serverScans).sort((a, b) => b.receivedAt - a.receivedAt));
-  // Parsing pasted scanner JSON: temporary Auto List pets (gone on restart unless listed/sold),
+  // Parsing pasted scanner JSON: Auto List pets that stay until listed or removed (also over a restart),
   // linked to the matching saved account (or the one picked) so they can be delivered, and kept out
   // of that account's inventory. Bases of accounts Zotac doesn't have are skipped.
   handle('pets:import', (json, accountId) => {
@@ -864,7 +864,7 @@ function ipc() {
     store.save(); send('pets:changed'); return true;
   });
   // Auto List ✕: off Auto List only. A scanned pet stays in its account's inventory (hidden from
-  // Auto List, put back from the "Removed" filter); a pasted (temporary) pet only lived in Auto List,
+  // Auto List, put back from the "Removed" filter); a pasted pet only lives in Auto List,
   // so it is deleted unless it is listed or sold. Eldorado offers are never touched.
   handle('pets:autolistRemove', ids => {
     const set = new Set([].concat(ids));

@@ -236,14 +236,14 @@ PAGES.autolist = async root => {
     let json; try { json = JSON.parse(text); } catch (e) { return toast('Invalid JSON: ' + e.message, 'error'); }
     const target = await new Promise(res => {
       const s2 = sel([['', 'Match the account names in the JSON'], ...S.accounts.map(a => [a.id, '@' + a.username])], '', v => { s2._v = v; });
-      modal('Import pets', h('div', null, h('label', { class: 'f' }, 'Assign to account', s2), h('p', { class: 'muted' }, 'The pets are temporary Auto List pets (gone on restart unless listed), linked to a saved Roblox account so Zotac can deliver them, and not added to that account\'s inventory. Pets of accounts that are not saved in Roblox Accounts are skipped. Accepts scanner JSON and Eldorado offer JSON (pick the account for that).')), [
+      modal('Import pets', h('div', null, h('label', { class: 'f' }, 'Assign to account', s2), h('p', { class: 'muted' }, 'The pets stay in Auto List until you list or remove them (also after a restart), linked to a saved Roblox account so Zotac can deliver them, and not added to that account\'s inventory. Pets of accounts that are not saved in Roblox Accounts are skipped. Accepts scanner JSON and Eldorado offer JSON (pick the account for that).')), [
         { label: t('cancel'), fn: () => res(undefined) }, { label: t('import'), cls: 'primary', fn: () => res(s2._v || '') }]);
     });
     if (target === undefined) return;
     const r = await run(() => M.call('pets:import', json, target || null));
     if (r) {
       const sk = (r.skipped || []).filter(Boolean);
-      toast(`Added ${r.added} temporary pets${r.matched ? `, ${r.matched} already in Zotac (shown again, not doubled)` : ''}${sk.length ? ' — skipped (not a saved account): ' + sk.map(n => n.startsWith('(') ? n : '@' + n).join(', ') : ''}`, r.added || r.matched ? 'good' : 'error', sk.length ? 9000 : 5000);
+      toast(`Added ${r.added} pets to Auto List${r.matched ? `, ${r.matched} already in Zotac (shown again, not doubled)` : ''}${sk.length ? ' — skipped (not a saved account): ' + sk.map(n => n.startsWith('(') ? n : '@' + n).join(', ') : ''}`, r.added || r.matched ? 'good' : 'error', sk.length ? 9000 : 5000);
       AL.json = ''; await refreshData(); render();
     }
   };
@@ -311,7 +311,7 @@ PAGES.autolist = async root => {
   const scriptPanel = h('section', { class: 'x-panel' },
     h('div', { class: 'x-ptitle' }, h('span', { class: 'x-glyph' }, '</>'), 'PLOT SCANNER SCRIPT', h('div', { class: 'grow' }),
       h('small', { class: 'muted', style: { fontWeight: 400, letterSpacing: 0 } }, 'Auto Scanner'), sw((S.settings.scanner || {}).autoexec !== false, v => toggleAutoexec('scanner', v))),
-    h('p', { class: 'x-ptext' }, 'Auto Scanner syncs inventory only to a matching account already saved in Roblox Accounts. A manual scan only copies JSON; parsing it adds temporary Auto List pets, linked to a matching saved account for delivery and hidden from account inventory.'),
+    h('p', { class: 'x-ptext' }, 'Auto Scanner syncs inventory only to a matching account already saved in Roblox Accounts. A manual scan only copies JSON; parsing it adds Auto List pets that stay until you list or remove them (also after a restart), linked to a matching saved account for delivery and hidden from account inventory.'),
     h('div', { class: 'x-code' }, scriptArea,
       h('div', { class: 'row x-code-btns' },
         h('button', { class: 'btn sm', onclick: () => { if (!scriptArea.value.trim()) return toast('Nothing to copy yet', 'error'); xCopy(scriptArea.value, 'Script copied'); } }, 'Copy'))),
@@ -1248,7 +1248,7 @@ PAGES.accounts = async root => {
   if (RA.open === null) RA.open = new Set();
   const [rLo, rHi] = f.range ? f.range.split('-').map(Number) : [0, 0];
   const minG = Math.max(parseGen(f.min), rLo || 0), maxG = f.max ? parseGen(f.max) : 0, hiG = rHi || 0;
-  const live = S.pets.filter(p => p.status !== 'sold' && !p.session);   // temporary pasted pets are not inventory
+  const live = S.pets.filter(p => p.status !== 'sold' && !p.session);   // pasted pets are not inventory
   const petOk = p => (!f.q || p.name.toLowerCase().includes(f.q.toLowerCase()))
     && (!f.mutation || String(p.mutation).toLowerCase() === f.mutation.toLowerCase())
     && (!minG || p.gen >= minG) && (!maxG || p.gen <= maxG) && (!hiG || p.gen < hiG);
