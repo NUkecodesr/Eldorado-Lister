@@ -471,9 +471,10 @@ class Delivery extends EventEmitter {
     d.jobs.push(job.id);
     this.store.save();
     this.emit('job', job);
-    // both games load at the same time (the mother is launched for the job, the stock account
-    // here): the steal starts as soon as both are in, instead of one launch after the other
-    this.openHost(job);
+    // the mother is opened now (launcher, for this job); the stock account 10 s later, so the mother
+    // joins first: bases are given out in join order and the recorded route expects the mother's
+    // base where it was when it was walked. Sooner when the mother's script takes the job first.
+    setTimeout(() => { if (!job.hostAt && ['pending', 'running'].includes(job.status)) this.openHost(job); }, 10000);
   }
 
   // the stock account of a running steal is opened with real Roblox and closed again once it is
@@ -786,6 +787,8 @@ class Delivery extends EventEmitter {
         if (j.crashes > 3) { this.jobResult(j.id, false, `Roblox of @${username} ${why} - 3 times in this job`); continue; }
         j.status = 'pending'; j.startedAt = null; j.createdAt = Date.now(); j.cancelRequested = false;
         j.reason = `Roblox ${why} - opened again (${j.crashes}/3)`;
+        // a steal: the stock account's game closes as well, the mother has to join before it again
+        if (j.kind === 'steal' && j.fromAccountId && this.hosts) { j.hostAt = null; Promise.resolve().then(() => this.hosts.close(j.fromAccountId)).catch(() => {}); }
         this.log('warn', `Job ${j.id}: Roblox of @${username} ${why} - starting the job over on a fresh launch (${j.crashes}/3)`);
         this.store.save();
         this.emit('job', j);   // the launcher opens the account again
@@ -848,9 +851,8 @@ class Delivery extends EventEmitter {
     if (!j) return null;
     j.status = 'running'; j.startedAt = Date.now();
     this.store.save(); this.emit('job', j);
-    // the stock account was opened when the job was queued; asked again in case it closed since
-    // (the launcher skips one that is already running)
-    if (j.kind === 'steal' && Date.now() - (j.hostAt || 0) > 90000) this.openHost(j);
+    // the mother is in game (its script took the job): the stock account now, unless already opened
+    if (j.kind === 'steal' && !j.hostAt) this.openHost(j);
     return j;
   }
 
