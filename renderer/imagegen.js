@@ -349,7 +349,22 @@ function tintPicture(img, w, hgt, pal, mkey, icon, k = 1) {
       if (m01 < 0.45) gamma = Math.max(0.45, Math.log(0.45) / Math.log(m01));
     }
   }
-  const hsl = (h, sat, l) => { const a = sat * Math.min(l, 1 - l), f = n => { const k = (n + h / 30) % 12; return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); }; return [f(0) * 255, f(8) * 255, f(4) * 255]; };
+  // Rainbow: in game the whole brainrot cycles through the colours; a still card shows that as one clean
+  // red -> violet sweep over the pet's own box (mostly top to bottom), with the picture's shading
+  // multiplied in so eyes and dark details stay dark and the brightest parts lift toward white
+  let rb = null;
+  if (fx.rainbow) {
+    let x0 = W, x1 = 0, y0 = H, y1 = 0; const ls = [];
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4;
+      if (d[i + 3] > 40) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+      if (d[i + 3] > 127 && !((x + y) & 3)) ls.push((0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) / 255);
+    }
+    ls.sort((a, b) => a - b);
+    rb = { x0, y0, x1, y1, bw: Math.max(1, x1 - x0), bh: Math.max(1, y1 - y0), p2: ls[Math.floor(ls.length * 0.02)] || 0, p98: ls[Math.floor(ls.length * 0.98)] || 1 };
+  }
+  const RAINBOW = [[255, 42, 77], [255, 138, 0], [255, 213, 0], [46, 224, 90], [47, 123, 255], [155, 77, 255], [255, 63, 208]];
+  const rainbowAt = t => { const x = Math.min(0.9999, Math.max(0, t)) * (RAINBOW.length - 1), i = Math.floor(x), f = x - i; return [0, 1, 2].map(c => RAINBOW[i][c] + (RAINBOW[i + 1][c] - RAINBOW[i][c]) * f); };
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const i = (y * W + x) * 4;
     if (!d[i + 3]) continue;
@@ -357,17 +372,26 @@ function tintPicture(img, w, hgt, pal, mkey, icon, k = 1) {
     if (!learned) l = Math.min(1, Math.max(0, (l - 0.5) * 1.15 + 0.52));   // learned maps already carry the game's contrast
     else { if (hi - lo < 1) l = Math.min(1, Math.max(0, (l - lo) / (hi - lo))); if (gamma !== 1) l = Math.pow(l, gamma); }
     let rgb;
-    if (fx.rainbow) rgb = hsl(((x + y) / (W + H)) * 360 * 1.4 % 360, 0.85, 0.25 + l * 0.55);
+    if (rb) {
+      const lr = Math.min(1, Math.max(0, ((0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) / 255 - rb.p2) / Math.max(0.15, rb.p98 - rb.p2)));
+      const c0 = rainbowAt(((y - rb.y0) / rb.bh) * 0.8 + ((x - rb.x0) / rb.bw) * 0.2), sh = Math.min(1, 0.42 + lr * 0.78), wt = Math.max(0, lr - 0.82) / 0.18 * 0.22;
+      rgb = c0.map(v => Math.min(255, v * sh + (255 - v) * wt));
+    }
     else if (fx.split) { const c = v => Math.min(1, Math.max(0, (v - 0.5) * 2.2 + 0.5)); rgb = map(x < W / 2 ? c(1 - l) * 0.9 : 0.25 + c(l) * 0.75); }   // yin-yang: one half black with white features, one half white
     else if (stops) rgb = map(l);
     else continue;
-    const k = learned ? 1 : 0.9;   // learned maps replace the colour fully, like the game
+    const k = learned || rb ? 1 : 0.9;   // learned maps (and Rainbow) replace the colour fully, like the game
     d[i] = lerp(d[i], rgb[0], k); d[i + 1] = lerp(d[i + 1], rgb[1], k); d[i + 2] = lerp(d[i + 2], rgb[2], k);
   }
   g.putImageData(id, 0, 0);
   // extras, clipped to the brainrot's own shape
   g.save(); g.globalCompositeOperation = 'source-atop';
   const rnd = (() => { let s0 = 1234567; return () => (s0 = (s0 * 16807) % 2147483647) / 2147483647; })();   // same pattern every time
+  if (rb) {   // Rainbow: a soft glossy streak across the colours
+    const lg = g.createLinearGradient(rb.x0, rb.y0, rb.x1, rb.y1);
+    lg.addColorStop(0.18, 'rgba(255,255,255,0)'); lg.addColorStop(0.33, 'rgba(255,255,255,.22)'); lg.addColorStop(0.44, 'rgba(255,255,255,0)');
+    g.fillStyle = lg; g.fillRect(0, 0, W, H);
+  }
   if (fx.shine) {
     const lg = g.createLinearGradient(0, 0, W, H);
     lg.addColorStop(0.25, 'rgba(255,255,255,0)'); lg.addColorStop(0.42, `rgba(255,255,255,${fx.shine})`); lg.addColorStop(0.5, 'rgba(255,255,255,0)');
