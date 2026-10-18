@@ -75,13 +75,21 @@ async function smartPrice(eld, pet, settings, myId) {
     // never up (the cheapest one decides, as before)
     const eff = c => c.gen > 0 && pet.gen > 0 ? Math.min(c.price, c.price * (pet.gen / c.gen)) : c.price;
     let list = near.map(c => ({ v: eff(c), price: c.price, seller: c.seller, gen: c.gen })).sort((a, b) => a.price - b.price);
-    // lowball guard: with 3+ similar offers, one far under their median is a dump or bait, not the
-    // market, and is ignored instead of dragging the price down (rules.lowballPct, 0 = off)
+    // lowball guard: a few offers at the bottom with a gap of more than lowballPct to the next offer
+    // up are a dump or bait, not the market, and are ignored (rules.lowballPct, 0 = off). Measured
+    // against the next offer, not the median: an item with many overpriced listings has a high
+    // median, and the group of real sellers at the low price (no gap between them) is the market.
+    // Only a minority is ever dropped (fewer than half the offers).
     const guard = lowballGuard(rules);
     if (guard && list.length >= 3) {
-      const m = median(list.map(x => x.v));
-      ignored = list.filter(x => x.v < m * (1 - guard));
-      list = list.filter(x => x.v >= m * (1 - guard));
+      const byV = [...list].sort((a, b) => a.v - b.v);
+      let cut = -1;
+      for (let k = 0; k + 1 < byV.length && (k + 1) * 2 < byV.length; k++) if (byV[k].v < byV[k + 1].v * (1 - guard)) cut = k;
+      if (cut >= 0) {
+        const low = new Set(byV.slice(0, cut + 1));
+        ignored = list.filter(x => low.has(x));
+        list = list.filter(x => !low.has(x));
+      }
     }
     ladder = list;
     const ref = ladder[0];

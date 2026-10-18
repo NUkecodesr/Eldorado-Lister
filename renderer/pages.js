@@ -498,8 +498,8 @@ PAGES.autolist = async root => {
         h('span', { class: 'row', style: { gap: '6px', flexWrap: 'nowrap' } },
           h('input', { type: 'number', step: 'any', min: '0', class: 'x-tol', value: byMs ? (al.genToleranceMs ?? 0) : (al.genTolerancePct ?? 15), onchange: e => saveSettings({ autolist: byMs ? { genToleranceMs: Number(e.target.value) || 0 } : { genTolerancePct: Number(e.target.value) || 0 } }).then(render) }),
           sel([['ms', 'Exact M/s'], ['pct', '± %']], byMs ? 'ms' : 'pct', v => saveSettings({ autolist: { genTolMode: v } }).then(render)))),
-      h('label', { class: 'x-fld', title: 'With 3+ similar offers, one this far under their median is a dump or bait and is not used. 0 = off. Also used by the repricer.' }, h('span', { class: 'x-lbl' }, 'IGNORE LOWBALLERS'),
-        h('span', { class: 'x-unit' }, h('input', { type: 'number', step: '1', min: '0', max: '90', value: rules.lowballPct ?? 40, onchange: e => saveSettings({ rules: { lowballPct: Math.min(90, Math.max(0, Number(e.target.value) || 0)) } }).then(render) }), h('span', null, '% under market')))),
+      h('label', { class: 'x-fld', title: 'A few offers this far under the next offer up are a dump or bait and are not used; a group of sellers at the same low price is the market and is used. 0 = off. Also used by the repricer.' }, h('span', { class: 'x-lbl' }, 'IGNORE LOWBALLERS'),
+        h('span', { class: 'x-unit' }, h('input', { type: 'number', step: '1', min: '0', max: '90', value: rules.lowballPct ?? 40, onchange: e => saveSettings({ rules: { lowballPct: Math.min(90, Math.max(0, Number(e.target.value) || 0)) } }).then(render) }), h('span', null, '% under next offer')))),
     listingRules);
 
   // ---- pet list ----
@@ -794,11 +794,11 @@ PAGES.listings = async root => {
       rpFld('EVERY', unit(rp.intervalMin, 'min', v => saveSettings({ repricer: { intervalMin: Math.max(5, Number(v) || 20) } }).then(render), { min: '5' })),
       rpFld('BEAT CHEAPEST BY', unit(rp.undercut, '$', v => saveSettings({ repricer: { undercut: Math.max(0, Number(v) || 0) } }).then(render), { step: '0.01' })),
       rpFld('NEVER UNDER', unit(rp.floorPct, '% of first price', v => saveSettings({ repricer: { floorPct: Math.max(0, Number(v) || 0) } }).then(render)), 'The lowest the repricer goes: this share of the price the offer had when Zotac first saw it'),
-      rpFld('IGNORE LOWBALLERS', unit(lowPct, '% under market', v => saveSettings({ rules: { lowballPct: Math.min(90, Math.max(0, Number(v) || 0)) } }).then(render)), 'A similar offer this far under the others (or, with only 1-2 others, under your first price) is a dump or bait: it is not followed. 0 = off. Also used by Auto Price on Auto List.'),
+      rpFld('IGNORE LOWBALLERS', unit(lowPct, '% under next offer', v => saveSettings({ rules: { lowballPct: Math.min(90, Math.max(0, Number(v) || 0)) } }).then(render)), 'A few offers this far under the next offer up (or, with only 1-2 offers, under your first price) are a dump or bait: they are not followed. A group of sellers at the same low price is the market and is followed. 0 = off. Also used by Auto Price on Auto List.'),
       rpFld('MAX DROP PER RUN', unit(maxDrop, '%', v => saveSettings({ repricer: { maxDropPct: Math.min(90, Math.max(0, Number(v) || 0)) } }).then(render)), 'A price never falls more than this in one run, so a sudden dump only moves you a little at a time. 0 = no cap'),
       rpFld('RAISE WHEN CHEAPEST', h('div', { class: 'x-rp-sw' }, sw(!rp.onlyIfBeaten, v => saveSettings({ repricer: { onlyIfBeaten: !v } }).then(render)), h('small', { class: 'muted' }, !rp.onlyIfBeaten ? 'moves up to just under the next offer' : 'only lowers')))),
     !rpOpen ? null : h('p', { class: 'x-rp-sum' }, `Beats the cheapest similar offer by $${Number(rp.undercut || 0).toFixed(2)}`
-      + (lowPct ? ` · ignores offers more than ${lowPct}% under the market` : ' · lowball guard off')
+      + (lowPct ? ` · ignores dumps more than ${lowPct}% under the next offer` : ' · lowball guard off')
       + ` · never under ${rp.floorPct || 0}% of an offer's first price (offers under it are not followed)`
       + (maxDrop ? ` · at most −${maxDrop}% per run` : '')
       + (blocked.length ? ` · skips ${blocked.length} blocked trait${blocked.length === 1 ? '' : 's'}` : '')),
