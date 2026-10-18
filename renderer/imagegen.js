@@ -240,7 +240,7 @@ async function renderCardCanvas({ pet, rarity, art, traitArt = [], mutationArt =
         const pic = recolor && mutated && known ? tintPicture(petImg, w * S, hh * S, pal, mkey, mutIcon, S) : petImg;
         if (fx && fx.rainbow && pic !== petImg) {   // Rainbow: a soft halo in the pet's own rainbow colours behind it
           const pad = 8;
-          g.save(); g.filter = `blur(${Math.round(18 * S)}px) saturate(1.6) brightness(1.3)`; g.globalAlpha = 0.9;
+          g.save(); g.filter = `blur(${Math.round(18 * S)}px) saturate(1.1) brightness(1.2)`; g.globalAlpha = 0.7;
           g.drawImage(pic, petX - w / 2 - pad, top + (bh - hh) / 2 - pad, w + pad * 2, hh + pad * 2);
           g.restore();
         }
@@ -382,7 +382,9 @@ function tintPicture(img, w, hgt, pal, mkey, icon, k = 1) {
     if (rb) {
       const lr = Math.min(1, Math.max(0, ((0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) / 255 - rb.p2) / Math.max(0.15, rb.p98 - rb.p2)));
       const c0 = rainbowAt(((y - rb.y0) / rb.bh) * 0.8 + ((x - rb.x0) / rb.bw) * 0.2), sh = Math.min(1, 0.42 + lr * 0.78), wt = Math.max(0, lr - 0.82) / 0.18 * 0.22;
-      rgb = c0.map(v => Math.min(255, v * sh + (255 - v) * wt));
+      // toned down (user: less colour): each band 30% toward its own grey
+      const c1 = c0.map(v => Math.min(255, v * sh + (255 - v) * wt)), gr = 0.299 * c1[0] + 0.587 * c1[1] + 0.114 * c1[2];
+      rgb = c1.map(v => v + (gr - v) * 0.3);
     }
     else if (fx.split) { const c = v => Math.min(1, Math.max(0, (v - 0.5) * 2.2 + 0.5)); rgb = map(x < W / 2 ? c(1 - l) * 0.9 : 0.25 + c(l) * 0.75); }   // yin-yang: one half black with white features, one half white
     else if (stops) rgb = map(l);
