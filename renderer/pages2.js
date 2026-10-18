@@ -923,12 +923,20 @@ PAGES.proof = async root => {
     const o = orderOf(f), d = VP.deliv[o];
     const buyer = d ? (d.username || d.title || o) : o;
     if (d) {
-      if (d.state === 'done') return { st: 'ok', label: 'OK', cls: 'good', buyer };
-      if (d.state === 'manual') return { st: 'failed', label: 'FAILED', cls: 'bad', buyer };
-      if (d.state === 'cancelled') return { st: 'failed', label: 'CANCELLED', cls: 'bad', buyer };
-      return { st: 'other', label: 'IN PROGRESS', cls: 'gold', buyer };
+      if (d.state === 'done') return { st: 'ok', label: 'OK', cls: 'good', ico: 'check', buyer };
+      // the brainrot was not there (out of stock cancel, or "not available" left for the seller)
+      if (['manual', 'cancelled'].includes(d.state) && /out of stock|brainrot not available/i.test(d.failReason || '')) return { st: 'failed', label: 'ITEM N/F', cls: 'violet', ico: 'warn', buyer };
+      if (d.state === 'manual') return { st: 'failed', label: 'FAILED', cls: 'bad', ico: 'x', buyer };
+      if (d.state === 'cancelled') return { st: 'failed', label: 'CANCELLED', cls: 'bad', ico: 'x', buyer };
+      return { st: 'other', label: 'IN PROGRESS', cls: 'gold', ico: 'play', buyer };
     }
-    return { st: 'other', label: o === 'manual' ? 'MANUAL' : 'UNLINKED', cls: '', buyer };
+    return { st: 'other', label: o === 'manual' ? 'MANUAL' : 'UNLINKED', cls: '', ico: 'play', buyer };
+  };
+  // "Today · 04:21", "Yesterday · 19:00", "2d ago · 19:00" (calendar days)
+  const when = ts => {
+    const t = new Date(ts), day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate());
+    const n = Math.round((day(new Date()) - day(t)) / 86400000);
+    return (n <= 0 ? 'Today' : n === 1 ? 'Yesterday' : n + 'd ago') + ' · ' + t.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
   };
   const all = files.map(f => ({ f, ...info(f) }));
   const okN = all.filter(x => x.st === 'ok').length, badN = all.filter(x => x.st === 'failed').length;
@@ -950,7 +958,7 @@ PAGES.proof = async root => {
     video = VP.player;
   } else VP.player = null;
   VP.play = false;
-  const icon = x => h('div', { class: 'pic ' + (x.st === 'ok' ? 'good' : x.st === 'failed' ? 'bad' : '') }, mxSvg(x.st === 'ok' ? 'check' : x.st === 'failed' ? 'x' : 'play', 14));
+  const icon = x => h('div', { class: 'pic ' + x.cls }, mxSvg(x.ico, 15));
 
   root.append(h('div', { class: 'mx-narrow wide' },
     mxHead('Video Proof Gallery', 'Automatic delivery recordings with buyer search', [
@@ -960,7 +968,7 @@ PAGES.proof = async root => {
       h('div', { class: 'mx-mini' }, h('span', null, 'STORAGE'), h('b', null, fmtBytes(total)))], 'play'),
     h('div', { class: 'row mx-filters' },
       h('input', { type: 'search', class: 'grow', placeholder: 'Search by buyer, date or status…', value: VP.q, onchange: e => { VP.q = e.target.value; render(); } }),
-      sel([['all', 'All statuses'], ['ok', 'OK'], ['failed', 'Failed'], ['other', 'Other']], VP.status, v => { VP.status = v; render(); }),
+      sel([['all', 'All statuses'], ['ok', 'OK'], ['failed', 'Failed / cancelled / item N/F'], ['other', 'Other']], VP.status, v => { VP.status = v; render(); }),
       RECS.size ? h('button', { class: 'btn danger', onclick: () => stopProof() }, `Stop recording (${[...RECS.values()].map(r => r.account ? '@' + r.account : r.orderId).join(', ')})`) : h('button', { class: 'btn', onclick: () => startProof('manual', null, 'manual recording') }, 'Record now'),
       badN ? h('button', { class: 'btn danger', title: 'Clips of cancelled / failed deliveries', onclick: async () => {
         const bad = all.filter(x => x.st === 'failed');
@@ -991,7 +999,9 @@ PAGES.proof = async root => {
       h('div', { class: 'mx-vlist' },
         h('div', { class: 'mx-vlist-h' }, h('span', null, `${shown.length} videos`), h('span', { class: 'muted' }, 'Click to play')),
         shown.length ? h('div', { class: 'items' }, shown.map(x => h('div', { class: 'mx-vitem' + (x.f.name === VP.sel ? ' on' : ''), onclick: () => { VP.sel = x.f.name; VP.play = true; render(); } },
-          icon(x), h('div', { class: 'grow' }, h('b', null, x.buyer), h('div', { class: 'row', style: { gap: '6px', flexWrap: 'nowrap' } }, h('span', { class: 'pill ' + x.cls }, x.label), h('small', { class: 'muted' }, fmtBytes(x.f.size) + ' · ' + ago(x.f.date))))))) : h('div', { class: 'empty' }, VP.list.length ? 'No videos match.' : 'No recordings yet.')),
+          icon(x), h('div', { class: 'grow mx-vtext' }, h('b', null, x.buyer),
+            h('div', { class: 'mx-vmeta' }, h('span', { class: 'pill ' + x.cls }, x.label), h('span', null, fmtBytes(x.f.size)), h('span', { class: 'mx-vext' }, 'WEBM')),
+            h('small', { class: 'muted' }, when(x.f.date)))))) : h('div', { class: 'empty' }, VP.list.length ? 'No videos match.' : 'No recordings yet.')),
       h('div', { class: 'mx-vplayer' },
         cur ? [
           h('div', { class: 'mx-vplayer-h' },

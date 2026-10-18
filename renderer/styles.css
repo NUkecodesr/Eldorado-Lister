@@ -19,6 +19,8 @@
   --cyan-rgb: 56, 189, 248;
   --cyan-soft: rgba(var(--cyan-rgb), .12);
   --on-cyan: #062233;
+  --violet: #a78bfa;
+  --violet-rgb: 167, 139, 250;
   /* older names, kept so every page's colours follow the new set */
   --gold: var(--accent);
   --gold2: var(--accent2);
@@ -161,6 +163,7 @@ th.num { text-align: right; }
 .pill.bad { color: var(--bad); border-color: rgba(248, 113, 113, .4); background: rgba(248, 113, 113, .08); }
 .pill.warn { color: var(--warn); border-color: rgba(251, 191, 36, .4); background: rgba(251, 191, 36, .08); }
 .pill.info { color: var(--info); border-color: rgba(96, 165, 250, .4); background: rgba(96, 165, 250, .08); }
+.pill.violet { color: var(--violet); border-color: rgba(var(--violet-rgb), .45); background: rgba(var(--violet-rgb), .1); }
 .pill.purple { color: var(--accent-hi); border-color: rgba(var(--accent-rgb), .45); background: var(--purple-soft); }
 .muted { color: var(--muted); }
 .ink2 { color: var(--ink2); }

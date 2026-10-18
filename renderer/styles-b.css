@@ -251,3 +251,15 @@
 .mx-setup-top p { margin: 0; }
 .mx-dcols > .mx-stack > .mx-card.mx-grow { flex: 1 1 auto; display: flex; flex-direction: column; }
 .mx-card.mx-grow > .mx-empty { flex: 1; justify-content: center; }
+
+/* Video Proof rows: status tile, buyer, pill + size + WEBM, day and time */
+.mx-vitem { gap: 12px; padding: 10px; }
+.mx-vitem .pic { width: 38px; height: 38px; flex: 0 0 38px; border-radius: 10px; }
+.mx-vitem .pic.violet { background: rgba(var(--violet-rgb), .14); color: var(--violet); }
+.mx-vitem .pic.gold { background: var(--gold-soft); color: var(--gold); }
+.mx-vtext { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.mx-vtext b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mx-vmeta { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--ink2); white-space: nowrap; }
+.mx-vmeta .pill { font-size: 9.5px; padding: 1px 7px; letter-spacing: .04em; }
+.mx-vext { color: var(--muted); font-size: 10px; letter-spacing: .06em; }
+.mx-vtext small { font-size: 10.5px; }
