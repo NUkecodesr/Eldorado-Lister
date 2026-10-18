@@ -236,12 +236,17 @@ class Eldorado {
     }
   }
   // seller cancel (Eldorado's own "Cancel order" button); the reason is shown to the buyer
-  async cancelOrder(id, reason) {
-    const text = String(reason || 'Delivery failed').slice(0, 450);
-    try { return await this.b.post(`orders/me/${id}/cancel`, { cancellationReason: text, reason: text, message: text }); }
+  // Eldorado's own seller "Cancel order" dialog (eld-seller-cancel-order-modal) posts
+  // { reason, message }: reason is one of its fixed codes (Out_Of_Stock, Buyer_Did_Not_Respond,
+  // Other, ...; free text there was the 400 "invalid values: , cancelation"), message is the note
+  // ("Other" needs one, 3+ chars). A code this category does not offer falls back to Other.
+  async cancelOrder(id, message, reasonCode = 'Other') {
+    const text = String(message || 'Delivery failed').slice(0, 450);
+    const send = code => this.b.post(`orders/me/${id}/cancel`, { reason: code, message: text });
+    try { return await send(reasonCode); }
     catch (e) {
-      if (e.status !== 400) throw e;
-      return this.b.post(`orders/me/${id}/cancel`, text);   // older shape: the reason as the body
+      if (e.status !== 400 || reasonCode === 'Other') throw e;
+      return send('Other');
     }
   }
   // What the buyer typed at checkout (e.g. their Roblox username). Eldorado shows it masked on

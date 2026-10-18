@@ -652,7 +652,9 @@ class Delivery extends EventEmitter {
     await this.say(d, msgKey, { reason, ...vars });
     let how = 'cancelled';
     if (!d.sim) {
-      try { await this.eld.cancelOrder(d.orderId, eldReason); this.log('info', `Order ${d.orderId} cancelled on Eldorado`); }
+      // Eldorado's fixed cancel reason for each of our cancels (anything else: Other + the note)
+      const code = { outOfStock: 'Out_Of_Stock', buyerNoShow: 'Buyer_Did_Not_Respond', buyerNoUsername: 'Buyer_Did_Not_Respond' }[msgKey] || 'Other';
+      try { await this.eld.cancelOrder(d.orderId, eldReason, code); this.log('info', `Order ${d.orderId} cancelled on Eldorado`); }
       catch (e) { how = 'manual'; d.state = 'manual'; this.log('error', `Cancel order ${d.orderId} failed: ${e.message}`); reason = `${reason} — and the Eldorado cancel failed: ${e.message}`; d.failReason = reason; }
     }
     if (this.cfg.recordProof) this.emit('proof', { action: 'stop', orderId: d.orderId });
@@ -946,7 +948,9 @@ class Delivery extends EventEmitter {
       `🟡 **$${Number(price || 0).toFixed(2)}**　📦 **×${qty}**　⏱️ **${dur}**`
     ];
     if (reason && outcome !== 'done') lines.push('', `⚠️ **Reason** — ${String(reason).slice(0, 400)}`);
-    if (d.debug && outcome !== 'done') lines.push('```\n' + d.debug.lines.slice(1).join('\n').replace(/`/g, "'").slice(0, 1200) + '\n```');
+    // the debug lines after the reason (an empty ``` block when there were none)
+    const dbg = d.debug && outcome !== 'done' ? d.debug.lines.slice(1).join('\n').replace(/`/g, "'").trim().slice(0, 1200) : '';
+    if (dbg) lines.push('```\n' + dbg + '\n```');
     const who = [d.buyer ? '👤 ' + d.buyer : null, d.username ? (d.robloxId ? `🎮 [@${d.username}](https://www.roblox.com/users/${d.robloxId}/profile)` : '🎮 @' + d.username) : null,
       accounts.length ? '📤 ' + accounts.map(a => '@' + a).join(', ') + (gatheredFrom.length ? ' (taken from ' + gatheredFrom.map(a => '@' + a).join(', ') + ')' : '') : null, (d.attempts || 0) > (outcome === 'done' ? 0 : 1) ? `🔁 ${(d.attempts || 0) + (outcome === 'done' ? 1 : 0)} tries` : null].filter(Boolean);
     lines.push('', '-# ' + [...who, '`' + d.orderId + '`'].join(' · '));
