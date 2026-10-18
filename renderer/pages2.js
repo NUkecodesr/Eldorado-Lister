@@ -752,6 +752,8 @@ PAGES.delivery = async root => {
         h('div', { class: 'grow' }, h('div', { class: 'pet-name' }, d.title || d.orderId), h('small', { class: 'muted mono' }, d.orderId), h('small', { class: 'muted' }, ' · ' + (d.username || 'waiting for username…') + ' · ' + d.accounts.length + ' acct · ' + ago(d.createdAt))),
         h('span', { class: 'pill ' + (stateCls[d.state] || 'info') }, d.state), rowActions(d))))
         : mxEmpty('clip', 'No deliveries in queue'));
+  // the two columns end level: the queue (right) and the script account (left) take the extra height
+  queueCard.classList.add('mx-grow'); scriptAcctCard.classList.add('mx-grow');
   const logCard = mxCard(mxIco('pulse', 'green'), 'Activity Log', 'Real-time delivery events', h('button', { class: 'btn sm', onclick: () => { DV.clearedAt = Date.now(); render(); } }, 'Clear'),
       h('div', { class: 'log mx-log', 'data-tail': true }, logs.length ? logs.map(l => h('div', { class: 'l-' + l.level }, `[${mxTime(l.t)}] ${l.msg.replace(/^\[(Delivery|Proof|Agent)\]\s*/, '')}`)) : h('span', { class: 'muted' }, 'No events yet.')));
   const histCard = mxCard(mxIco('clock', 'purple'), 'Delivery History', 'Completed and failed deliveries',

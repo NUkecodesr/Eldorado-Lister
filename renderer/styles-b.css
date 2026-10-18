@@ -224,7 +224,7 @@
 .mx-stat .v.cyan { color: var(--cyan); }
 .mx-tabs { border-radius: var(--radius-pill); background: var(--bg2); border-color: var(--line2); }
 .mx-tab { border-radius: var(--radius-pill); }
-.mx-dcols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+.mx-dcols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: stretch; }
 .mx-dcols .mx-log { max-height: 520px; }
 .mx-jobs > summary { cursor: pointer; color: var(--ink2); font-size: 12px; padding: 4px 2px; }
 @media (max-width: 1000px) { .mx-dcols { grid-template-columns: 1fr; } }
@@ -249,3 +249,5 @@
 .mx-card-h .x-stpills button { padding: 4px 12px; font-size: 11.5px; }
 .mx-setup-top { gap: 10px; align-items: center; flex-wrap: nowrap; margin-bottom: 10px; }
 .mx-setup-top p { margin: 0; }
+.mx-dcols > .mx-stack > .mx-card.mx-grow { flex: 1 1 auto; display: flex; flex-direction: column; }
+.mx-card.mx-grow > .mx-empty { flex: 1; justify-content: center; }
