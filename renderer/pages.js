@@ -52,6 +52,16 @@ function xAvatar(pet, size = 34) {
   const c = xMutColor(pet.mutation) || RARITY_COLORS[pet.rarity || xRarity(pet.name)] || '#74829a';
   return h('div', { class: 'x-ava', style: { width: size + 'px', height: size + 'px', background: `linear-gradient(135deg, ${c}55, #0f1726)`, borderColor: c + '88', fontSize: Math.round(size * .36) + 'px' } }, xInitials(pet.name));
 }
+// the stock account(s) with an order's brainrot: its sold pets (where they were before a steal moved
+// them to the mother), else the offer's listed pets; one box per account (Orders rows, chat header)
+function xOrderAccts(o) {
+  if (!o) return [];
+  let ps = S.pets.filter(p => p.orderId === o.id);
+  if (!ps.length && o.offerId) ps = S.pets.filter(p => p.offerId === o.offerId && p.status === 'listed').slice(0, Math.max(1, Number(o.quantity) || 1));
+  const name = id => (S.accounts.find(a => a.id === id) || {}).username;
+  return [...new Set(ps.map(p => name(p.gatheredFrom || p.accountId)).filter(Boolean))];
+}
+const xOrderAcctBoxes = o => xOrderAccts(o).map(n => h('span', { class: 'x-oacct', title: 'Stock account with the brainrot of this order' }, '@' + n));
 // order picture (the listing image) with the initials tile as fallback
 function xOrderAva(o, size = 34) {
   const f = o && o.image;
@@ -1647,13 +1657,6 @@ PAGES.orders = async root => {
   const filt = { all: () => true, completed: o => XSTATE.completed(o.state), delivered: o => XSTATE.delivered(o.state), pending: o => XSTATE.pending(o.state), canceled: o => XSTATE.canceled(o.state) }[OR.filter] || (() => true);
   const rows = all.filter(o => filt(o) && (!OR.q || `${o.buyer} ${o.title} ${o.id}`.toLowerCase().includes(OR.q.toLowerCase())));
   const ratingTxt = o => !o.rating ? '—' : typeof o.rating === 'object' ? (o.rating.rating || o.rating.type || 'Rated') : String(o.rating);
-  // the Roblox account(s) holding the order's brainrot: its sold pets, else the offer's listed ones
-  const acctName = id => (S.accounts.find(a => a.id === id) || {}).username;
-  const orderAccts = o => {
-    let ps = S.pets.filter(p => p.orderId === o.id);
-    if (!ps.length && o.offerId) ps = S.pets.filter(p => p.offerId === o.offerId && p.status === 'listed').slice(0, Math.max(1, Number(o.quantity) || 1));
-    return [...new Set(ps.map(p => acctName(p.accountId)).filter(Boolean))];
-  };
 
   root.append(
     h('div', { class: 'x-head' }, h('div', { class: 'x-badge' }, '🛒'), h('div', { class: 'x-head-t' }, h('h1', null, 'Orders'), h('p', null, 'Sold orders on Eldorado')), h('div', { class: 'grow' }),
@@ -1669,7 +1672,7 @@ PAGES.orders = async root => {
       h('div', { class: 'x-ohead' }, h('span', null, 'ORDER'), h('span', null, 'BUYER'), h('span', { class: 'r' }, 'AMOUNT'), h('span', null, 'STATUS'), h('span', null, 'RATING'), h('span', { class: 'r' }, 'ACTION')),
       rows.length ? rows.map(o => h('div', { class: 'x-orow' },
         h('div', { class: 'x-oi' }, xOrderAva(o, 34), h('div', { class: 'x-ot' }, h('b', null, o.title || '—'), h('small', { class: 'muted mono' }, '#' + String(o.id || '').slice(0, 8))),
-          orderAccts(o).map(n => h('span', { class: 'x-oacct', title: 'Roblox account with the brainrot of this order' }, '@' + n))),
+          xOrderAcctBoxes(o)),
         h('div', { class: 'x-ob' }, h('b', null, o.buyer || '—'), h('small', { class: 'muted' }, ago(o.date))),
         h('div', { class: 'x-oa' }, money(o.price)),
         h('div', null, xStatePill(o.state)),
@@ -1741,6 +1744,7 @@ PAGES.chat = async root => {
       cur ? xOrderAva(cur, 36) : null,
       h('div', { class: 'grow' }, h('b', null, cur ? (cur.buyer || 'Unknown buyer') : 'Order ' + CH.orderId),
         h('small', { class: 'muted' }, cur ? `${cur.title || 'Order'}   ·   #${String(CH.orderId).slice(0, 18)}` : '')),
+      cur ? xOrderAcctBoxes(cur) : null,
       cur ? xStatePill(cur.state) : null,
       // the seller's two order buttons, right in the chat (same calls as Eldorado's order page)
       cur && !XSTATE.canceled(cur.state) && !XSTATE.delivered(cur.state) && !XSTATE.completed(cur.state) ? [
