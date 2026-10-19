@@ -298,7 +298,7 @@ const MUTATION_FX = {
   radioactive: { hatch: 'rgba(20,70,14,.45)' }, divine: { glow: 'rgba(255,233,160,.5)', glyphs: { chars: '☉♃♄☽♆♇♁♀♂☿', color: 'rgba(255,255,240,.85)', glow: 'rgba(255,255,220,.9)' } },
   cyber: { grid: 'rgba(205,245,255,.55)', glow: 'rgba(40,190,255,.85)' }, candy: {}, cursed: { glyphs: { chars: '♦☿♆✦♦⚚', color: 'rgba(255,90,70,.9)', glow: 'rgba(255,30,20,1)' } },
   bloodrot: {}, phantom: { alpha: 0.85 }, eclipse: { glow: 'rgba(120,96,200,.3)', night: true },
-  'yin-yang': { twoTone: 0.55 }   // cut-off on the picture's own brightness: darker -> black
+  'yin-yang': { twoTone: true }
 };
 const ICON_PALETTE = new WeakMap();
 function iconPalette(icon) {
@@ -389,14 +389,10 @@ function tintPicture(img, w, hgt, pal, mkey, icon, k = 1) {
     // white), with only a short soft step between them; the old version made the left half of the
     // picture black and the right half white, so with two pets one was all black and one all white
     else if (fx.twoTone) {
-      // the game paints each part black or white; a grey part flips (light grey -> black with its darker
-      // details white, like Garama's stone face), a coloured part keeps its order (light -> white, dark
-      // details -> black, like Madundung's yellow face and the legs)
-      const r0 = d[i], g0 = d[i + 1], b0 = d[i + 2], mx = Math.max(r0, g0, b0), sat = mx ? (mx - Math.min(r0, g0, b0)) / mx : 0;
-      const raw = (0.299 * r0 + 0.587 * g0 + 0.114 * b0) / 255, grey = sat < 0.16;
-      let t = Math.min(1, Math.max(0, (raw - (grey ? 0.72 : fx.twoTone)) * 5 + 0.5));
-      if (grey && raw > 0.3) t = 1 - t;
-      rgb = [18 + (248 - 18) * t, 18 + (238 - 18) * t, 20 + (242 - 20) * t];
+      // Yin Yang, kept clean (user: the flipped black faces looked demonic): the pet in white and soft
+      // greys from its own shading, only its dark details (eyes, spots, outlines) going black
+      const t = Math.pow(Math.min(1, Math.max(0, l)), 1.6);   // l: the picture's brightness (stretched when flat)
+      rgb = [18 + (250 - 18) * t, 18 + (245 - 18) * t, 20 + (248 - 20) * t];
     }
     else if (stops) rgb = map(l);
     else continue;
