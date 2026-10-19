@@ -716,7 +716,8 @@ PAGES.delivery = async root => {
       scriptAccts.length ? h('div', { class: 'mx-rows' }, scriptAccts.map(a => {
         const st = (DV.lst || {})[a.id] || {};
         return h('div', { class: 'mx-acct' },
-          h('div', { class: 'av' }, (a.username || '?')[0].toUpperCase(), h('span', { class: 'led ' + (st.online ? 'on' : '') })),
+          // the account's Roblox headshot (Roblox Accounts loads them), the initial until it is there
+          h('div', { class: 'av' }, a.avatar ? h('img', { src: a.avatar, alt: '', onerror: e => e.target.remove() }) : (a.username || '?')[0].toUpperCase(), h('span', { class: 'led ' + (st.online ? 'on' : '') })),
           h('div', null, h('b', null, a.username), h('div', { class: 'muted', style: { fontSize: '11px' } }, st.online ? 'in game, script connected' : 'not in game — opened with the executor when an order needs it')));
       })) : h('div', { class: 'mx-empty' }, 'No logged-in account is in SCRIPT mode: set one to SCRIPT on Roblox Accounts (it becomes the mother).'));
   // Autoexec and the script in one card (tabs in the header, like Import Pets on Auto List)

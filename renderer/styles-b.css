@@ -263,3 +263,4 @@
 .mx-vmeta .pill { font-size: 9.5px; padding: 1px 7px; letter-spacing: .04em; }
 .mx-vext { color: var(--muted); font-size: 10px; letter-spacing: .06em; }
 .mx-vtext small { font-size: 10.5px; }
+.mx-acct .av img { width: 100%; height: 100%; object-fit: cover; border-radius: 11px; display: block; }
