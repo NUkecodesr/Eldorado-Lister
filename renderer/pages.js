@@ -417,7 +417,18 @@ PAGES.autolist = async root => {
   const keep = e => e.preventDefault();   // chips must not steal the caret
   const emoPop = h('div', { class: 'x-emo' }, AL_EMOJIS.map(em => h('button', { onmousedown: keep, onclick: () => insertAt(em) }, em)));
   const qDel = sel(DELIVERY_TIMES.filter(x => x !== 'Instant').map(v => [v, dtLabel(v)]), al.deliveryTime, v => saveSettings({ autolist: { deliveryTime: v } }));
-  const qp = h('input', { type: 'number', step: '0.01', min: '0', placeholder: '—' });
+  const qp = h('input', { type: 'number', step: '0.01', min: '0', placeholder: '—', value: AL.tplPrice ?? '' });
+  AL.tplPrice = null;   // a template's price, handed over once by Templates -> Use
+  // a saved text template (Templates page / Save Template) into the fields above; Apply to All or
+  // Selected then writes it to the pets, as with typed text
+  const loadTpl = id => {
+    const tp = (S.templates || []).find(x => x.id === id); if (!tp) return;
+    qt.value = tp.title || ''; qd.value = tp.description || ''; qp.value = tp.price ?? '';
+    if (tp.deliveryTime && DELIVERY_TIMES.includes(tp.deliveryTime) && tp.deliveryTime !== 'Instant') { qDel.value = tp.deliveryTime; saveSettings({ autolist: { deliveryTime: tp.deliveryTime } }); }
+    saveTpl();
+    toast(`Template "${tp.name}" loaded - press Apply to All or Selected`, 'good', 5000);
+  };
+  const qTpl = sel([['', (S.templates || []).length ? 'Load a saved template…' : 'No saved templates yet'], ...(S.templates || []).map(tp => [tp.id, tp.name])], '', loadTpl);
   const applyQuick = async ids => {
     if (!ids.length) return toast('Select pets first', 'error');
     clearTimeout(saveT);
@@ -435,6 +446,7 @@ PAGES.autolist = async root => {
           h('span', { class: 'x-emo-wrap' }, h('button', { class: 'x-var x-emob', onmousedown: keep, onclick: () => emoPop.classList.toggle('on') }, '✎ Emojis'), emoPop)),
         h('div', { class: 'x-lbl' }, 'DESCRIPTION'), qd),
       h('div', { class: 'x-qside' },
+        h('div', { class: 'x-lbl' }, 'TEMPLATE'), qTpl,
         h('div', { class: 'x-lbl' }, 'DELIVERY'), qDel,
         h('div', { class: 'x-lbl' }, 'PRICE ($)'), qp,
         h('button', { class: 'btn', title: 'Apply to the selected pets', onclick: () => applyQuick(selIds()) }, 'Selected'),
@@ -898,7 +910,15 @@ function textTemplatesTab(root, tabs) {
       h('h3', null, tp.name, tp.price ? h('span', { class: 'pill gold' }, money(tp.price)) : null),
       h('div', { class: 'pet-name' }, fill(tp.title)),
       h('pre', { style: { whiteSpace: 'pre-wrap', color: 'var(--ink2)', fontFamily: 'inherit', maxHeight: '140px', overflow: 'auto' } }, fill(tp.description)),
-      h('div', { class: 'row' }, h('button', { class: 'btn sm', onclick: () => edit(tp) }, t('edit')), h('button', { class: 'btn sm danger', onclick: async () => { await M.call('templates:delete', tp.id); await refreshData(); render(); } }, t('delete')))))) :
+      h('div', { class: 'row' },
+        // into Quick Fill on Auto List (title, description, delivery; the price fills its field once)
+        h('button', { class: 'btn sm primary', onclick: async () => {
+          const dt = tp.deliveryTime && DELIVERY_TIMES.includes(tp.deliveryTime) && tp.deliveryTime !== 'Instant' ? { deliveryTime: tp.deliveryTime } : {};
+          await saveSettings({ autolist: { titleTemplate: tp.title || '', descriptionTemplate: tp.description || '', ...dt } });
+          AL.tplPrice = tp.price ?? null; go('autolist');
+          toast(`Template "${tp.name}" is in Quick Fill - press Apply to All or Selected`, 'good', 6000);
+        } }, 'Use'),
+        h('button', { class: 'btn sm', onclick: () => edit(tp) }, t('edit')), h('button', { class: 'btn sm danger', onclick: async () => { await M.call('templates:delete', tp.id); await refreshData(); render(); } }, t('delete')))))) :
       h('div', { class: 'card empty' }, 'No templates yet. Create one and use it from Quick Fill on Auto List.'));
 }
 
