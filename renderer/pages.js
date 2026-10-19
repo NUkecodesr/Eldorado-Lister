@@ -53,15 +53,46 @@ function xAvatar(pet, size = 34) {
   return h('div', { class: 'x-ava', style: { width: size + 'px', height: size + 'px', background: `linear-gradient(135deg, ${c}55, #0f1726)`, borderColor: c + '88', fontSize: Math.round(size * .36) + 'px' } }, xInitials(pet.name));
 }
 // the stock account(s) with an order's brainrot: its sold pets (where they were before a steal moved
-// them to the mother), else the offer's listed pets; one box per account (Orders rows, chat header)
-function xOrderAccts(o) {
+// them to the mother), else the offer's listed pets -> [{ a: account, n: pets of this order on it }]
+function xOrderStock(o) {
   if (!o) return [];
   let ps = S.pets.filter(p => p.orderId === o.id);
   if (!ps.length && o.offerId) ps = S.pets.filter(p => p.offerId === o.offerId && p.status === 'listed').slice(0, Math.max(1, Number(o.quantity) || 1));
-  const name = id => (S.accounts.find(a => a.id === id) || {}).username;
-  return [...new Set(ps.map(p => name(p.gatheredFrom || p.accountId)).filter(Boolean))];
+  const by = new Map();
+  for (const p of ps) {
+    const id = p.gatheredFrom || p.accountId, a = S.accounts.find(x => x.id === id);
+    if (a) { const e = by.get(id) || { a, n: 0 }; e.n++; by.set(id, e); }
+  }
+  return [...by.values()];
 }
-const xOrderAcctBoxes = o => xOrderAccts(o).map(n => h('span', { class: 'x-oacct', title: 'Stock account with the brainrot of this order' }, '@' + n));
+// open an account's game (same call and messages as ▶ Start on Roblox Accounts)
+async function xLaunchAcct(a, force) {
+  if (a.legit && !force) toast(`Opening real Roblox for @${a.username}…`, 'info', 5000);
+  const r = await run(() => M.call('accounts:launch', a.id, force));
+  if (!r) return;
+  if (r.skipped === 'already online') return toast(`@${a.username} is already in game`, 'info');
+  if (r.skipped) { if (await confirmBox(`@${a.username}: ${r.skipped}. Launch it again?`)) return xLaunchAcct(a, true); return; }
+  toast(`Launching @${a.username} into your private server`, 'good');
+}
+// "Stock accounts" popup: every account holding a pet of the order, with Launch
+function xStockModal(o) {
+  const list = xOrderStock(o);
+  modal('Stock accounts', h('div', { class: 'x-stockm' },
+    h('p', { class: 'muted' }, 'Accounts holding items for this order'),
+    list.length ? list.map(({ a, n }) => h('div', { class: 'x-stockrow' },
+      a.avatar ? h('img', { src: a.avatar, alt: '', onerror: e => e.target.remove() }) : h('div', { class: 'ph' }, (a.username || '?')[0].toUpperCase()),
+      h('div', { class: 'grow' }, h('b', null, '@' + a.username), h('small', { class: 'muted' }, `${n} item${n > 1 ? 's' : ''} in this order`)),
+      h('button', { class: 'btn sm', onclick: () => xLaunchAcct(a) }, '▸ Launch')))
+      : h('p', { class: 'muted' }, 'No account holds a pet of this order.')), [{ label: t('close') }]);
+}
+// the box on Orders rows and the chat header: the account names, click = the popup above
+const xOrderAcctBoxes = o => {
+  const list = xOrderStock(o);
+  if (!list.length) return null;
+  const names = list.map(e => '@' + e.a.username);
+  return h('button', { class: 'x-oacct', title: 'Stock accounts of this order - click to launch', onclick: e => { e.stopPropagation(); xStockModal(o); } },
+    names.length > 2 ? names.slice(0, 2).join(', ') + ` +${names.length - 2}` : names.join(', '));
+};
 // order picture (the listing image) with the initials tile as fallback
 function xOrderAva(o, size = 34) {
   const f = o && o.image;

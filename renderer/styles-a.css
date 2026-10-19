@@ -566,3 +566,13 @@ input.x-alpin { width: 62px; flex: 0 0 62px; padding: 3px 5px; font-size: 12px; 
 .x-rp-log .log { margin-top: 8px; }
 .x-oacct { margin-left: auto; flex: 0 0 auto; border: 1px solid var(--line2); background: var(--bg2); border-radius: 8px; padding: 4px 10px; font-size: 12px; font-weight: 600; color: var(--ink); white-space: nowrap; }
 .x-oacct + .x-oacct { margin-left: 0; }
+
+/* Stock accounts popup (order account box) */
+button.x-oacct { cursor: pointer; font-family: inherit; }
+button.x-oacct:hover { border-color: var(--accent); color: var(--accent-hi); }
+.x-stockm { min-width: 340px; }
+.x-stockm > p { margin: -4px 0 12px; font-size: 12px; }
+.x-stockrow { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line2); border-radius: 10px; background: var(--bg2); margin-bottom: 8px; }
+.x-stockrow img, .x-stockrow .ph { width: 40px; height: 40px; border-radius: 9px; object-fit: cover; flex: 0 0 40px; background: var(--panel2); display: flex; align-items: center; justify-content: center; font-weight: 700; color: var(--accent-hi); }
+.x-stockrow b { display: block; font-size: 13px; }
+.x-stockrow small { font-size: 11px; }
