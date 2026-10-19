@@ -417,18 +417,22 @@ PAGES.autolist = async root => {
   const keep = e => e.preventDefault();   // chips must not steal the caret
   const emoPop = h('div', { class: 'x-emo' }, AL_EMOJIS.map(em => h('button', { onmousedown: keep, onclick: () => insertAt(em) }, em)));
   const qDel = sel(DELIVERY_TIMES.filter(x => x !== 'Instant').map(v => [v, dtLabel(v)]), al.deliveryTime, v => saveSettings({ autolist: { deliveryTime: v } }));
-  const qp = h('input', { type: 'number', step: '0.01', min: '0', placeholder: '—', value: AL.tplPrice ?? '' });
-  AL.tplPrice = null;   // a template's price, handed over once by Templates -> Use
+  // the price box and the loaded template survive the page's live refresh (AL), like the texts do (settings)
+  const qp = h('input', { type: 'number', step: '0.01', min: '0', placeholder: '—', value: AL.qPrice ?? '', oninput: e => { AL.qPrice = e.target.value; } });
   // a saved text template (Templates page / Save Template) into the fields above; Apply to All or
   // Selected then writes it to the pets, as with typed text
   const loadTpl = id => {
     const tp = (S.templates || []).find(x => x.id === id); if (!tp) return;
-    qt.value = tp.title || ''; qd.value = tp.description || ''; qp.value = tp.price ?? '';
-    if (tp.deliveryTime && DELIVERY_TIMES.includes(tp.deliveryTime) && tp.deliveryTime !== 'Instant') { qDel.value = tp.deliveryTime; saveSettings({ autolist: { deliveryTime: tp.deliveryTime } }); }
-    saveTpl();
+    qt.value = tp.title || ''; qd.value = tp.description || ''; qp.value = tp.price ?? ''; AL.qPrice = qp.value; AL.tplId = tp.id;
+    const dt = tp.deliveryTime && DELIVERY_TIMES.includes(tp.deliveryTime) && tp.deliveryTime !== 'Instant' ? tp.deliveryTime : null;
+    if (dt) qDel.value = dt;
+    // saved at once (not after the typing delay), so a refresh right after can't bring the old text back
+    clearTimeout(saveT);
+    saveSettings({ autolist: { titleTemplate: qt.value, descriptionTemplate: qd.value, ...(dt ? { deliveryTime: dt } : {}) } });
+    for (const [el, p] of titleEls) el.textContent = xFill(qt.value, p);
     toast(`Template "${tp.name}" loaded - press Apply to All or Selected`, 'good', 5000);
   };
-  const qTpl = sel([['', (S.templates || []).length ? 'Load a saved template…' : 'No saved templates yet'], ...(S.templates || []).map(tp => [tp.id, tp.name])], '', loadTpl);
+  const qTpl = sel([['', (S.templates || []).length ? 'Load a saved template…' : 'No saved templates yet'], ...(S.templates || []).map(tp => [tp.id, tp.name])], AL.tplId || '', loadTpl);
   const applyQuick = async ids => {
     if (!ids.length) return toast('Select pets first', 'error');
     clearTimeout(saveT);
@@ -915,7 +919,7 @@ function textTemplatesTab(root, tabs) {
         h('button', { class: 'btn sm primary', onclick: async () => {
           const dt = tp.deliveryTime && DELIVERY_TIMES.includes(tp.deliveryTime) && tp.deliveryTime !== 'Instant' ? { deliveryTime: tp.deliveryTime } : {};
           await saveSettings({ autolist: { titleTemplate: tp.title || '', descriptionTemplate: tp.description || '', ...dt } });
-          AL.tplPrice = tp.price ?? null; go('autolist');
+          AL.qPrice = tp.price ?? ''; AL.tplId = tp.id; go('autolist');
           toast(`Template "${tp.name}" is in Quick Fill - press Apply to All or Selected`, 'good', 6000);
         } }, 'Use'),
         h('button', { class: 'btn sm', onclick: () => edit(tp) }, t('edit')), h('button', { class: 'btn sm danger', onclick: async () => { await M.call('templates:delete', tp.id); await refreshData(); render(); } }, t('delete')))))) :
