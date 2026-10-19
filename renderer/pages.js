@@ -1651,7 +1651,7 @@ PAGES.searcher = async root => {
       sel([['', 'Any trait'], ...(traitsAttr ? traitsAttr.selectValues.map(v => [v.id, v.name]) : [])], q.trait, v => q.trait = v),
       h('input', { type: 'number', placeholder: 'min $', value: q.minPrice, style: { width: '80px' }, onchange: e => q.minPrice = e.target.value }),
       h('input', { type: 'number', placeholder: 'max $', value: q.maxPrice, style: { width: '80px' }, onchange: e => q.maxPrice = e.target.value }),
-      sel([['', 'Any delivery'], ...DELIVERY_TIMES.map(x => [x, x])], q.deliveryTime, v => q.deliveryTime = v),
+      sel([['', 'Any delivery'], ...DELIVERY_TIMES.map(x => [x, dtLabel(x)])], q.deliveryTime, v => q.deliveryTime = v),
       sel([['priceAsc', 'Price ↑'], ['priceDesc', 'Price ↓'], ['', 'Recommended']], q.sort, v => q.sort = v),
       h('input', { type: 'search', placeholder: 'Text search', value: q.search, onchange: e => q.search = e.target.value }),
       h('button', { class: 'btn primary', onclick: () => go(1) }, SR.loading ? 'Searching…' : t('search')))),
@@ -1666,7 +1666,7 @@ PAGES.searcher = async root => {
       { label: t('gen'), num: true, render: r => { const a = (r.offer.attributes || []).find(x => x.type === 'Numeric'); return a ? formatGen(a.value) : '—'; } },
       { label: 'Seller', render: r => h('div', null, r.user ? r.user.username : '—', r.user && r.user.isVerifiedSeller ? h('span', { class: 'pill good', style: { marginLeft: '6px' } }, '✓') : null) },
       { label: 'Feedback', num: true, render: r => r.userOrderInfo && r.userOrderInfo.feedbackScore != null ? `${r.userOrderInfo.feedbackScore.toFixed(1)}% (${r.userOrderInfo.ratingCount})` : '—' },
-      { label: 'Delivery', render: r => r.offer.guaranteedDeliveryTime },
+      { label: 'Delivery', render: r => dtLabel(r.offer.guaranteedDeliveryTime) },
       { label: t('qty'), num: true, render: r => r.offer.quantity },
       { label: t('price'), num: true, render: r => h('b', { style: { color: 'var(--gold)' } }, money((r.offer.pricePerUnitInUSD || r.offer.pricePerUnit).amount)) },
       { label: '', render: r => h('button', { class: 'btn sm', onclick: () => M.call('open:external', offerUrl(r.offer)) }, '↗') }
