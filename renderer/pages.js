@@ -68,10 +68,9 @@ function xOrderStock(o) {
 // open an account's game (same call and messages as ▶ Start on Roblox Accounts)
 async function xLaunchAcct(a, force) {
   if (a.legit && !force) toast(`Opening real Roblox for @${a.username}…`, 'info', 5000);
-  const r = await run(() => M.call('accounts:launch', a.id, force));
+  const r = await run(() => M.call('accounts:launch', a.id, true));
   if (!r) return;
-  if (r.skipped === 'already online') return toast(`@${a.username} is already in game`, 'info');
-  if (r.skipped) { if (await confirmBox(`@${a.username}: ${r.skipped}. Launch it again?`)) return xLaunchAcct(a, true); return; }
+  if (r.skipped) return toast(`@${a.username}: ${r.skipped}`, 'info');
   toast(`Launching @${a.username} into your private server`, 'good');
 }
 // "Stock accounts" popup: every account holding a pet of the order, with Launch
@@ -1333,10 +1332,9 @@ PAGES.accounts = async root => {
   };
   const launch = async (a, force) => {
     if (a.legit) toast(`Opening real Roblox for @${a.username}… (the first time Zotac installs it, ~240 MB)`, 'info', 6000);
-    const r = await run(() => M.call('accounts:launch', a.id, force));
+    const r = await run(() => M.call('accounts:launch', a.id, true));
     if (!r) return;
-    if (r.skipped === 'already online') return toast(`${a.username} is already in game`, 'info');
-    if (r.skipped) { if (await confirmBox(`${a.username}: ${r.skipped}. Launch it again?`)) return launch(a, true); return; }
+    if (r.skipped) return toast(`${a.username}: ${r.skipped}`, 'info');
     toast(`Launching ${a.username} into your private server`, 'good');
   };
   if (RA.open === null) RA.open = new Set();
