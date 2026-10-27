@@ -417,7 +417,8 @@ class Delivery extends EventEmitter {
     if (!mother) return this.needsYou(d, 'Security mode needs an account in SCRIPT mode with a saved cookie to be the mother, and there is none (Roblox Accounts → SCRIPT)');
     d.origAccounts = d.origAccounts || [...d.accounts];
     d.steal = d.steal || {};
-    const petsOf = id => this.store.get('pets').filter(p => d.petIds.includes(p.id) && !p.delivered && p.accountId === id).length;
+    const orderIds = new Set(d.petIds);
+    const petsOf = id => this.store.get('pets').filter(p => orderIds.has(p.id) && !p.delivered && p.accountId === id).length;
     d.feeders = d.feeders || d.accounts.filter(id => id !== d.mother && petsOf(id) > 0).sort((x, y) => petsOf(y) - petsOf(x));
     // a stock account Zotac can't open (no cookie) and that isn't in game: nobody can steal from it
     const stuck = d.feeders.map(id => accts.find(a => a.id === id) || { id }).filter(a => !a.cookieEnc && !this.accountOnline(a.id));
@@ -613,7 +614,8 @@ class Delivery extends EventEmitter {
     d.debug = this.debugReport(d, reason, job);
     this.log('warn', `Order ${d.orderId}: brainrot not available — ${reason}`);
     for (const l of d.debug.lines.slice(1)) this.log('warn', `Order ${d.orderId} · ${l}`);
-    const traded = this.store.get('pets').filter(p => d.petIds.includes(p.id) && p.delivered && p.tradedTo).length;
+    const tradedIds = new Set(d.petIds);
+    const traded = this.store.get('pets').filter(p => tradedIds.has(p.id) && p.delivered && p.tradedTo).length;
     if (traded) return this.needsYou(d, `brainrot not available (${reason}); ${traded} pet(s) of this order already reached the buyer, so it is not cancelled — deliver the rest by hand`);
     if (this.cfg.cancelOnUnavailable === false) return this.needsYou(d, `brainrot not available: ${reason} — deliver by hand or cancel the order`);
     return this.cancelOrder(d, `Out of stock: ${reason}`, 'outOfStock', { item: d.title || 'your brainrot' });
@@ -752,7 +754,8 @@ class Delivery extends EventEmitter {
     const msg = { cancels: 'buyerKeptCancelling', noShow: 'buyerNoShow', username: 'buyerNoUsername' }[g.kind];
     d.debug = this.debugReport(d, why);
     this.log('warn', `Order ${d.orderId}: giving up — ${why}`);
-    const traded = this.store.get('pets').filter(p => d.petIds.includes(p.id) && p.delivered && p.tradedTo).length;
+    const tradedIds = new Set(d.petIds);
+    const traded = this.store.get('pets').filter(p => tradedIds.has(p.id) && p.delivered && p.tradedTo).length;
     if (traded) return this.needsYou(d, `${why}; ${traded} pet(s) of this order already reached the buyer, so it is not cancelled`);
     return this.cancelOrder(d, `Gave up: ${why}`, msg, { count: g.count || 0, minutes: g.minutes || 0 }, `Buyer did not complete the delivery: ${why}`);
   }
