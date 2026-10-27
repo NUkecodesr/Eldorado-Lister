@@ -217,6 +217,7 @@ const dtLabel = v => DT_LABEL[v] || v;
 const AL_VARS = ['name', 'rarity', 'mutation', 'gen', 'traits', 'emoji'];
 const AL_EMOJIS = ['🔥', '⚡', '💎', '👑', '⭐', '✨', '🌈', '💰', '🚀', '✅', '🎁', '🧠', '💥', '🍀', '❄️', '🌙', '☀️', '💜', '💛', '❤️', '🖤', '🤍', '🏆', '📦', '⏱️', '🔒', '🛒', '🎯', '🦄', '🐱'];
 const AL = { selected: new Set(), filter: { account: '', status: 'available', q: '' }, log: [], json: '', open: false, sort: 'gen', dir: -1, fold: xLs.get('zotac.alFold', {}), lastKey: 'title', dtOpen: false, limit: 200 };
+const AL_COLLATOR = new Intl.Collator();
 
 // renderer copy of sab.fillTemplate (main) so rows show the live title
 function xFill(tpl, p) {
@@ -262,7 +263,7 @@ PAGES.autolist = async root => {
     (!AL.filter.account || p.accountId === AL.filter.account) &&
     (removedView ? !!p.alHidden : !p.alHidden && (AL.filter.status === 'all' || p.status === AL.filter.status)) &&
     (!q || `${p.name} ${p.mutation} ${(p.traits || []).join(' ')} ${p.title || ''}`.toLowerCase().includes(q)))
-    .sort((a, b) => AL.sort === 'name' ? AL.dir * String(a.name).localeCompare(String(b.name)) || (b.gen - a.gen) : AL.dir * ((a.gen || 0) - (b.gen || 0)));
+    .sort((a, b) => AL.sort === 'name' ? AL.dir * AL_COLLATOR.compare(String(a.name), String(b.name)) || ((b.gen || 0) - (a.gen || 0)) : AL.dir * ((a.gen || 0) - (b.gen || 0)));
   for (const id of [...AL.selected]) if (!S.pets.some(p => p.id === id)) AL.selected.delete(id);
   const prog = S.listerProgress || {};
   const special = xSpecial();
