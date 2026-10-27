@@ -1302,7 +1302,7 @@ async function smoke() {
       } catch (e) { store.log('warn', '[Update] ' + e.message); }
     }, 8000);
   }
-});
+}));
 
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
 app.on('window-all-closed', () => app.quit());
