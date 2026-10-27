@@ -201,7 +201,7 @@ function wire() {
   M.on('pets:changed', reload);
   M.on('bridge:state', s => { S.bridge = s; renderFooter(); soft(); });
   M.on('auth:changed', async () => { await refreshMe(); soft(); });
-  M.on('log', e => { S.logs.push(e); if (S.logs.length > 1600) S.logs.splice(0, S.logs.length - 1500); const el = $('#al-log'); if (el && /\[AutoList\]/.test(e.msg)) { const end = el.scrollTop + el.clientHeight >= el.scrollHeight - 4; el.appendChild(h('div', { class: 'l-' + e.level }, `${new Date(e.t).toLocaleTimeString()}  ${e.msg}`)); while (el.childElementCount > 600) el.firstElementChild.remove(); if (end) el.scrollTop = el.scrollHeight; } });
+  M.on('log', e => { S.logs.push(e); if (S.logs.length > 1600) S.logs.splice(0, S.logs.length - 1500); const el = $('#al-log'); if (el && e.msg.includes('[AutoList]')) { const end = el.scrollTop + el.clientHeight >= el.scrollHeight - 4; el.appendChild(h('div', { class: 'l-' + e.level }, `${new Date(e.t).toLocaleTimeString()}  ${e.msg}`)); while (el.childElementCount > 600) el.firstElementChild.remove(); if (end) el.scrollTop = el.scrollHeight; } });
   M.on('autolist:progress', p => { S.listerProgress = p; S.listerRunning = !!p && p.done < p.total; if (!S.listerRunning) refreshData().then(soft); else if (S.page === 'autolist') soft(); });
   M.on('repricer:done', () => { if (S.page === 'listings') soft(); });
   M.on('server:scan', () => { if (S.page === 'server') liveTick('local', true); });

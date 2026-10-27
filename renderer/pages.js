@@ -675,7 +675,7 @@ PAGES.autolist = async root => {
           setting('Ignore my own offers', 'Listing Rules: skip my offers when pricing', sw(rules.ignoreOwn, v => saveSettings({ rules: { ignoreOwn: v } }))),
           setting('Pet art folder', al.imageFolder || 'Optional: PNGs named after the brainrot', h('button', { class: 'btn sm', onclick: async () => { const f = await M.call('dialog:folder'); if (f !== null) { await saveSettings({ autolist: { imageFolder: f } }); render(); } } }, 'Choose'))),
         h('div', { class: 'card' }, h('h3', null, 'Activity'),
-          h('div', { class: 'log', id: 'al-log', 'data-tail': true }, (S.logs || []).filter(l => /\[AutoList\]/.test(l.msg)).slice(-80).map(l => h('div', { class: 'l-' + l.level }, `${new Date(l.t).toLocaleTimeString()}  ${l.msg.replace('[AutoList] ', '')}`)))))));
+          h('div', { class: 'log', id: 'al-log', 'data-tail': true }, (S.logs || []).filter(l => l.msg.includes('[AutoList]')).slice(-80).map(l => h('div', { class: 'l-' + l.level }, `${new Date(l.t).toLocaleTimeString()}  ${l.msg.replace('[AutoList] ', '')}`)))))));
 };
 
 // "Special traits — manual review": grid of every trait (Eldorado list + the ones your pets
@@ -861,7 +861,7 @@ PAGES.listings = async root => {
       + (maxDrop ? ` · at most −${maxDrop}% per run` : '')
       + (blocked.length ? ` · skips ${blocked.length} blocked trait${blocked.length === 1 ? '' : 's'}` : '')),
     !rpOpen ? null : h('details', { class: 'x-fold x-rp-log' }, h('summary', null, 'Repricer log'),
-      h('div', { class: 'log', 'data-tail': true }, (S.logs || []).filter(l => /\[Repricer\]/.test(l.msg)).slice(-40).map(l => h('div', { class: 'l-' + l.level }, `${new Date(l.t).toLocaleTimeString()} ${l.msg.replace('[Repricer] ', '')}`)))));
+      h('div', { class: 'log', 'data-tail': true }, (S.logs || []).filter(l => l.msg.includes('[Repricer]')).slice(-40).map(l => h('div', { class: 'l-' + l.level }, `${new Date(l.t).toLocaleTimeString()} ${l.msg.replace('[Repricer] ', '')}`)))));
 
   root.append(
     xHead('L', 'My Listings', 'Manage your active listings', stTabs,
