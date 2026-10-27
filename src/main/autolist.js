@@ -124,7 +124,8 @@ class AutoLister extends EventEmitter {
           // what the offer already covers raise its quantity.
           const onOffer = this.store.get('pets').filter(p => p.offerId === stock.id && p.status === 'listed' && !p.delivered && !group.includes(p));
           const live = Math.max(1, Number(stock.quantity) || 1);
-          const sameUuid = group.filter(p => p.uuid && onOffer.some(o => o.uuid === p.uuid)).length;
+          const onOfferUuids = new Set(onOffer.map(o => o.uuid));
+          const sameUuid = group.filter(p => p.uuid && onOfferUuids.has(p.uuid)).length;
           const already = Math.min(qty, Math.max(sameUuid, live - onOffer.length));
           const add = qty - already;
           if (add > 0) { await this.eld.bumpQuantity(stock, add); stock.quantity = live + add; }
