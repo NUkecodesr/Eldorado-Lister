@@ -142,7 +142,8 @@ class Store {
   log(level, msg, extra) {
     const entry = { t: Date.now(), level, msg: String(msg), extra: extra === undefined ? undefined : safe(extra) };
     this.data.logs.push(entry);
-    if (this.data.logs.length > 1500) this.data.logs.splice(0, this.data.logs.length - 1500);
+    // trimmed in batches: one splice per 100 lines instead of shifting 1500 entries on every line
+    if (this.data.logs.length > 1600) this.data.logs.splice(0, this.data.logs.length - 1500);
     this.save();
     return entry;
   }

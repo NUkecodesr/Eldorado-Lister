@@ -346,7 +346,8 @@ PAGES.autolist = async root => {
   const jsonArea = h('textarea', { class: 'x-json mono', placeholder: 'Paste JSON from Zotac Lister Scanner here...', spellcheck: 'false' });
   jsonArea.value = AL.json;
   const countEl = h('span', { class: 'x-count' }, String(xJsonCount(AL.json)));
-  jsonArea.addEventListener('input', () => { AL.json = jsonArea.value; countEl.textContent = String(xJsonCount(AL.json)); });
+  let countT = null;   // big pastes: parse once typing stops, not on every key
+  jsonArea.addEventListener('input', () => { AL.json = jsonArea.value; clearTimeout(countT); countT = setTimeout(() => { countEl.textContent = String(xJsonCount(AL.json)); }, 200); });
 
   const scriptPanel = h('section', { class: 'x-panel' },
     h('div', { class: 'x-ptitle' }, h('span', { class: 'x-glyph' }, '</>'), 'PLOT SCANNER SCRIPT', h('div', { class: 'grow' }),
@@ -711,7 +712,8 @@ async function manageSpecial() {
         h('small', null, n)));
     }
   };
-  search.addEventListener('input', draw);
+  let searchT = null;
+  search.addEventListener('input', () => { clearTimeout(searchT); searchT = setTimeout(draw, 120); });
   draw();
   modal('Special traits — manual review', h('div', { class: 'x-trmodal' },
     h('div', { class: 'row', style: { marginBottom: '10px', flexWrap: 'nowrap' } },
