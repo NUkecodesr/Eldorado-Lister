@@ -1,7 +1,7 @@
 {
   "name": "zotac-lister",
   "productName": "Zotac Lister",
-  "version": "1.23.34",
+  "version": "1.23.35",
   "description": "Steal a Brainrot listing tool for Eldorado.gg",
   "main": "main.js",
   "private": true,
