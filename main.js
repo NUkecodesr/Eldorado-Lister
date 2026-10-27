@@ -1284,7 +1284,7 @@ async function smoke() {
       });
       
       setTimeout(run, 1000);
-  });
+  }));
 
   if (store.get('settings').bridgeUserAgent) bridge.setUserAgent(store.get('settings').bridgeUserAgent);
   bridge.start().then(afterLogin);
