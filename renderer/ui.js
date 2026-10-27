@@ -57,8 +57,10 @@ function restoreScroll(root, saved) {
   }
 }
 const money = n => (n === null || n === undefined || isNaN(n) ? '—' : '$' + Number(n).toFixed(2));
-const fmtDate = d => { if (!d) return '—'; const x = new Date(d); return isNaN(x) ? String(d) : x.toLocaleString(); };
-const fmtShort = d => { if (!d) return '—'; const x = new Date(d); return isNaN(x) ? String(d) : x.toLocaleDateString(); };
+const fmtDateFmt = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' });
+const fmtShortFmt = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'numeric', day: 'numeric' });
+const fmtDate = d => { if (!d) return '—'; const x = new Date(d); return isNaN(x) ? String(d) : fmtDateFmt.format(x); };
+const fmtShort = d => { if (!d) return '—'; const x = new Date(d); return isNaN(x) ? String(d) : fmtShortFmt.format(x); };
 const ago = ts => { if (!ts) return 'never'; const s = Math.round((Date.now() - new Date(ts)) / 1000); if (s < 60) return s + 's ago'; if (s < 3600) return Math.round(s / 60) + 'm ago'; if (s < 86400) return Math.round(s / 3600) + 'h ago'; return Math.round(s / 86400) + 'd ago'; };
 
 function formatGen(n) {
