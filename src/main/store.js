@@ -118,20 +118,27 @@ class Store {
     if (OLD_TITLES.includes(al.titleTemplate)) al.titleTemplate = DEFAULT_TITLE;
     if (OLD_DESCRIPTIONS.includes(al.descriptionTemplate)) al.descriptionTemplate = DEFAULT_DESCRIPTION;
     this.timer = null;
+    this.dirtySince = 0;   // first unsaved change; 0 = nothing to write
   }
   get(key) { return key ? this.data[key] : this.data; }
   set(key, val) { this.data[key] = val; this.save(); return val; }
   patchSettings(p) { this.data.settings = deepMerge(this.data.settings, p); this.save(); return this.data.settings; }
+  // debounced, but never more than 2 s behind: a steady stream of log lines used to push the
+  // write back forever, so a crash lost everything since the stream started
   save() {
     clearTimeout(this.timer);
-    this.timer = setTimeout(() => this.flush(), 300);
+    if (!this.dirtySince) this.dirtySince = Date.now();
+    this.timer = setTimeout(() => this.flush(), Date.now() - this.dirtySince > 2000 ? 0 : 300);
   }
   flush() {
     clearTimeout(this.timer);
+    this.dirtySince = 0;
     const tmp = this.file + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(this.data, null, 1));
+    fs.writeFileSync(tmp, JSON.stringify(this.data));
     fs.renameSync(tmp, this.file);
   }
+  // write pending changes only (a second instance that quits at once must not overwrite the file)
+  flushIfDirty() { if (this.dirtySince) this.flush(); }
   log(level, msg, extra) {
     const entry = { t: Date.now(), level, msg: String(msg), extra: extra === undefined ? undefined : safe(extra) };
     this.data.logs.push(entry);

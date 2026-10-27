@@ -307,7 +307,13 @@ function createWindow() {
   });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) shell.openExternal(url); return { action: 'deny' }; });
-  win.on('closed', () => { win = null; });
+  // the hidden eldorado.gg window kept the app alive with no way back to it: closing the main window quits
+  win.on('close', e => {
+    if (SMOKE || !store || !deliveryJobsActive()) return;
+    const r = dialog.showMessageBoxSync(win, { type: 'warning', buttons: ['Keep open', 'Quit anyway'], defaultId: 0, cancelId: 0, title: 'Zotac Lister', message: 'A delivery is running.', detail: 'Quitting stops the delivery until you start Zotac again.' });
+    if (r === 0) e.preventDefault();
+  });
+  win.on('closed', () => { win = null; if (!SMOKE) app.quit(); });
 }
 
 // Screen recording for Video Proof: the Roblox window of the account doing the trade (set by
@@ -1169,7 +1175,8 @@ function ipc() {
     const acct = meta && meta.account ? '__' + String(meta.account).replace(/[^\w]/g, '') : '';
     const name = `${String(orderId || 'manual').replace(/[^\w-]/g, '')}${acct}-${Date.now()}.webm`;
     const f = path.join(proofDir(), name);
-    fs.writeFileSync(f, Buffer.from(b64, 'base64'));
+    // raw bytes from the renderer (Uint8Array); base64 still accepted
+    fs.writeFileSync(f, typeof b64 === 'string' ? Buffer.from(b64, 'base64') : Buffer.from(b64));
     // MediaRecorder leaves out the duration and the seek index: without them the player shows
     // 0:00 and can't scrub. Duration written here; ffmpeg (if installed) adds the seek index.
     try { if (meta.startedAt && meta.endedAt) webmfix.fixDuration(f, meta.endedAt - meta.startedAt); } catch (e) { store.log('warn', '[Proof] duration fix: ' + e.message); }
@@ -1298,4 +1305,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
-app.on('window-all-closed', () => { try { store.flush(); } catch { /* ignore */ } try { launcher && launcher.stop(); } catch { /* ignore */ } app.quit(); });
+app.on('window-all-closed', () => app.quit());
+app.on('will-quit', () => { try { launcher && launcher.stop(); } catch { /* ignore */ } });
+// also runs on app.exit (updater relaunch), which skips will-quit
+process.on('exit', () => { try { store.flushIfDirty(); } catch { /* ignore */ } });

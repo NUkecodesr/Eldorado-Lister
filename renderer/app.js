@@ -182,7 +182,9 @@ let liveBusy = false;
 async function liveTick(kind, force) {
   const fn = (LIVE[kind] || {})[S.page];
   if (!fn || liveBusy) return;
-  if (kind === 'remote' && (!S.me || (document.hidden && !force))) return;
+  // minimized: skip (backgroundThrottling is off, so the page kept re-rendering unseen); shown again = refresh at once
+  if (document.hidden && !force) return;
+  if (kind === 'remote' && !S.me) return;
   liveBusy = true;
   try { await fn(); soft(); } catch { /* next tick */ } finally { liveBusy = false; }
 }
@@ -237,7 +239,7 @@ function wire() {
   });
   M.on('update:available', u => { UP.info = u; toast(`Update ${u.latest} available (Settings)`, 'info', 9000); if (S.page === 'settings') soft(); });
   M.onCall({ renderImage: p => renderListingImage(p), renderModel: p => renderModel3D(p) });
-  setInterval(async () => { try { S.info = await M.call('app:info'); S.bridge = S.info.bridge || S.bridge; S.listerRunning = S.info.listerRunning; renderFooter(); } catch { /* ignore */ } }, 15000);
+  setInterval(async () => { if (document.hidden) return; try { S.info = await M.call('app:info'); S.bridge = S.info.bridge || S.bridge; S.listerRunning = S.info.listerRunning; renderFooter(); } catch { /* ignore */ } }, 15000);
 }
 
 // Used by `electron . --smoke`: render every page and report failures.

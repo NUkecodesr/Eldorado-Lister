@@ -862,11 +862,10 @@ async function openRec(key) {
     rec.onstop = async () => {
       clearInterval(tick); clearTimeout(r.cap);
       src.getTracks().forEach(tr => tr.stop());
-      const buf = await new Blob(chunks, { type: 'video/webm' }).arrayBuffer();
-      let bin = ''; const bytes = new Uint8Array(buf);
-      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      // raw bytes over IPC: the old base64 string cost ~3x the clip size in memory
+      const bytes = new Uint8Array(await new Blob(chunks, { type: 'video/webm' }).arrayBuffer());
       try {
-        const kept = await M.call('proof:save', r.orderId, btoa(bin), { account: r.account, labels: r.labels, startedAt: started, endedAt: Date.now(), window: target && target.hwnd ? 'account window' : 'first Roblox window / screen' });
+        const kept = await M.call('proof:save', r.orderId, bytes, { account: r.account, labels: r.labels, startedAt: started, endedAt: Date.now(), window: target && target.hwnd ? 'account window' : 'first Roblox window / screen' });
         if (kept) toast('Proof video saved' + (r.account ? ' (@' + r.account + ')' : ''), 'good');
         else toast('Clip not kept: the delivery did not go through', 'info');
       } catch (e) { toast('Saving proof failed: ' + e.message, 'error'); }
