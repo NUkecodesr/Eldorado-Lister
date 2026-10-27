@@ -490,7 +490,7 @@ async function openOrderSimulator() {
   };
   const off = M.on('delivery:update', u => { if (u && u.orderId === orderId) draw(); });
   const offJob = M.on('delivery:job', j => { if (j && j.orderId === orderId) draw(); });
-  const timer = setInterval(draw, 3000);
+  const timer = setInterval(() => { if (!document.hidden) draw(); }, 3000);   // events still redraw; poll only while shown
   const closeSim = modal('Simulated order — ' + d.title, h('div', { class: 'sim' }, status, msgs, quick, h('div', { class: 'row' }, input, h('button', { class: 'btn primary', onclick: () => send() }, 'Send'))),
     [{ label: 'Cancel order', cls: 'danger', fn: async () => { await M.call('delivery:manual', orderId, 'cancel'); } }, { label: t('close') }]);
   const bg = $('#modal-root').lastElementChild;

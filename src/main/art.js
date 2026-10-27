@@ -18,6 +18,7 @@ class Art {
     if (!store.data.art) store.data.art = { pets: {}, traits: {} };
     if (!store.data.art.mutations) store.data.art.mutations = {};
     this.inflight = new Map();
+    this.urls = new Map();   // png path -> { mtime, url }: skips re-reading + re-encoding the same picture
     this.dropSharedPetArt();
   }
   // one picture id used for several different brainrots is a decoration the scanner picked
@@ -94,6 +95,16 @@ class Art {
     finally { this.prefetching[kind] = false; }
   }
 
+  // data: URL of a png on disk, cached in memory until the file changes
+  pngUrl(f) {
+    const mtime = fs.statSync(f).mtimeMs, hit = this.urls.get(f);
+    if (hit && hit.mtime === mtime) return hit.url;
+    const url = this.pngUrl(f);
+    if (this.urls.size >= 300) this.urls.delete(this.urls.keys().next().value);
+    this.urls.set(f, { mtime, url });
+    return url;
+  }
+
   file(kind, name) { return path.join(this.dir, kind + '-' + norm(name) + '.png'); }
 
   // data: URL for a pet / trait picture, downloading it the first time; null when unknown
@@ -104,12 +115,12 @@ class Art {
     const keys = [name + '|None', name + '|' + (mutation || 'None')];   // normal model first
     for (const key of keys) {
       const f = this.file('render1024', key);
-      if (fs.existsSync(f)) return 'data:image/png;base64,' + fs.readFileSync(f).toString('base64');
+      if (fs.existsSync(f)) return this.pngUrl(f);
       const mf = path.join(this.dir, 'models', norm(key) + '.json');
       if (!fs.existsSync(mf)) continue;
       const job = 'render:' + key;
       if (!this.inflight.has(job)) this.inflight.set(job, this.renderModel(JSON.parse(fs.readFileSync(mf, 'utf8')), f).finally(() => this.inflight.delete(job)));
-      if (await this.inflight.get(job)) return 'data:image/png;base64,' + fs.readFileSync(f).toString('base64');
+      if (await this.inflight.get(job)) return this.pngUrl(f);
     }
     return this.dataUrl('pets', name);
   }
@@ -159,13 +170,13 @@ class Art {
 
   async dataUrl(kind, name) {
     const f = this.file(kind, name);
-    if (fs.existsSync(f)) return 'data:image/png;base64,' + fs.readFileSync(f).toString('base64');
+    if (fs.existsSync(f)) return this.pngUrl(f);
     const id = this.ids[kind] && (this.ids[kind][name] || Object.entries(this.ids[kind]).find(([k]) => norm(k) === norm(name))?.[1]);
     if (!id) return null;
     const key = kind + ':' + id;
     if (!this.inflight.has(key)) this.inflight.set(key, this.download(id, f).finally(() => this.inflight.delete(key)));
     const ok = await this.inflight.get(key);
-    return ok ? 'data:image/png;base64,' + fs.readFileSync(f).toString('base64') : null;
+    return ok ? this.pngUrl(f) : null;
   }
 
   async download(id, file) {
