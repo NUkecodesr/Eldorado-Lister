@@ -71,7 +71,8 @@ class Eldorado {
   async itemIndex() { await this.library(); return this.cache.itemIndex; }
   async itemList() {
     const idx = await this.itemIndex();
-    return [...idx.values()].sort((a, b) => a.name.localeCompare(b.name));
+    const cmp = new Intl.Collator().compare;
+    return [...idx.values()].sort((a, b) => cmp(a.name, b.name));
   }
   attrValues(id) { return ((this.cache.attrs || []).find(a => a.id === id) || {}).selectValues || []; }
 
