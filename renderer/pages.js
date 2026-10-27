@@ -687,7 +687,7 @@ async function manageSpecial() {
   for (const n of [...(attrDef ? attrDef.selectValues.map(v => v.name) : []), ...S.pets.flatMap(p => p.traits || []), ...cur()]) {
     const k = String(n || '').trim(); if (k && !seen.has(k.toLowerCase())) seen.set(k.toLowerCase(), k);
   }
-  const names = [...seen.values()].sort((a, b) => a.localeCompare(b));
+  const names = [...seen.values()].sort(new Intl.Collator().compare);
   // every trait still without an icon is asked for again (icons may have arrived since)
   const want = names.filter(n => !ART_THUMBS.traits[n]);
   if (want.length) {
@@ -1361,7 +1361,7 @@ PAGES.accounts = async root => {
   if (!RA.showEmpty && !f.account) accts = accts.filter(shownAcct);
   if (RA.org === 'pets') accts = [...accts].sort((a, b) => countOf(b) - countOf(a));
   else if (RA.org === 'free') accts = [...accts].sort((a, b) => countOf(a) - countOf(b));
-  else accts = [...accts].sort((a, b) => a.username.localeCompare(b.username));
+  else { const cmp = new Intl.Collator().compare; accts = [...accts].sort((a, b) => cmp(a.username, b.username)); }
 
   const editAcct = (a = {}) => {
     const x = { ...a };
