@@ -1137,7 +1137,9 @@ PAGES.settings = async root => {
 // every log line Zotac keeps (Launcher, Sale, Scanner, Watcher, Updates... not only delivery)
 const SL = { area: 'all', level: 'all' };
 function settingsLogs() {
-  const areas = [...new Set((S.logs || []).map(l => (l.msg.match(/^\[([^\]]+)\]/) || [])[1]).filter(Boolean))].sort();
+  const areaSet = new Set();
+  for (const l of S.logs || []) { if (l.msg[0] === '[') { const i = l.msg.indexOf(']'); if (i > 1) areaSet.add(l.msg.slice(1, i)); } }
+  const areas = [...areaSet].sort();
   const rows = (S.logs || []).filter(l => (SL.level === 'all' || l.level === SL.level) && (SL.area === 'all' || l.msg.startsWith('[' + SL.area + ']'))).slice(-300).reverse();
   return mxCard('pulse', 'Logs', 'Everything Zotac logged lately, newest first', h('button', { class: 'btn sm', onclick: async () => { S.logs = await M.call('logs:get'); render(); } }, 'Refresh'),
     h('div', { class: 'row', style: { marginBottom: '8px' } },
