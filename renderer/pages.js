@@ -1352,7 +1352,9 @@ PAGES.accounts = async root => {
   const petFilterOn = !!(f.q || f.mutation || f.min || f.max || f.range);
 
   let accts = S.accounts.filter(a => !f.account || a.username.toLowerCase().includes(f.account.toLowerCase()));
-  const countOf = a => live.filter(p => p.accountId === a.id).length;
+  const liveCounts = new Map();
+  for (const p of live) liveCounts.set(p.accountId, (liveCounts.get(p.accountId) || 0) + 1);
+  const countOf = a => liveCounts.get(a.id) || 0;
   // every logged-in account (saved cookie) shows, also with no stock left; the rest via Show others
   const shownAcct = a => a.hasCookie;
   const emptyCount = accts.filter(a => !shownAcct(a)).length;
