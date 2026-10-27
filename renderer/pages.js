@@ -264,7 +264,7 @@ PAGES.autolist = async root => {
     (removedView ? !!p.alHidden : !p.alHidden && (AL.filter.status === 'all' || p.status === AL.filter.status)) &&
     (!q || `${p.name} ${p.mutation} ${(p.traits || []).join(' ')} ${p.title || ''}`.toLowerCase().includes(q)))
     .sort((a, b) => AL.sort === 'name' ? AL.dir * AL_COLLATOR.compare(String(a.name), String(b.name)) || ((b.gen || 0) - (a.gen || 0)) : AL.dir * ((a.gen || 0) - (b.gen || 0)));
-  for (const id of [...AL.selected]) if (!S.pets.some(p => p.id === id)) AL.selected.delete(id);
+  if (AL.selected.size) { const petIds = new Set(S.pets.map(p => p.id)); for (const id of [...AL.selected]) if (!petIds.has(id)) AL.selected.delete(id); }
   const prog = S.listerProgress || {};
   const special = xSpecial();
   const review = pets.filter(p => xIsReview(p, special));
