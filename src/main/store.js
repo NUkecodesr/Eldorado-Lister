@@ -109,7 +109,7 @@ const DEFAULTS = {
 class Store {
   constructor(dir) {
     this.file = path.join(dir, 'zotac-data.json');
-    this.data = JSON.parse(JSON.stringify(DEFAULTS));
+    this.data = structuredClone(DEFAULTS);
     try {
       const raw = JSON.parse(fs.readFileSync(this.file, 'utf8'));
       this.data = deepMerge(this.data, raw);
@@ -147,7 +147,7 @@ class Store {
     this.save();
     return entry;
   }
-  reset() { const keep = this.data.settings; this.data = JSON.parse(JSON.stringify(DEFAULTS)); this.data.settings = keep; this.save(); }
+  reset() { const keep = this.data.settings; this.data = structuredClone(DEFAULTS); this.data.settings = keep; this.save(); }
 }
 
 function safe(v) { try { return JSON.parse(JSON.stringify(v)); } catch { return String(v); } }
