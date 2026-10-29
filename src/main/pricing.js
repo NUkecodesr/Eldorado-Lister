@@ -25,6 +25,14 @@ function compFromResult(r, numericAttr, mutationAttr) {
   };
 }
 
+// parsed once per distinct setting value, not once per competitor offer
+let twSrc, twOut = [];
+function titleWords(src) {
+  const key = Array.isArray(src) ? src.join('') : String(src || '');
+  if (key !== twSrc) { twSrc = key; twOut = (Array.isArray(src) ? src : key.split(',')).map(s => String(s).trim().toLowerCase()).filter(Boolean); }
+  return twOut;
+}
+
 function passesRules(c, rules, myId) {
   if (rules.ignoreOwn && myId && c.sellerId === myId) return false;
   if (Array.isArray(rules.deliveryTimes) && rules.deliveryTimes.length) {
@@ -37,7 +45,7 @@ function passesRules(c, rules, myId) {
   }
   if (rules.minFeedback && c.feedback != null && c.feedback < rules.minFeedback) return false;
   if (rules.minRatings && (c.ratings || 0) < rules.minRatings) return false;
-  const words = (Array.isArray(rules.ignoreTitleWords) ? rules.ignoreTitleWords : String(rules.ignoreTitleWords || '').split(',')).map(s => String(s).trim().toLowerCase()).filter(Boolean);
+  const words = titleWords(rules.ignoreTitleWords);
   if (words.length && words.some(w => String(c.title || '').toLowerCase().includes(w))) return false;
   return c.price > 0;
 }
