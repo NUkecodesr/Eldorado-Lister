@@ -6,6 +6,7 @@ const crypto = require('crypto');
 // analytics / tracking cookies change all the time and say nothing about the login
 const NOISE = /^(_ga|_gid|_gcl|_fbp|_ttp|_hj|ajs_|amp_|_clck|_clsk|intercom|__stripe|_uet|mp_|_tt_|ttcsid|_scid|_rdt|_pin|__hs|hubspot|_dd_s|OptanonConsent)/i;
 let lastCookieSig = '';
+const MAX_BODY = 64 * 1024 * 1024;   // bytes; the old cap counted chunks, so its real size was unbounded
 
 function startLocalServer({ onClientError, store, bridge, delivery, importScan, onServerScan, onArt, wantRescan, wantServer, onCookies, onAgentClosing }) {
   const port = store.get('settings').localPort || 47321;
@@ -19,7 +20,8 @@ function startLocalServer({ onClientError, store, bridge, delivery, importScan, 
     let body = {};
     if (req.method === 'POST') {
       const chunks = [];
-      for await (const c of req) { chunks.push(c); if (chunks.length > 4000) break; }
+      let size = 0;
+      for await (const c of req) { size += c.length; if (size > MAX_BODY) { req.destroy(); return send(413, { error: 'body too large' }); } chunks.push(c); }
       try { body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { return send(400, { error: 'bad json' }); }
     }
     const token = req.headers['x-zotac-token'] || url.searchParams.get('token') || body.token;
