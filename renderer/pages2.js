@@ -294,8 +294,9 @@ PAGES.reviews = async root => {
   const st = (RV.data && RV.data.stats) || {};
   const rows = RV.rows;
   const shown = rows.filter(r => RV.filter === 'all' || (RV.filter === 'pos') === rvPos(r));
-  const posN = st.positiveCount ?? st.positive ?? (rows.length ? rows.filter(rvPos).length : null);
-  const negN = st.negativeCount ?? st.negative ?? (rows.length ? rows.filter(r => !rvPos(r)).length : null);
+  const rowsPos = rows.length ? rows.filter(rvPos).length : null;
+  const posN = st.positiveCount ?? st.positive ?? rowsPos;
+  const negN = st.negativeCount ?? st.negative ?? (rows.length ? rows.length - rowsPos : null);
   root.append(h('div', null, mxHead('Reviews', 'Ratings & feedback from buyers', [
     st.feedbackScore != null ? h('span', { class: 'pill gold' }, 'Feedback ' + Number(st.feedbackScore).toFixed(2) + '%') : null,
     h('button', { class: 'btn sm', onclick: () => fetchPage(1) }, mxSvg('refresh', 12), RV.loading ? 'Loading…' : t('refresh'))], 'star'),
