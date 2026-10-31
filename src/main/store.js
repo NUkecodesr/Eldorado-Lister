@@ -150,7 +150,9 @@ class Store {
   reset() { const keep = this.data.settings; this.data = structuredClone(DEFAULTS); this.data.settings = keep; this.save(); }
 }
 
-function safe(v) { try { return JSON.parse(JSON.stringify(v)); } catch { return String(v); } }
+function safe(v) {
+  if (typeof v === 'string' || typeof v === 'boolean' || (typeof v === 'number' && isFinite(v))) return v;   // primitives need no round trip
+  try { return JSON.parse(JSON.stringify(v)); } catch { return String(v); } }
 
 function deepMerge(base, over) {
   if (Array.isArray(base) || Array.isArray(over)) return over === undefined ? base : over;
