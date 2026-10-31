@@ -232,7 +232,8 @@ class Launcher extends EventEmitter {
     for (const id of Object.keys(this.pids)) { delete this.pids[id]; if (this.missing) delete this.missing[id]; }
     await new Promise(r => setTimeout(r, 800));
     const left = await robloxPids();
-    const killed = before.filter(pid => !left.includes(pid)).length;
+    const leftSet = new Set(left);
+    const killed = before.filter(pid => !leftSet.has(pid)).length;
     this.resetMultiInstance();
     this.log(left.length ? 'warn' : 'info', `Fix Launch: ended ${killed} Roblox game(s)${left.length ? `, ${left.length} still running (pid ${left.join(', ')})` : ''} and reset the launcher`);
     return { killed, left: left.length };
