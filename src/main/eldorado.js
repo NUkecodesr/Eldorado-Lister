@@ -174,7 +174,9 @@ class Eldorado {
     if (has(g.mutationAttr)) offerAttributes.push({ id: g.mutationAttr, type: 'Select', values: [sab.mutationId(pet.mutation, this.attrValues(g.mutationAttr))] });
     if (has(g.msNumericAttr) && pet.gen > 0) offerAttributes.push({ id: g.msNumericAttr, type: 'Numeric', value: Math.round(pet.gen) });
     if (has(g.traitsAttr)) {
-      const t = sab.traitIds(pet.traits, this.attrValues(g.traitsAttr));
+      const missed = [];
+      const t = sab.traitIds(pet.traits, this.attrValues(g.traitsAttr), missed);
+      if (missed.length) this.store.log('warn', `${pet.name}: trait(s) not on Eldorado, left off the offer: ${missed.join(', ')}`);
       if (t.length) offerAttributes.push({ id: g.traitsAttr, type: 'Select', values: t });
     }
     return {

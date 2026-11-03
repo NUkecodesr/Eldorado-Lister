@@ -54,12 +54,22 @@ function mutationId(m, metaValues) {
   return slug(raw);
 }
 
-function traitIds(traits, metaValues) {
+// In-game trait names do not always equal Eldorado's ("Jack O'Lantern" vs "Jack O'Lantern Pet"), and a
+// trait that did not match used to be dropped silently. Exact name/id first, then a unique prefix match
+// (4+ chars); `missed` collects what still found no Eldorado value.
+function traitIds(traits, metaValues, missed) {
   const list = Array.isArray(traits) ? traits : String(traits || '').split(/[,;|]/);
+  const meta = metaValues || [];
   const out = [];
   for (const t of list.map(x => String(x).trim()).filter(Boolean)) {
-    const hit = (metaValues || []).find(v => norm(v.name) === norm(t) || norm(v.id) === norm(t));
-    if (hit && !out.includes(hit.id)) out.push(hit.id);
+    const n = norm(t);
+    let hit = meta.find(v => norm(v.name) === n || norm(v.id) === n);
+    if (!hit && n.length >= 4) {
+      const near = meta.filter(v => { const a = norm(v.name); return a.length >= 4 && (a.startsWith(n) || n.startsWith(a)); });
+      if (near.length === 1) hit = near[0];
+    }
+    if (!hit) { if (missed) missed.push(t); continue; }
+    if (!out.includes(hit.id)) out.push(hit.id);
   }
   return out;
 }
