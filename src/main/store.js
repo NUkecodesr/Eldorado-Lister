@@ -48,6 +48,7 @@ const DEFAULTS = {
     autoMessage: { enabled: false, text: 'Hi {buyer}! Thanks for buying {item}. Please send your Roblox username and stay online — delivery is coming right up.' },
     autoUpdate: { enabled: true, repo: 'NUkecodesr/Eldorado-Lister', installedSha: '' },
     pollSec: 45,
+    eldAuto: { petIds: [], offerIds: [] },   // pets tagged for Eldorado's built-in auto delivery; offers made that way (Zotac never delivers those orders)
     game: {
       gameId: '259',
       category: 'CustomItem',

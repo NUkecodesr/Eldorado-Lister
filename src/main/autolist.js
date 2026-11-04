@@ -117,7 +117,12 @@ class AutoLister extends EventEmitter {
         }
         if (!price || price <= 0) throw new Error('No price');
         // 2. stock detection
-        const stock = al.stockDetection ? this.findStock(pet, myOffers) : null;
+        // tagged for Eldorado's built-in auto delivery: always its own offer (an existing offer would be rebuilt without the linked account)
+        const eld = this.store.get('settings').eldAuto || {};
+        const auto = group.every(p => (eld.petIds || []).includes(p.id));
+        let stock = al.stockDetection && !auto ? this.findStock(pet, myOffers) : null;
+        // a manual pet never joins an automated offer: Eldorado's bot would try to deliver it
+        if (stock && (stock.guaranteedDeliveryTime === 'Automated' || (eld.offerIds || []).includes(stock.id))) stock = null;
         if (stock) {
           // the offer may already stand for some of these pets: Zotac lost track of a listed pet (its
           // record was reset) and it is listed again. Those are linked, not added: only pets beyond
@@ -153,10 +158,12 @@ class AutoLister extends EventEmitter {
             } catch (e) { this.log('warn', `Image skipped for ${pet.name}: ${e.message}`); }
           }
           const payload = await this.eld.buildOfferPayload(pet, { title, description, price, deliveryTime: pet.deliveryTime || al.deliveryTime, image, quantity: qty });
+          if (auto) await this.eld.makeAutomated(payload, acct && acct.username);
           const res = await this.eld.createOffer(payload);
           const offerId = (res && (res.id || res.offerId || (res.offer && res.offer.id))) || (typeof res === 'string' ? res : null);
           for (const p of group) this.updatePet(p.id, { status: 'listed', offerId, price, title, description, listedAt: Date.now() });
-          this.log('info', `Listed ${title} @ $${price}${qty > 1 ? ` × ${qty} (quantity ${qty})` : ''} (${basis})`);
+          if (auto && offerId) { const s = this.store.get('settings'); s.eldAuto = s.eldAuto || { petIds: [], offerIds: [] }; s.eldAuto.offerIds = [...(s.eldAuto.offerIds || []), offerId]; this.store.save(); }
+          this.log('info', `Listed ${title} @ $${price}${qty > 1 ? ` × ${qty} (quantity ${qty})` : ''} (${basis})${auto ? ' · Eldorado auto delivery' : ''}`);
         }
         this.progress.ok += qty;
       } catch (e) {

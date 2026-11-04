@@ -193,6 +193,37 @@ class Eldorado {
     };
   }
 
+  // --- Eldorado built-in auto delivery (verified sellers; Eldorado's own bot does the trade) ---
+  // Roblox accounts the seller linked on eldorado.gg: [{ id, robloxUsername, ... }]
+  async autoDeliveryAccounts() {
+    const r = await this.b.get('v1/item-management/me/roblox-accounts/select-options', { gameId: this.game.gameId });
+    return Array.isArray(r) ? r : [];
+  }
+  // same request the Sell form sends: select attributes as [firstValueId], numeric as [number]
+  async autoDeliveryEligibility(item, offerAttributes) {
+    const g = this.game;
+    const attributes = {};
+    for (const a of offerAttributes) {
+      if (a.type === 'Numeric') attributes[a.id] = [a.value];
+      else if (a.values && a.values.length) attributes[a.id] = [a.values[0]];
+    }
+    const r = await this.b.post('v1/item-management/me/offers/auto-delivery/is-eligible', { gameId: g.gameId, category: g.category, itemType: g.itemTypeValue, itemName: item.name, attributes });
+    return { eligible: !!(r && r.isEligible), multi: !!(r && r.canLinkMultipleAccounts) };
+  }
+  // Turn a built payload into an Eldorado auto delivery offer: checks eligibility, finds the linked
+  // Roblox account that owns the pet, sets guaranteedDeliveryTime 'Automated' + robloxAccountLinkIds.
+  async makeAutomated(payload, ownerUsername) {
+    const el = await this.autoDeliveryEligibility(payload._item, payload.augmentedGame.offerAttributes);
+    if (!el.eligible) throw new Error('not eligible for Eldorado auto delivery (needs a verified seller and a supported item)');
+    const want = String(ownerUsername || '').trim().toLowerCase();
+    if (!want) throw new Error('this pet has no Roblox account, so Eldorado auto delivery cannot pick the account to deliver from');
+    const mine = (await this.autoDeliveryAccounts()).filter(a => String(a.robloxUsername || '').toLowerCase() === want);
+    if (!mine.length) throw new Error(`Roblox account ${ownerUsername} is not linked to Eldorado auto delivery (eldorado.gg dashboard > Automated delivery)`);
+    payload.details.guaranteedDeliveryTime = 'Automated';
+    payload.robloxAccountLinkIds = mine.map(a => a.id);
+    return payload;
+  }
+
   async createOffer(payload) {
     const body = { ...payload }; delete body._item;
     return this.b.post('v1/item-management/me/offers/item', body);

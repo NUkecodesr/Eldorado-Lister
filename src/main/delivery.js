@@ -230,6 +230,11 @@ class Delivery extends EventEmitter {
 
   // --- flow ------------------------------------------------------------
   async onSale(order, pets) {
+    // an Eldorado built-in auto delivery offer: Eldorado's own bot delivers it, Zotac must not also trade
+    if (!order.sim && order.offerId && ((this.store.get('settings').eldAuto || {}).offerIds || []).includes(order.offerId)) {
+      if (!this.map[order.id]) this.log('info', `Order ${order.id}: Eldorado auto delivery offer, Eldorado delivers it, Zotac does nothing`);
+      return;
+    }
     if ((!this.cfg.enabled && !order.sim) || this.map[order.id]) return;
     const accounts = [...new Set(pets.map(p => p.accountId).filter(Boolean))];
     const quantity = Math.max(1, Number(order.quantity) || pets.length || 1);
