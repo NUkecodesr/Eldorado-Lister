@@ -230,7 +230,8 @@ function xFill(tpl, p) {
     .replace(/([ \t]*\|)+[ \t]*$/gm, '').replace(/^[ \t]*\|[ \t]*/gm, '').trim();
 }
 // pets Zotac can deliver: their account is logged in (saved cookie)
-const xDeliverable = p => { const a = S.accounts.find(x => x.id === p.accountId); return !!(a && a.hasCookie); };
+const xEldAutoIds = () => new Set(((S.settings || {}).eldAuto || {}).petIds || []);
+const xDeliverable = p => { if (xEldAutoIds().has(p.id)) return true; const a = S.accounts.find(x => x.id === p.accountId); return !!(a && a.hasCookie); };
 const xSpecial = () => new Set(((S.settings.autolist || {}).specialTraits || []).map(x => String(x).toLowerCase()));
 const xTraitReview = (p, set) => (p.traits || []).some(t => set.has(String(t).toLowerCase()));
 const xIsReview = (p, set) => xTraitReview(p, set) || !!p.noComps;
@@ -532,6 +533,17 @@ PAGES.autolist = async root => {
   const step = (n, title, sub, ...btns) => h('div', { class: 'x-step' },
     h('div', { class: 'x-step-h' }, h('span', { class: 'x-step-n' + (n === 3 ? ' go' : '') }, String(n)), h('b', null, title)),
     h('p', null, sub), h('div', { class: 'x-step-b' }, btns));
+  const eldTags = xEldAutoIds();
+  const toggleEldAuto = async () => {
+    const chosen = [...AL.selected].map(id => S.pets.find(p => p.id === id)).filter(p => p && p.status === 'available' && !p.alHidden);
+    if (!chosen.length) return toast('Select available pets first', 'error');
+    const on = !chosen.every(p => eldTags.has(p.id));
+    const cur = xEldAutoIds();
+    chosen.forEach(p => on ? cur.add(p.id) : cur.delete(p.id));
+    await saveSettings({ eldAuto: { petIds: [...cur] } });
+    toast(on ? `${chosen.length} pet(s) tagged: Eldorado auto delivery eligible. Start Auto List lists them with Eldorado's own delivery (their Roblox account must be linked on eldorado.gg)` : `${chosen.length} pet(s) back to Zotac delivery`, 'good', 8000);
+    render();
+  };
   const stepsRow = h('div', { class: 'x-steps3' },
     step(1, 'Price', `Beats the cheapest similar offer by $${Number(al.undercut ?? 0.01).toFixed(2)} (${tolTxt} gen/s)`,
       h('button', { class: 'btn primary', onclick: () => priceRun(live) }, 'Price all'),
@@ -542,7 +554,8 @@ PAGES.autolist = async root => {
       h('label', { class: 'x-chk' }, h('input', { type: 'checkbox', checked: al.recolorByMutation !== false, onchange: e => saveSettings({ autolist: { recolorByMutation: e.target.checked } }).then(render) }), 'Recolor')),
     step(3, 'List', `${live.length} ready · ${dtLabel(al.deliveryTime || 'Minute20')} delivery`,
       // calls the start itself: a ".btn.danger" lookup in the action bar found Remove first
-      h('button', { class: 'btn primary x-go', onclick: () => S.listerRunning ? M.call('autolist:stop') : startList() }, S.listerRunning ? 'Stop' : `Start Auto List (${AL.selected.size})`)));
+      h('button', { class: 'btn primary x-go', onclick: () => S.listerRunning ? M.call('autolist:stop') : startList() }, S.listerRunning ? 'Stop' : `Start Auto List (${AL.selected.size})`),
+      h('button', { class: 'btn', title: 'Tag the selected pets so they are listed with Eldorado\'s own auto delivery (Eldorado delivers, Zotac does not). Press again to remove the tag.', onclick: toggleEldAuto }, 'Eldorado built-in autodelivery')));
   const rulesBar = h('div', { class: 'x-rulesbar' },
     h('span', null, `Rules: ${tolTxt} gen/s · ${rules.minRatings || 0}+ reviews, ${rules.minFeedback || 0}%+ rating · ${dts.length ? dts.map(dtLabel).join(', ') : 'any delivery'} · ${words.length} blocked word${words.length === 1 ? '' : 's'} · ${(al.specialTraits || []).length} special trait${(al.specialTraits || []).length === 1 ? '' : 's'} · no similar → ${al.noCompsMode === 'estimate' ? 'estimate' : 'you price it'}`),
     h('button', { class: 'btn sm', onclick: () => { AL.rulesOpen = !AL.rulesOpen; render(); } }, AL.rulesOpen ? 'Hide pricing rules' : '⚙ Pricing rules'));
@@ -603,7 +616,7 @@ PAGES.autolist = async root => {
       p.imagePath ? xCardThumb(p, () => previewImage(p)) : xPetThumb(p, () => previewImage(p)),
       h('div', { class: 'x-alname', title: p.title ? 'Fixed title (Quick Fill)' : 'Title from the template' }, tEl,
         p.status !== 'available' ? statusPill(p.status) : null,
-        null),
+        ids.some(id => eldTags.has(id)) ? h('span', { class: 'x-eldtag', title: 'Listed with Eldorado\'s built-in auto delivery: Eldorado delivers, Zotac does not' }, 'ELDORADO AUTO DELIVERY ELIGIBLE') : null),
       h('div', { class: 'x-alact' },
         h('button', { title: 'Smart price & competitors', onclick: () => showComps(p) }, '$'),
         h('button', { title: 'Preview image', onclick: () => previewImage(p) }, 'Img'),
