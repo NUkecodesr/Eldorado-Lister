@@ -1122,6 +1122,7 @@ class Delivery extends EventEmitter {
   async startFromOrder(o) {
     if (!o || !o.id) throw new Error('No order');
     if (this.map[o.id]) throw new Error('This order already has a delivery (Auto Delivery → activity)');
+    if (o.offerId && ((this.store.get('settings').eldAuto || {}).offerIds || []).includes(o.offerId)) throw new Error('Eldorado delivers this order itself (built-in auto delivery offer): Zotac does not start a delivery');
     const qty = Math.max(1, Number(o.quantity) || 1);
     const all = this.store.get('pets');
     let pets = all.filter(p => p.orderId === o.id && !p.delivered);
