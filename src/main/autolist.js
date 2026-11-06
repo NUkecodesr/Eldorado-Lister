@@ -162,8 +162,18 @@ class AutoLister extends EventEmitter {
           const res = await this.eld.createOffer(payload);
           const offerId = (res && (res.id || res.offerId || (res.offer && res.offer.id))) || (typeof res === 'string' ? res : null);
           for (const p of group) this.updatePet(p.id, { status: 'listed', offerId, price, title, description, listedAt: Date.now() });
-          if (auto && offerId) { const s = this.store.get('settings'); s.eldAuto = s.eldAuto || { petIds: [], offerIds: [] }; s.eldAuto.offerIds = [...(s.eldAuto.offerIds || []), offerId]; this.store.save(); }
-          this.log('info', `Listed ${title} @ $${price}${qty > 1 ? ` × ${qty} (quantity ${qty})` : ''} (${basis})${auto ? ' · Eldorado auto delivery' : ''}`);
+          let autoOk = false;
+          if (auto && offerId) {
+            // read the offer back: Eldorado must report it as Automated, else it is a normal offer and Zotac delivers it
+            const live = await this.eld.isAutomatedOffer(offerId);
+            if (live === false) this.log('error', `${pet.name}: Eldorado auto delivery did NOT start (offer ${offerId} is a normal offer): account not linked on Eldorado or not accepted for auto delivery. Zotac delivers this one itself.`);
+            else {
+              if (live === null) this.log('warn', `${pet.name}: could not read offer ${offerId} back to confirm Eldorado auto delivery; treated as automated`);
+              autoOk = true;
+              const s = this.store.get('settings'); s.eldAuto = s.eldAuto || { petIds: [], offerIds: [] }; s.eldAuto.offerIds = [...(s.eldAuto.offerIds || []), offerId]; this.store.save();
+            }
+          }
+          this.log('info', `Listed ${title} @ $${price}${qty > 1 ? ` × ${qty} (quantity ${qty})` : ''} (${basis})${autoOk ? ' · Eldorado auto delivery' : ''}`);
         }
         this.progress.ok += qty;
       } catch (e) {

@@ -537,11 +537,49 @@ PAGES.autolist = async root => {
   const toggleEldAuto = async () => {
     const chosen = [...AL.selected].map(id => S.pets.find(p => p.id === id)).filter(p => p && p.status === 'available' && !p.alHidden);
     if (!chosen.length) return toast('Select available pets first', 'error');
-    const on = !chosen.every(p => eldTags.has(p.id));
     const cur = xEldAutoIds();
-    chosen.forEach(p => on ? cur.add(p.id) : cur.delete(p.id));
-    await saveSettings({ eldAuto: { petIds: [...cur] } });
-    toast(on ? `${chosen.length} pet(s) tagged: Eldorado auto delivery eligible. Start Auto List lists them with Eldorado's own delivery (their Roblox account must be linked on eldorado.gg)` : `${chosen.length} pet(s) back to Zotac delivery`, 'good', 8000);
+    if (chosen.every(p => eldTags.has(p.id))) {
+      chosen.forEach(p => cur.delete(p.id));
+      await saveSettings({ eldAuto: { petIds: [...cur] } });
+      toast(`${chosen.length} pet(s) back to Zotac delivery`, 'good');
+      return render();
+    }
+    if (!S.me) return toast('Log in to Eldorado first (Account page)', 'error');
+    // tag only what Eldorado would really deliver: the pet's Roblox account is linked there and the item is eligible
+    const g = S.settings.game || {};
+    const lc = s => String(s || '').toLowerCase();
+    const nrm = s => lc(s).replace(/[^a-z0-9]/g, '');
+    let linkedRes, items;
+    try {
+      [linkedRes, items] = await Promise.all([
+        M.call('eld:raw', 'GET', 'v1/item-management/me/roblox-accounts/select-options', null, { gameId: g.gameId }),
+        M.call('eld:items')]);
+    } catch (e) { return toast(`Could not ask Eldorado about auto delivery: ${(e && e.message) || e}`, 'error', 9000); }
+    if (!linkedRes || !linkedRes.ok || !Array.isArray(linkedRes.data)) return toast(`Could not read your Roblox accounts linked on Eldorado (status ${linkedRes ? linkedRes.status : '?'}). Nothing tagged.`, 'error', 9000);
+    const linkedNames = new Set(linkedRes.data.map(a => lc(a.robloxUsername)));
+    const itemByKey = new Map((items || []).map(i => [nrm(i.name), i.name]));
+    const eligCache = new Map();
+    const eligible = async name => {
+      const itemName = itemByKey.get(nrm(name));
+      if (!itemName) return false;
+      if (!eligCache.has(itemName)) {
+        eligCache.set(itemName, M.call('eld:raw', 'POST', 'v1/item-management/me/offers/auto-delivery/is-eligible', { gameId: g.gameId, category: g.category, itemType: g.itemTypeValue, itemName })
+          .then(r => !!(r && r.ok && r.data && r.data.isEligible)).catch(() => false));
+      }
+      return eligCache.get(itemName);
+    };
+    const okIds = [], notLinked = new Set(), notElig = new Set();
+    for (const p of chosen) {
+      const owner = (S.accounts.find(a => a.id === p.accountId) || {}).username;
+      if (!owner || !linkedNames.has(lc(owner))) { notLinked.add(owner || 'no account'); continue; }
+      if (!await eligible(p.name)) { notElig.add(p.name); continue; }
+      okIds.push(p.id);
+    }
+    okIds.forEach(id => cur.add(id));
+    if (okIds.length) await saveSettings({ eldAuto: { petIds: [...cur] } });
+    if (okIds.length) toast(`${okIds.length} pet(s) tagged: Eldorado auto delivery eligible. Start Auto List lists them with Eldorado's own delivery`, 'good', 8000);
+    if (notLinked.size) toast(`Account not linked on Eldorado: ${[...notLinked].join(', ')}. Link it on eldorado.gg (Automated delivery); those pets stay with Zotac delivery`, 'error', 12000);
+    if (notElig.size) toast(`Not eligible for Eldorado auto delivery (item or seller): ${[...notElig].join(', ')}`, 'error', 12000);
     render();
   };
   const stepsRow = h('div', { class: 'x-steps3' },
