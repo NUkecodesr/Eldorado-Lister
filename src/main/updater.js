@@ -52,6 +52,21 @@ async function latestSha(repo) {
   return c && c.sha;
 }
 
+// version in one commit's package.json, read raw (no API limit, no zip download)
+async function remoteVersion(repo, sha) {
+  const r = await fetch(`https://raw.githubusercontent.com/${repo}/${sha}/package.json`, { headers: { 'User-Agent': 'ZotacLister-updater' }, signal: AbortSignal.timeout(20000) });
+  if (!r.ok) throw new Error('package.json HTTP ' + r.status);
+  return (await r.json()).version;
+}
+
+// "<commit> <version>" this copy is on. settings.autoUpdate.installedSha is only written by an
+// update, so a copy from the installer or a git clone had none and every start downloaded the whole
+// zip just to find the same version. Trusted only while the app still has that version (an older
+// installer run over it must not look up to date).
+const baselineFile = () => path.join(app.getPath('userData'), 'update-baseline.txt');
+const readBaseline = () => { try { const [sha, version] = fs.readFileSync(baselineFile(), 'utf8').trim().split(/\s+/); return { sha: sha || '', version: version || '' }; } catch { return { sha: '', version: '' }; } };
+const writeBaseline = (sha, version) => { try { fs.writeFileSync(baselineFile(), `${sha} ${version}`); } catch { /* next check tries again */ } };
+
 // downloads and unpacks one commit of the repo (codeload, no API limit); returns its folder
 const sourceCache = {};
 async function fetchSource(repo, sha) {
@@ -90,13 +105,22 @@ async function checkUpdate(repoSetting, installedSha) {
     // when it differs from the installed one is the zip fetched (and kept for the install).
     const sha = await latestSha(repo);
     if (!sha) return { error: `Repo ${repo} not found (or it is private)` };
-    if (installedSha && installedSha === sha) return { repo, mode: canSource ? 'source' : 'page', current, latest: current, newer: false, sha, page: `https://github.com/${repo}` };
-    const dir = await fetchSource(repo, sha);
-    let latest = current;
-    try { latest = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).version || current; } catch { /* keep current */ }
-    const newer = cmp(latest, current) > 0 || (!!installedSha && cmp(latest, current) >= 0);
-    return { repo, mode: canSource ? 'source' : 'page', current, latest: newer && cmp(latest, current) === 0 ? `${latest} (${sha.slice(0, 7)})` : latest,
-      newer, sha, dir, notes: '', page: `https://github.com/${repo}` };
+    const bl = readBaseline();
+    // already on the newest commit: nothing to download
+    if (bl.sha === sha && bl.version === current) return { repo, mode: canSource ? 'source' : 'page', current, latest: current, newer: false, upToDate: true, sha, page: `https://github.com/${repo}` };
+    let latest = current, dir;
+    try { latest = (await remoteVersion(repo, sha)) || current; }
+    catch {
+      dir = await fetchSource(repo, sha);
+      try { latest = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).version || current; } catch { /* keep current */ }
+    }
+    const c = cmp(latest, current);
+    // same version: a new commit only counts when this copy's own commit is known (and differs)
+    const known = (bl.version === current && bl.sha) || installedSha || '';
+    const newer = c > 0 || (c === 0 && !!known && known !== sha);
+    if (c === 0 && !newer) writeBaseline(sha, current);   // on the latest: later starts skip the download
+    return { repo, mode: canSource ? 'source' : 'page', current, latest: newer && c === 0 ? `${latest} (${sha.slice(0, 7)})` : latest,
+      newer, upToDate: !newer && c >= 0, sha, dir, notes: '', page: `https://github.com/${repo}` };
   } catch (e) {
     return { error: e.message };
   }
@@ -143,6 +167,7 @@ async function installUpdate(info, { onDone, log } = {}) {
     catch (e) { if (log) log('[Update] npm install failed (' + e.message.slice(0, 120) + '): if the app misbehaves, download the new installer'); }
   }
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* temp */ }
+  writeBaseline(info.sha, String(info.latest).split(' ')[0]);
   if (onDone) onDone(info.sha);
   setTimeout(() => { app.relaunch(); app.exit(0); }, 600);
   return { restarting: true };
