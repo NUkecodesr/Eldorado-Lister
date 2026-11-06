@@ -151,14 +151,6 @@ class Eldorado {
     return all.map(x => x.offer || x);
   }
   offer(id) { return this.b.get(`v1/item-management/offers/${id}`); }
-  // true / false = the live offer is / is not an Eldorado auto delivery offer; null = could not read it
-  async isAutomatedOffer(id) {
-    try {
-      const r = await this.offer(id);
-      const o = (r && r.offer) || r || {};
-      return o.guaranteedDeliveryTime ? o.guaranteedDeliveryTime === 'Automated' : null;
-    } catch { return null; }
-  }
   pauseOffer(id) { return this.b.post(`v1/item-management/me/offers/${id}/pause`); }
   resumeOffer(id) { return this.b.post(`v1/item-management/me/offers/${id}/resume`); }
   deleteOffer(id) { return this.b.del(`v1/item-management/me/offers/${id}`); }
