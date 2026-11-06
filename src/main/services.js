@@ -279,7 +279,9 @@ class Watcher extends EventEmitter {
         ]
       });
     }
-    if (s.autoMessage.enabled && !s.delivery.enabled && !this.store.get('seen').autoMessaged[o.id]) {
+    // an Eldorado auto delivery offer: Eldorado talks to the buyer itself, Zotac sends no text
+    const eldHandled = !!o.offerId && ((s.eldAuto || {}).offerIds || []).includes(o.offerId);
+    if (s.autoMessage.enabled && !s.delivery.enabled && !eldHandled && !this.store.get('seen').autoMessaged[o.id]) {
       try {
         const text = s.autoMessage.text.replace(/\{buyer\}/g, o.buyer || '').replace(/\{item\}/g, o.title || '').replace(/\{orderId\}/g, o.id);
         await (this.sendChat ? this.sendChat(o.id, text) : this.eld.sendOrderMessage(o.id, text));
