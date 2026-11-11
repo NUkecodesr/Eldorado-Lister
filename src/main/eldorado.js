@@ -224,6 +224,26 @@ class Eldorado {
     return payload;
   }
 
+  // Roblox accounts linked on Eldorado auto delivery, every page: [{ id, gameId, robloxUsername, accountsSettingsValid, ... }]
+  async robloxAccounts() {
+    const all = [];
+    for (let page = 1; page <= 20; page++) {
+      const rows = listOf(await this.b.get('v1/item-management/me/roblox-accounts', { page, pageSize: 50 }));
+      all.push(...rows);
+      if (rows.length < 50) break;
+    }
+    return all;
+  }
+  // games with their privateServerSettings { isSupported, isRequired }
+  async robloxSupportedGames() {
+    const r = await this.b.get('v1/item-management/me/roblox-accounts/supported-games');
+    return Array.isArray(r) ? r : listOf(r);
+  }
+  // same request as the "Update cookie" dialog on eldorado.gg
+  updateRobloxCookie(id, cookieValue, privateServerLink) {
+    return this.b.put(`v1/item-management/me/roblox-accounts/${id}`, { cookieValue, privateServerLink });
+  }
+
   async createOffer(payload) {
     const body = { ...payload }; delete body._item;
     return this.b.post('v1/item-management/me/offers/item', body);

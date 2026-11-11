@@ -1376,6 +1376,21 @@ function accountStats() {
     xTile('BASE SLOTS USED', total ? `${used}/${total}${unknown ? '+' : ''}` : `${used}/?`, total ? (total - usedKnown <= 0 ? 'x-red' : 'x-green') : 'x-plain',
       total ? `${Math.max(0, total - usedKnown)} free${unknown ? ` · ${unknown} base${unknown === 1 ? '' : 's'} not counted yet (Auto Scan counts them)` : ''}` : 'Auto Scan counts each base\'s slots', ic('folder')));
 }
+// Roblox Accounts "Eldorado cookies": push cookies to Eldorado auto delivery now, show what happened
+async function syncEldCookies() {
+  if (!S.me) return toast('Log in to Eldorado first (Account page)', 'error');
+  toast('Sending cookies to Eldorado auto delivery…', 'info', 3000);
+  const r = await run(() => M.call('eld:cookieSync', true));
+  if (!r) return;
+  if (r.error) return toast('Eldorado: ' + r.error, 'error', 10000);
+  const parts = [];
+  if (r.updated.length) parts.push(`updated: ${r.updated.join(', ')}`);
+  if (r.notInZotac.length) parts.push(`linked on Eldorado but no cookie in Zotac: ${r.notInZotac.join(', ')}`);
+  if (!r.updated.length && !r.failed.length && !r.notInZotac.length) parts.push('no Roblox accounts linked on Eldorado auto delivery');
+  if (parts.length) toast(parts.join(' · '), r.updated.length ? 'good' : 'info', 10000);
+  for (const f of r.failed) toast(f, 'error', 12000);
+}
+
 PAGES.accounts = async root => {
   const f = RA.filter;
   const LST = {}; try { for (const x of await M.call('launcher:status')) LST[x.id] = x; } catch { /* old backend */ }
@@ -1610,6 +1625,7 @@ PAGES.accounts = async root => {
         h('button', { class: 'btn sm', title: 'Launch every account that has a cookie and is not in game', onclick: async () => { const n = S.accounts.filter(a => a.hasCookie).length; if (!n) return toast('No logged-in accounts', 'error'); if (!await confirmBox(`Open Roblox on all ${n} logged-in accounts (4 s apart, accounts already in game are skipped)?`)) return; toast('Launching accounts…', 'info'); const r = await run(() => M.call('accounts:launchAll')); if (r) toast(r.map(x => `${x.username}: ${x.error || x.skipped || 'launched'}`).join(' · ') || 'No accounts with cookies', 'good', 9000); } }, '▶ Launch All'),
         h('button', { class: 'btn sm', title: 'Ends every open Roblox game (all accounts) and resets the launcher', onclick: async () => { if (!await confirmBox('Close every open Roblox game (all accounts, also ones Zotac did not open) and reset the launcher? A running delivery loses its game.')) return; const r = await run(() => M.call('launcher:fix')); if (r) toast(`Ended ${r.killed} Roblox game(s)${r.left ? `, ${r.left} still running` : ''} · launcher reset`, r.left ? 'error' : 'good'); } }, '⟳ Fix Launch'),
         h('button', { class: 'btn sm primary', title: 'Sign in to a stock account on roblox.com; the account and its cookie are added', onclick: async () => { const r = await run(() => M.call('accounts:loginBrowser', null)); if (r) { toast(`${r.created ? 'Added' : 'Updated'} @${r.username} — cookie saved`, 'good'); await refreshData(); render(); } } }, '⎆ Browser Login'),
+        h('button', { class: 'btn sm', title: 'Send the saved cookies of accounts linked on Eldorado auto delivery (eldorado.gg > Automated delivery) to Eldorado now. Runs by itself every 30 min and after a cookie changes.', onclick: syncEldCookies }, '⇪ Eldorado cookies'),
         h('button', { class: 'btn sm primary', onclick: () => editAcct() }, '+ Account'),
         h('button', { class: 'btn sm danger', onclick: () => { Object.assign(RA.filter, { account: '', q: '', mutation: '', min: '', max: '', range: '' }); render(); } }, 'Clear'))),
     accountStats(),

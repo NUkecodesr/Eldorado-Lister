@@ -144,6 +144,7 @@ class Launcher extends EventEmitter {
     a.username = a.username || me.name; a.robloxUserId = me.id; a.displayName = me.displayName;
     this.store.save();
     this.log('info', `Cookie saved for ${me.name}`);
+    this.emit('cookie', { id: a.id });
     return { username: me.name, id: me.id };
   }
 
@@ -183,6 +184,7 @@ class Launcher extends EventEmitter {
           a.robloxUserId = me.id; a.displayName = me.displayName; a.username = a.username || me.name;
           this.store.save();
           this.log('info', `Browser login: cookie saved for ${me.name}`);
+          this.emit('cookie', { id: a.id });
           finish(null, { id: a.id, username: me.name, created: !target });
         } catch (e) { if (/invalid or expired/i.test(e.message)) return; finish(e); }
       };

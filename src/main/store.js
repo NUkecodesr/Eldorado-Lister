@@ -48,7 +48,7 @@ const DEFAULTS = {
     autoMessage: { enabled: false, text: 'Hi {buyer}! Thanks for buying {item}. Please send your Roblox username and stay online — delivery is coming right up.' },
     autoUpdate: { enabled: true, repo: 'NUkecodesr/Eldorado-Lister', installedSha: '' },
     pollSec: 45,
-    eldAuto: { petIds: [], offerIds: [] },   // pets tagged for Eldorado's built-in auto delivery; offers made that way (Zotac never delivers those orders)
+    eldAuto: { petIds: [], offerIds: [], cookieSync: true },   // cookieSync: send Zotac's Roblox cookies to accounts linked on Eldorado auto delivery   // pets tagged for Eldorado's built-in auto delivery; offers made that way (Zotac never delivers those orders)
     game: {
       gameId: '259',
       category: 'CustomItem',
@@ -103,6 +103,7 @@ const DEFAULTS = {
   jobs: [],              // agent jobs
   trades: [],            // permanent ledger: every pet Zotac traded away or saw disappear (newest last)
   seen: { orders: {}, notifications: {}, disputes: {}, autoMessaged: {} },
+  eldCookieSync: { hashes: {}, last: null },   // Eldorado linked account id -> short hash of the cookie last sent; last run result
   art: { pets: {}, traits: {}, mutations: {} },   // Roblox asset ids from the scanner: name -> id
   logs: []
 };

@@ -18,6 +18,7 @@ const baseroute = require('./src/main/baseroute');
 const { Launcher, decryptCookie } = require('./src/main/launcher');
 const { Art } = require('./src/main/art');
 const { Wiki } = require('./src/main/wiki');
+const { EldCookieSync } = require('./src/main/eldcookies');
 
 const SMOKE = process.argv.includes('--smoke');
 
@@ -40,7 +41,7 @@ if (!SMOKE && !app.requestSingleInstanceLock()) app.quit();
 
 let win = null;
 let appInfoRate;   // % of the last 200 Eldorado requests that succeeded (footer)
-let store, bridge, eld, lister, repricer, watcher, delivery, launcher, art, wiki;
+let store, bridge, eld, lister, repricer, watcher, delivery, launcher, art, wiki, cookieSync;
 const proofDir = () => { const d = path.join(app.getPath('userData'), 'proofs'); fs.mkdirSync(d, { recursive: true }); return d; };
 
 const send = (ch, payload) => { if (win && !win.isDestroyed()) win.webContents.send(ch, payload); };
@@ -397,6 +398,8 @@ function wire() {
   launcher.legit = new LegitRoblox({ dir: path.join(process.env.LOCALAPPDATA || app.getPath('userData'), 'Zotac Lister', 'LegitRoblox'), log: (lvl, msg) => store.log(lvl, msg) });
   launcher.legit.on('progress', p => send('legit:progress', p));
   launcher.on('launched', () => send('launcher:changed'));
+  cookieSync = new EldCookieSync({ store, eld, onChange: st => send('eldcookies', st) });
+  launcher.on('cookie', () => { if (eld.cache.me) cookieSync.later(); });
   delivery.on('job', j => { syncDeliveryAutoexec(); launcher.onJob(j); });
 
   // Security mode: the stock account a steal takes from is opened with real Roblox (never the
@@ -479,6 +482,7 @@ async function afterLogin() {
     repricer.schedule();
     clearInterval(afterLogin.recon); afterLogin.recon = setInterval(reconListed, 3 * 60000); setTimeout(reconListed, 20000);
     if (store.get('settings').delivery.enabled) delivery.ensureTalk();
+    cookieSync.start();
   } catch { /* not logged in yet */ }
 }
 
@@ -836,6 +840,8 @@ function ipc() {
   handle('eld:attrs', async () => { await eld.library(); return { attrs: eld.cache.attrs, game: store.get('settings').game }; });
   handle('eld:reloadLibrary', () => eld.library(true).then(() => eld.itemList()));
   handle('eld:raw', (method, p, body, query) => bridge.request(method, p, { body, query }));
+  handle('eld:cookieSync', force => cookieSync.sync({ force: !!force }));
+  handle('eld:cookieSyncState', () => cookieSync.state());
   handle('eld:message', (orderId, text) => delivery.chat(orderId, text));
   handle('chat:history', (orderId, conversationId) => delivery.history(orderId, conversationId));
   handle('chat:buyerRoblox', async orderId => { try { const v = await eld.deliveryDetail(orderId); return typeof v === 'string' ? v : (v && (v.value || v.username)) || null; } catch { return null; } });
