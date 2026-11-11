@@ -99,7 +99,7 @@ class Art {
   pngUrl(f) {
     const mtime = fs.statSync(f).mtimeMs, hit = this.urls.get(f);
     if (hit && hit.mtime === mtime) return hit.url;
-    const url = this.pngUrl(f);
+    const url = 'data:image/png;base64,' + fs.readFileSync(f).toString('base64');
     if (this.urls.size >= 300) this.urls.delete(this.urls.keys().next().value);
     this.urls.set(f, { mtime, url });
     return url;
